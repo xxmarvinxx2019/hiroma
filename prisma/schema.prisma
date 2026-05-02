@@ -1,0 +1,412 @@
+// ============================================================
+// HIROMA - Full Prisma Schema
+// MLM & Distribution System
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  admin
+  regional
+  provincial
+  city
+  reseller
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum DistributorLevel {
+  regional
+  provincial
+  city
+}
+
+enum PinStatus {
+  unused
+  used
+  expired
+}
+
+enum ProductType {
+  physical
+  digital
+}
+
+enum TreePosition {
+  left
+  right
+}
+
+enum CommissionType {
+  direct_referral
+  binary_pairing
+  multilevel
+  sponsor_point
+}
+
+enum OrderType {
+  online
+  offline
+}
+
+enum OrderStatus {
+  pending
+  processing
+  delivered
+  cancelled
+}
+
+enum PayoutStatus {
+  pending
+  approved
+  rejected
+}
+
+// ============================================================
+// USERS & ROLES
+// ============================================================
+
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique
+  full_name     String
+  email         String?    @unique
+  mobile        String
+  password_hash String
+  role          Role
+  status        UserStatus @default(active)
+  address       String?
+  created_at    DateTime   @default(now())
+  created_by    String?
+
+  // Relations
+  creator                 User?                  @relation("UserCreatedBy", fields: [created_by], references: [id])
+  created_users           User[]                 @relation("UserCreatedBy")
+  distributor_profile     DistributorProfile?
+  reseller_profile        ResellerProfile?
+  wallet                  Wallet?
+  commissions_earned      Commission[]           @relation("CommissionEarner")
+  commissions_triggered   Commission[]           @relation("CommissionSource")
+  commissions_overflow    Commission[]           @relation("CommissionOverflow")
+  payouts                 Payout[]               @relation("PayoutUser")
+  payouts_approved        Payout[]               @relation("PayoutApprover")
+  pins_generated          Pin[]                  @relation("PinGenerator")
+  pins_sold               Pin[]                  @relation("PinSoldTo")
+  pins_used               Pin[]                  @relation("PinUsedBy")
+  orders_bought           Order[]                @relation("OrderBuyer")
+  orders_sold             Order[]                @relation("OrderSeller")
+  inventory               Inventory[]
+  binary_tree_node        BinaryTreeNode?        @relation("TreeNodeOwner")
+  sponsored_nodes         BinaryTreeNode[]       @relation("TreeNodeSponsor")
+  resellers_registered    ResellerProfile[]      @relation("ResellerRegisteredBy")
+
+  @@map("users")
+}
+
+// ============================================================
+// DISTRIBUTOR PROFILE
+// ============================================================
+
+model DistributorProfile {
+  id                 String           @id @default(uuid())
+  user_id            String           @unique
+  dist_level         DistributorLevel
+  coverage_area      String
+  parent_dist_id     String?
+  contract_signed_at DateTime?
+  is_active          Boolean          @default(true)
+
+  // Relations
+  user               User               @relation(fields: [user_id], references: [id])
+  parent             DistributorProfile? @relation("DistributorHierarchy", fields: [parent_dist_id], references: [id])
+  children           DistributorProfile[] @relation("DistributorHierarchy")
+  product_visibility ProductAreaVisibility[]
+
+  @@map("distributor_profiles")
+}
+
+// ============================================================
+// RESELLER PROFILE
+// ============================================================
+
+model ResellerProfile {
+  id                    String    @id @default(uuid())
+  user_id               String    @unique
+  package_id            String
+  city_dist_id          String
+  pin_id                String    @unique
+  total_points          Int       @default(0)
+  points_reset_at       DateTime?
+  daily_referral_count  Int       @default(0)
+  last_referral_date    DateTime?
+  daily_pairs_count     Int       @default(0)
+  last_pairs_date       DateTime?
+
+  // Relations
+  user        User     @relation(fields: [user_id], references: [id])
+  package     Package  @relation(fields: [package_id], references: [id])
+  city_dist   User     @relation("ResellerRegisteredBy", fields: [city_dist_id], references: [id])
+  pin         Pin      @relation(fields: [pin_id], references: [id])
+
+  @@map("reseller_profiles")
+}
+
+// ============================================================
+// PACKAGES
+// ============================================================
+
+model Package {
+  id                    String   @id @default(uuid())
+  name                  String
+  price                 Decimal  @db.Decimal(10, 2)
+  direct_referral_bonus Decimal  @db.Decimal(10, 2)
+  pairing_bonus_value   Decimal  @db.Decimal(10, 2)
+  point_php_value       Decimal  @db.Decimal(10, 2)
+  point_reset_days      Int      @default(30)
+  is_active             Boolean  @default(true)
+  created_at            DateTime @default(now())
+
+  // Relations
+  products          PackageProduct[]
+  pins              Pin[]
+  reseller_profiles ResellerProfile[]
+
+  @@map("packages")
+}
+
+model PackageProduct {
+  id         String @id @default(uuid())
+  package_id String
+  product_id String
+  quantity   Int
+
+  // Relations
+  package Package @relation(fields: [package_id], references: [id])
+  product Product @relation(fields: [product_id], references: [id])
+
+  @@map("package_products")
+}
+
+// ============================================================
+// PINS
+// ============================================================
+
+model Pin {
+  id            String    @id @default(uuid())
+  pin_code      String    @unique
+  package_id    String
+  city_dist_id  String
+  status        PinStatus @default(unused)
+  used_by       String?
+  used_at       DateTime?
+  generated_by  String
+  created_at    DateTime  @default(now())
+
+  // Relations
+  package          Package          @relation(fields: [package_id], references: [id])
+  city_distributor User             @relation("PinSoldTo", fields: [city_dist_id], references: [id])
+  used_by_user     User?            @relation("PinUsedBy", fields: [used_by], references: [id])
+  generator        User             @relation("PinGenerator", fields: [generated_by], references: [id])
+  reseller_profile ResellerProfile?
+
+  @@map("pins")
+}
+
+// ============================================================
+// PRODUCTS & INVENTORY
+// ============================================================
+
+model Product {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  type        ProductType
+  price       Decimal     @db.Decimal(10, 2)
+  image_url   String?
+  is_active   Boolean     @default(true)
+  created_at  DateTime    @default(now())
+
+  // Relations
+  package_products   PackageProduct[]
+  area_visibility    ProductAreaVisibility[]
+  inventory          Inventory[]
+  order_items        OrderItem[]
+
+  @@map("products")
+}
+
+model ProductAreaVisibility {
+  id             String  @id @default(uuid())
+  product_id     String
+  distributor_id String
+  is_visible     Boolean @default(true)
+
+  // Relations
+  product     Product            @relation(fields: [product_id], references: [id])
+  distributor DistributorProfile @relation(fields: [distributor_id], references: [id])
+
+  @@unique([product_id, distributor_id])
+  @@map("product_area_visibility")
+}
+
+model Inventory {
+  id                  String   @id @default(uuid())
+  owner_id            String
+  product_id          String
+  quantity            Int      @default(0)
+  low_stock_threshold Int      @default(10)
+  updated_at          DateTime @updatedAt
+
+  // Relations
+  owner   User    @relation(fields: [owner_id], references: [id])
+  product Product @relation(fields: [product_id], references: [id])
+
+  @@unique([owner_id, product_id])
+  @@map("inventory")
+}
+
+// ============================================================
+// BINARY TREE
+// ============================================================
+
+model BinaryTreeNode {
+  id          String       @id @default(uuid())
+  user_id     String       @unique
+  parent_id   String?
+  position    TreePosition?
+  sponsor_id  String?
+  left_count  Int          @default(0)
+  right_count Int          @default(0)
+  is_overflow Boolean      @default(false)
+  created_at  DateTime     @default(now())
+
+  // Relations
+  user     User            @relation("TreeNodeOwner", fields: [user_id], references: [id])
+  parent   BinaryTreeNode? @relation("TreeHierarchy", fields: [parent_id], references: [id])
+  children BinaryTreeNode[] @relation("TreeHierarchy")
+  sponsor  User?           @relation("TreeNodeSponsor", fields: [sponsor_id], references: [id])
+
+  @@map("binary_tree_nodes")
+}
+
+// ============================================================
+// NAME CAP REGISTRY
+// ============================================================
+
+model NameCapRegistry {
+  id              String   @id @default(uuid())
+  normalized_name String   @unique
+  count           Int      @default(0)
+  max_allowed     Int      @default(7)
+  updated_at      DateTime @updatedAt
+
+  @@map("name_cap_registry")
+}
+
+// ============================================================
+// WALLET & COMMISSIONS
+// ============================================================
+
+model Wallet {
+  id              String   @id @default(uuid())
+  user_id         String   @unique
+  balance         Decimal  @default(0) @db.Decimal(10, 2)
+  total_earned    Decimal  @default(0) @db.Decimal(10, 2)
+  total_withdrawn Decimal  @default(0) @db.Decimal(10, 2)
+  updated_at      DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("wallets")
+}
+
+model Commission {
+  id                String         @id @default(uuid())
+  user_id           String
+  type              CommissionType
+  amount            Decimal        @db.Decimal(10, 2)
+  points            Int?
+  source_user_id    String?
+  cascade_remainder Decimal?       @db.Decimal(10, 2)
+  is_pair_overflow  Boolean        @default(false)
+  overflow_to       String?
+  created_at        DateTime       @default(now())
+
+  // Relations
+  user         User  @relation("CommissionEarner", fields: [user_id], references: [id])
+  source_user  User? @relation("CommissionSource", fields: [source_user_id], references: [id])
+  overflow_user User? @relation("CommissionOverflow", fields: [overflow_to], references: [id])
+
+  @@map("commissions")
+}
+
+model Payout {
+  id                String       @id @default(uuid())
+  user_id           String
+  amount            Decimal      @db.Decimal(10, 2)
+  status            PayoutStatus @default(pending)
+  payment_method    String?
+  payment_reference String?
+  approved_by       String?
+  requested_at      DateTime     @default(now())
+  processed_at      DateTime?
+
+  // Relations
+  user     User  @relation("PayoutUser", fields: [user_id], references: [id])
+  approver User? @relation("PayoutApprover", fields: [approved_by], references: [id])
+
+  @@map("payouts")
+}
+
+// ============================================================
+// ORDERS
+// ============================================================
+
+model Order {
+  id                String      @id @default(uuid())
+  buyer_id          String
+  seller_id         String
+  order_type        OrderType
+  status            OrderStatus @default(pending)
+  total_amount      Decimal     @db.Decimal(10, 2)
+  is_cross_purchase Boolean     @default(false)
+  notes             String?
+  created_at        DateTime    @default(now())
+
+  // Relations
+  buyer  User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
+  seller User        @relation("OrderSeller", fields: [seller_id], references: [id])
+  items  OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String  @id @default(uuid())
+  order_id   String
+  product_id String
+  quantity   Int
+  unit_price Decimal @db.Decimal(10, 2)
+  subtotal   Decimal @db.Decimal(10, 2)
+
+  // Relations
+  order   Order   @relation(fields: [order_id], references: [id])
+  product Product @relation(fields: [product_id], references: [id])
+
+  @@map("order_items")
+}

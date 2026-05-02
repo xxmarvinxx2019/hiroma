@@ -8,19 +8,40 @@
     "start": "next start",
     "lint": "eslint"
   },
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
+  },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@supabase/supabase-js": "^2.105.1",
+    "bcryptjs": "^3.0.3",
+    "cookies-next": "^6.1.1",
+    "jose": "^6.2.3",
+    "jsonwebtoken": "^9.0.3",
     "next": "16.2.4",
+    "prisma": "^7.8.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.19.39",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "pg": "^8.20.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

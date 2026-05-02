@@ -1,26 +1,189 @@
 @import "tailwindcss";
 
+/* ============================================================
+   HIROMA — Global Styles
+   Color Palette:
+   Navy:       #0D1B3E
+   Navy Light: #1A2F5E
+   Gold:       #C9A84C
+   Gold Light: #E8C96A
+   Surface:    #F0F2F8
+   ============================================================ */
+ 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --hiroma-navy: #0D1B3E;
+  --hiroma-navy-light: #1A2F5E;
+  --hiroma-gold: #C9A84C;
+  --hiroma-gold-light: #E8C96A;
+  --hiroma-surface: #F0F2F8;
 }
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+ 
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+ 
+  html {
+    scroll-behavior: smooth;
+  }
+ 
+  body {
+    @apply bg-white text-gray-900 antialiased;
+    background: white;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+      Roboto, Oxygen, Ubuntu, sans-serif;
+  }
+ 
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold leading-tight;
   }
 }
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+ 
+@layer components {
+ 
+  /* ── Buttons ── */
+  .btn-gold {
+    @apply bg-[#C9A84C] text-[#0D1B3E] font-semibold rounded-lg px-5 py-2.5
+           text-sm transition-all duration-150 hover:bg-[#E8C96A]
+           active:scale-95 cursor-pointer border-none;
+  }
+ 
+  .btn-navy {
+    @apply bg-[#0D1B3E] text-white font-medium rounded-lg px-5 py-2.5
+           text-sm transition-all duration-150 hover:bg-[#1A2F5E]
+           active:scale-95 cursor-pointer border-none;
+  }
+ 
+  .btn-ghost-gold {
+    @apply bg-transparent text-[#C9A84C] font-medium rounded-lg px-5 py-2.5
+           text-sm border border-[#C9A84C] transition-all duration-150
+           hover:bg-[#C9A84C] hover:text-[#0D1B3E] active:scale-95 cursor-pointer;
+  }
+ 
+  .btn-ghost-white {
+    @apply bg-transparent text-white font-medium rounded-lg px-5 py-2.5
+           text-sm border border-white/30 transition-all duration-150
+           hover:bg-white/10 active:scale-95 cursor-pointer;
+  }
+ 
+  /* ── Cards ── */
+  .card {
+    @apply bg-white rounded-xl border border-[#0D1B3E]/10 p-4;
+  }
+ 
+  .card-navy {
+    @apply bg-[#0D1B3E] rounded-xl border border-white/10 p-4;
+  }
+ 
+  /* ── Form inputs ── */
+  .input {
+    @apply w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg
+           px-3 py-2 text-sm text-[#0D1B3E] outline-none
+           focus:border-[#C9A84C] transition-colors duration-150
+           placeholder:text-gray-400;
+  }
+ 
+  .input-dark {
+    @apply w-full bg-white/7 border border-white/15 rounded-lg
+           px-3 py-2 text-sm text-white outline-none
+           focus:border-[#C9A84C] transition-colors duration-150
+           placeholder:text-white/30;
+  }
+ 
+  .label {
+    @apply block text-xs text-gray-400 mb-1;
+  }
+ 
+  .label-dark {
+    @apply block text-xs text-white/50 mb-1;
+  }
+ 
+  /* ── Section layouts ── */
+  .section-light {
+    @apply bg-white px-6 py-12 md:px-12 lg:px-20;
+  }
+ 
+  .section-gray {
+    @apply bg-[#F0F2F8] px-6 py-12 md:px-12 lg:px-20;
+  }
+ 
+  .section-navy {
+    @apply bg-[#0D1B3E] px-6 py-12 md:px-12 lg:px-20;
+  }
+ 
+  .section-title {
+    @apply text-2xl font-semibold text-[#0D1B3E] text-center mb-2;
+  }
+ 
+  .section-title-white {
+    @apply text-2xl font-semibold text-white text-center mb-2;
+  }
+ 
+  .section-eyebrow {
+    @apply text-[#C9A84C] text-xs font-semibold tracking-widest
+           uppercase text-center mb-2;
+  }
+ 
+  .section-sub {
+    @apply text-sm text-gray-400 text-center leading-relaxed
+           max-w-lg mx-auto mb-8;
+  }
+ 
+  .section-sub-white {
+    @apply text-sm text-white/50 text-center leading-relaxed
+           max-w-lg mx-auto mb-8;
+  }
+ 
+  /* ── Nav ── */
+  .nav-link {
+    @apply text-white/60 text-sm cursor-pointer hover:text-white
+           transition-colors duration-150;
+  }
+ 
+  /* ── Badges ── */
+  .badge-gold {
+    @apply bg-[#fef6e4] text-[#9a6f1e] text-xs px-2 py-0.5 rounded-full
+           inline-block;
+  }
+ 
+  .badge-navy {
+    @apply bg-[#eef0f8] text-[#0D1B3E] text-xs px-2 py-0.5 rounded-full
+           inline-block;
+  }
+ 
+  .badge-green {
+    @apply bg-[#e8f7ef] text-[#1a7a4a] text-xs px-2 py-0.5 rounded-full
+           inline-block;
+  }
+}
+ 
+@layer utilities {
+  .text-gold {
+    color: #C9A84C;
+  }
+ 
+  .text-navy {
+    color: #0D1B3E;
+  }
+ 
+  .bg-navy {
+    background-color: #0D1B3E;
+  }
+ 
+  .bg-gold {
+    background-color: #C9A84C;
+  }
+ 
+  .border-gold {
+    border-color: #C9A84C;
+  }
+ 
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+ 
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
