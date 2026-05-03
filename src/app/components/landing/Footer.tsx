@@ -1,5 +1,7 @@
 'use client'
 
+import Image from 'next/image' // Added for the logo image
+
 const footerLinks = {
   Company: [
     { label: 'About Hiroma', href: '#' },
@@ -59,21 +61,21 @@ export default function Footer() {
 
   return (
     <footer className="bg-[#060E1F]">
-
-      {/* Main Footer */}
       <div className="max-w-7xl mx-auto px-6 py-12">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-10">
 
           {/* Brand Column */}
           <div className="md:col-span-2">
-            {/* Logo */}
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 bg-[#C9A84C] rounded-lg flex items-center justify-center">
-                <span className="text-[#0D1B3E] font-bold text-sm tracking-wider">H</span>
-              </div>
-              <span className="text-white font-medium text-base tracking-[0.25em]">
-                HIROMA
-              </span>
+            
+            {/* Logo Image */}
+            <div className="mb-4">
+              <Image 
+                src="/hiroma-logo.jpg" // Replace with your actual path (e.g., /images/logo-white.svg)
+                alt="Hiroma Logo"
+                width={40}      // Adjust width as needed
+                height={40}      // Adjust height as needed
+                className="object-contain"
+              />
             </div>
 
             <p className="text-white/40 text-xs italic mb-5">
@@ -123,10 +125,8 @@ export default function Footer() {
         </div>
       </div>
 
-      {/* Divider */}
       <div className="border-t border-white/5" />
 
-      {/* Bottom Bar */}
       <div className="max-w-7xl mx-auto px-6 py-5 flex flex-col md:flex-row items-center justify-between gap-3">
         <p className="text-white/25 text-xs">
           © {currentYear} Hiroma. All rights reserved.
@@ -151,7 +151,6 @@ export default function Footer() {
           </p>
         </div>
       </div>
-
     </footer>
   )
 }

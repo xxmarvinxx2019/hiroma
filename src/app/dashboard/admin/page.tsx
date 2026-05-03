@@ -131,7 +131,7 @@ export default function AdminDashboardPage() {
             Generate PIN
           </Link>
           <Link
-            href="/dashboard/admin/distributors/new"
+            href="/dashboard/admin/distributors"
             className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors"
           >
             + Add distributor
