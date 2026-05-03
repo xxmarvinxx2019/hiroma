@@ -72,16 +72,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Package not found.' }, { status: 404 })
     }
 
-    // ── Get admin user ──
-    const adminUser = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { id: true },
-    })
-
-    if (!adminUser) {
-      return NextResponse.json({ error: 'Admin not found.' }, { status: 404 })
-    }
-
     // ── Generate unique PIN codes ──
     const pinCodes: string[] = []
     const existingPins = new Set(
@@ -97,7 +87,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Create PINs + record as a sale order in one transaction ──
+    const totalAmount = Number(pkg.price) * quantity
+
+    // ── Create PINs + record as a sale order ──
     await prisma.$transaction(async (tx) => {
 
       // 1. Bulk create PINs
@@ -111,11 +103,9 @@ export async function POST(req: NextRequest) {
         })),
       })
 
-      // 2. Record as a sale order (admin → city distributor)
-      // Total = package price × quantity
-      const totalAmount = Number(pkg.price) * quantity
-
-      const order = await tx.order.create({
+      // 2. Record the PIN sale as an order (admin → city distributor)
+      // Note: no order_items needed since this is a PIN sale not a product sale
+      await tx.order.create({
         data: {
           buyer_id: city_dist_id,
           seller_id: user.id,
@@ -123,20 +113,10 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           total_amount: totalAmount,
           is_cross_purchase: false,
-          notes: `PIN sale: ${quantity} × ${pkg.name} package`,
+          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${Number(pkg.price).toLocaleString()} each`,
         },
       })
 
-      // 3. Add order items — one line per PIN quantity
-      await tx.orderItem.create({
-        data: {
-          order_id: order.id,
-          product_id: package_id, // using package_id as reference
-          quantity,
-          unit_price: Number(pkg.price),
-          subtotal: totalAmount,
-        },
-      })
     })
 
     return NextResponse.json({
@@ -146,6 +126,9 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error('[GENERATE PINS ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Something went wrong. Please check server logs.' },
+      { status: 500 }
+    )
   }
 }
