@@ -208,6 +208,7 @@ export default function CityResellersPage() {
   const [form, setForm] = useState({
     full_name: '',
     username: '',
+    email: '',
     mobile: '',
     address: '',
     password: '',
@@ -260,7 +261,7 @@ export default function CityResellersPage() {
     setTreeData(null)
     setSelectedSlot(null)
     setDirectAvailable(false)
-    setForm({ full_name: '', username: '', mobile: '', address: '', password: '', confirmPassword: '' })
+    setForm({ full_name: '', username: '', email: '', mobile: '', address: '', password: '', confirmPassword: '' })
     setNameCapInfo(null)
     setUsernameAvailable(null)
     setFormError('')
@@ -391,6 +392,7 @@ export default function CityResellersPage() {
       body: JSON.stringify({
         full_name: form.full_name,
         username: form.username.toLowerCase(),
+        email: form.email,
         mobile: form.mobile,
         address: form.address,
         password: form.password,
@@ -778,6 +780,18 @@ export default function CityResellersPage() {
                       value={form.address}
                       onChange={(e) => setForm({ ...form, address: e.target.value })}
                       placeholder="City / Municipality"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Email address</label>
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => setForm({ ...form, email: e.target.value })}
+                      placeholder="Optional"
                       className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
                     />
                   </div>

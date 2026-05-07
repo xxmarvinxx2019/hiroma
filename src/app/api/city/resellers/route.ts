@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
     const {
       full_name,
       username,
+      email,
       mobile,
       password,
       address,
@@ -101,6 +102,16 @@ export async function POST(req: NextRequest) {
     })
     if (existingUser) {
       return NextResponse.json({ error: 'Username already taken.' }, { status: 400 })
+    }
+
+    // ── Check email uniqueness if provided ──
+    if (email?.trim()) {
+      const existingEmail = await prisma.user.findUnique({
+        where: { email: email.trim().toLowerCase() },
+      })
+      if (existingEmail) {
+        return NextResponse.json({ error: 'Email is already in use.' }, { status: 400 })
+      }
     }
 
     // ── Check name cap ──
@@ -193,6 +204,7 @@ export async function POST(req: NextRequest) {
         data: {
           username: username.trim().toLowerCase(),
           full_name: full_name.trim(),
+          email: email?.trim().toLowerCase() || null,
           mobile: mobile.trim(),
           password_hash: hashedPassword,
           role: 'reseller',

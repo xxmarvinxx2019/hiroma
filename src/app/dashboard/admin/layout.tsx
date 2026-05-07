@@ -20,11 +20,13 @@ const navItems = [
       { label: 'Products', href: '/dashboard/admin/products', icon: '🧴' },
       { label: 'Packages', href: '/dashboard/admin/packages', icon: '📦' },
       { label: 'PIN Manager', href: '/dashboard/admin/pins', icon: '🔑' },
+      { label: 'Inventory', href: '/dashboard/admin/inventory', icon: '🏭' },
     ],
   },
   {
     section: 'Finance',
     items: [
+      { label: 'Orders', href: '/dashboard/admin/orders', icon: '🛒' },
       { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
       { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
       { label: 'Reports', href: '/dashboard/admin/reports', icon: '📈' },
