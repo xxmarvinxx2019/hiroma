@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { Prisma } from "@prisma/client"
 
 // ── GET all distributors ──
 export async function GET() {
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     const hashedPassword = await hashPassword(password)
 
-    const newDist = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const newDist = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
           username: username.trim().toLowerCase(),
