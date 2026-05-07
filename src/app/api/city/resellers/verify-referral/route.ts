@@ -2,56 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-// ============================================================
-// HELPER: Find the next available node in a given direction
-// Uses BFS (breadth-first) to find the shallowest open slot
-// in the chosen leg direction under the referrer
-// ============================================================
-
-async function findAvailableSlot(
-  startNodeId: string,
-  direction: 'left' | 'right'
-): Promise<{ parentId: string; position: 'left' | 'right'; depth: number } | null> {
-  // BFS queue — starts with the chosen leg direction
-  const queue: { nodeId: string; depth: number }[] = [{ nodeId: startNodeId, depth: 0 }]
-
-  while (queue.length > 0) {
-    const { nodeId, depth } = queue.shift()!
-
-    // Check left slot
-    const leftChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'left' },
-      select: { id: true },
-    })
-
-    // Check right slot
-    const rightChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'right' },
-      select: { id: true },
-    })
-
-    // If left is open → available slot found
-    if (!leftChild) {
-      return { parentId: nodeId, position: 'left', depth }
-    }
-
-    // If right is open → available slot found
-    if (!rightChild) {
-      return { parentId: nodeId, position: 'right', depth }
-    }
-
-    // Both occupied → go deeper into both children
-    if (leftChild) queue.push({ nodeId: leftChild.id, depth: depth + 1 })
-    if (rightChild) queue.push({ nodeId: rightChild.id, depth: depth + 1 })
-  }
-
-  return null // tree is completely full (shouldn't happen)
-}
-
-// ============================================================
-// POST /api/city/resellers/verify-referral
-// ============================================================
-
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -59,7 +9,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { username, placement } = await req.json()
+    const { username } = await req.json()
 
     if (!username) {
       return NextResponse.json(
@@ -96,7 +46,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Allow reseller OR hiroma top node ──
     const isHiromaNode = referrer.username === 'hiroma'
     const isReseller = referrer.role === 'reseller'
 
@@ -114,54 +63,55 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Find referrer's binary tree node ──
-    const referrerNode = await prisma.binaryTreeNode.findUnique({
+    // ── Find binary tree node — THIS is what was missing ──
+    const node = await prisma.binaryTreeNode.findUnique({
       where: { user_id: referrer.id },
-      select: { id: true, left_count: true, right_count: true },
+      select: { id: true },
     })
 
-    if (!referrerNode) {
+    if (!node) {
       return NextResponse.json(
         { error: 'This referrer has no binary tree node. Please contact admin.' },
         { status: 400 }
       )
     }
 
-    // ── Check direct legs ──
-    const directLeftChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: referrerNode.id, position: 'left' },
-      select: { id: true, user_id: true },
+    // ── Check direct leg availability ──
+    const leftChild = await prisma.binaryTreeNode.findFirst({
+      where: { parent_id: node.id, position: 'left' },
+      select: { id: true },
     })
 
-    const directRightChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: referrerNode.id, position: 'right' },
-      select: { id: true, user_id: true },
+    const rightChild = await prisma.binaryTreeNode.findFirst({
+      where: { parent_id: node.id, position: 'right' },
+      select: { id: true },
     })
 
-    const directLeftAvailable = !directLeftChild
-    const directRightAvailable = !directRightChild
+    const leftIsDirect = !leftChild
+    const rightIsDirect = !rightChild
 
-    // ── If placement is provided, find the actual slot ──
-    let leftSlot = null
-    let rightSlot = null
+    // ── Check if any space exists deeper ──
+    // For left: if occupied, check if the left subtree has any open slot
+    let leftAvailable = leftIsDirect
+    let rightAvailable = rightIsDirect
 
-    if (directLeftAvailable) {
-      leftSlot = { parentId: referrerNode.id, position: 'left', depth: 0, direct: true }
-    } else {
-      // Go deeper into left leg
-      const slot = await findAvailableSlot(directLeftChild!.id, 'left')
-      if (slot) leftSlot = { ...slot, direct: false }
+    if (!leftIsDirect && leftChild) {
+      // Check if there's any open slot in the left subtree (BFS check)
+      leftAvailable = await hasOpenSlot(leftChild.id)
     }
 
-    if (directRightAvailable) {
-      rightSlot = { parentId: referrerNode.id, position: 'right', depth: 0, direct: true }
-    } else {
-      // Go deeper into right leg
-      const slot = await findAvailableSlot(directRightChild!.id, 'right')
-      if (slot) rightSlot = { ...slot, direct: false }
+    if (!rightIsDirect && rightChild) {
+      rightAvailable = await hasOpenSlot(rightChild.id)
     }
 
-    // ── Daily referral cap check (resellers only) ──
+    if (!leftAvailable && !rightAvailable) {
+      return NextResponse.json(
+        { error: 'Both legs of this referrer are completely full. Please use a different referrer.' },
+        { status: 400 }
+      )
+    }
+
+    // ── Daily referral cap check ──
     let dailyCount = 0
     let dailyCapReached = false
 
@@ -183,15 +133,12 @@ export async function POST(req: NextRequest) {
         is_hiroma_node: isHiromaNode,
         daily_referral_count: dailyCount,
         daily_cap_reached: dailyCapReached,
-        // Direct leg availability
-        left_available: !!leftSlot,
-        right_available: !!rightSlot,
-        // Direct or deep placement info
-        left_is_direct: directLeftAvailable,
-        right_is_direct: directRightAvailable,
-        // Slot details for registration
-        left_slot: leftSlot,
-        right_slot: rightSlot,
+        left_available: leftAvailable,
+        right_available: rightAvailable,
+        left_is_direct: leftIsDirect,
+        right_is_direct: rightIsDirect,
+        // ✅ node_id is now returned — needed for tree-nodes API
+        node_id: node.id,
       },
     })
   } catch (error) {
@@ -201,4 +148,30 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// ── Helper: check if any open slot exists in a subtree ──
+async function hasOpenSlot(nodeId: string): Promise<boolean> {
+  const queue: string[] = [nodeId]
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+
+    const left = await prisma.binaryTreeNode.findFirst({
+      where: { parent_id: current, position: 'left' },
+      select: { id: true },
+    })
+
+    const right = await prisma.binaryTreeNode.findFirst({
+      where: { parent_id: current, position: 'right' },
+      select: { id: true },
+    })
+
+    if (!left || !right) return true // open slot found
+
+    queue.push(left.id)
+    queue.push(right.id)
+  }
+
+  return false
 }

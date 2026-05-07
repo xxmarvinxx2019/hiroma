@@ -3,39 +3,7 @@ import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 // ============================================================
-// HELPER: Find available slot using BFS in chosen direction
-// ============================================================
-
-async function findAvailableSlot(
-  startNodeId: string
-): Promise<{ parentId: string; position: 'left' | 'right' } | null> {
-  const queue: string[] = [startNodeId]
-
-  while (queue.length > 0) {
-    const nodeId = queue.shift()!
-
-    const leftChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'left' },
-      select: { id: true },
-    })
-
-    const rightChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'right' },
-      select: { id: true },
-    })
-
-    if (!leftChild) return { parentId: nodeId, position: 'left' }
-    if (!rightChild) return { parentId: nodeId, position: 'right' }
-
-    queue.push(leftChild.id)
-    queue.push(rightChild.id)
-  }
-
-  return null
-}
-
-// ============================================================
-// GET — paginated resellers for this city distributor
+// GET — paginated resellers
 // ============================================================
 
 export async function GET(req: NextRequest) {
@@ -51,7 +19,6 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get('search') || ''
 
     const where: any = { role: 'reseller', created_by: user.id }
-
     if (search) {
       where.OR = [
         { full_name: { contains: search, mode: 'insensitive' } },
@@ -60,7 +27,6 @@ export async function GET(req: NextRequest) {
     }
 
     const total = await prisma.user.count({ where })
-
     const resellers = await prisma.user.findMany({
       where,
       orderBy: { created_at: 'desc' },
@@ -95,7 +61,7 @@ export async function GET(req: NextRequest) {
 }
 
 // ============================================================
-// POST — register new reseller with deep placement support
+// POST — register new reseller
 // ============================================================
 
 export async function POST(req: NextRequest) {
@@ -113,15 +79,21 @@ export async function POST(req: NextRequest) {
       address,
       pin_id,
       referrer_username,
-      placement, // 'left' or 'right' — direction chosen by referrer
+      // actual_parent_node_id = the node the city dist selected in the visual tree
+      // actual_position = left or right slot under that node
+      actual_parent_node_id,
+      actual_position,
     } = await req.json()
 
-    if (!full_name || !username || !mobile || !password || !pin_id || !referrer_username || !placement) {
+    if (!full_name || !username || !mobile || !password || !pin_id ||
+      !referrer_username || !actual_parent_node_id || !actual_position) {
       return NextResponse.json(
         { error: 'All required fields must be filled.' },
         { status: 400 }
       )
     }
+
+    console.log('[REGISTER] Starting:', username, '| parent node:', actual_parent_node_id, '| position:', actual_position)
 
     // ── Check username uniqueness ──
     const existingUser = await prisma.user.findUnique({
@@ -157,6 +129,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── Verify the selected slot is still available ──
+    const slotTaken = await prisma.binaryTreeNode.findFirst({
+      where: { parent_id: actual_parent_node_id, position: actual_position },
+    })
+    if (slotTaken) {
+      return NextResponse.json({
+        error: 'This slot was just taken by another registration. Please refresh and try again.',
+      }, { status: 400 })
+    }
+
     // ── Find referrer ──
     const referrer = await prisma.user.findUnique({
       where: { username: referrer_username.trim().toLowerCase() },
@@ -167,90 +149,44 @@ export async function POST(req: NextRequest) {
     }
 
     const isHiromaNode = referrer.username === 'hiroma'
-    if (!isHiromaNode && referrer.role !== 'reseller') {
-      return NextResponse.json({ error: 'Invalid referrer.' }, { status: 400 })
-    }
 
-    // ── Find referrer's tree node ──
-    const referrerNode = await prisma.binaryTreeNode.findUnique({
-      where: { user_id: referrer.id },
-      select: { id: true },
-    })
-    if (!referrerNode) {
-      return NextResponse.json(
-        { error: 'Referrer has no binary tree node.' },
-        { status: 400 }
-      )
-    }
+    // ── Get referrer's package for pairing bonus ──
+    const referrerProfile = !isHiromaNode
+      ? await prisma.resellerProfile.findUnique({
+          where: { user_id: referrer.id },
+          select: {
+            daily_referral_count: true,
+            last_referral_date: true,
+            package: {
+              select: {
+                pairing_bonus_value: true,
+                direct_referral_bonus: true,
+              },
+            },
+          },
+        })
+      : null
 
-    // ── Find actual placement slot ──
-    // Check if direct slot in chosen direction is available
-    const directChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: referrerNode.id, position: placement },
-      select: { id: true },
-    })
-
-    let actualParentId: string
-    let actualPosition: 'left' | 'right'
-
-    if (!directChild) {
-      // Direct slot is available
-      actualParentId = referrerNode.id
-      actualPosition = placement
-    } else {
-      // Direct slot occupied — find next available slot deeper in chosen direction
-      const slot = await findAvailableSlot(directChild.id)
-      if (!slot) {
-        return NextResponse.json(
-          { error: `No available slots found in the ${placement} direction. Try the other leg.` },
-          { status: 400 }
-        )
-      }
-      actualParentId = slot.parentId
-      actualPosition = slot.position
-    }
-
-    // ── Check daily referral cap for resellers ──
-    if (!isHiromaNode) {
-      const referrerProfile = await prisma.resellerProfile.findUnique({
-        where: { user_id: referrer.id },
-        select: { daily_referral_count: true, last_referral_date: true },
-      })
-
-      if (referrerProfile) {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const lastDate = referrerProfile.last_referral_date
-        const isToday = lastDate ? new Date(lastDate) >= today : false
-        const dailyCount = isToday ? referrerProfile.daily_referral_count : 0
-
-        if (dailyCount >= 10) {
-          // Overflow to Hiroma top node
-          const hiromaUser = await prisma.user.findUnique({
-            where: { username: 'hiroma' },
-            select: { id: true },
-          })
-          const hiromaNode = hiromaUser
-            ? await prisma.binaryTreeNode.findUnique({
-                where: { user_id: hiromaUser.id },
-                select: { id: true },
-              })
-            : null
-
-          if (hiromaNode) {
-            const hiromaSlot = await findAvailableSlot(hiromaNode.id)
-            if (hiromaSlot) {
-              actualParentId = hiromaSlot.parentId
-              actualPosition = hiromaSlot.position
-            }
-          }
-        }
-      }
+    // ── Check daily referral cap ──
+    let overflowToHiroma = false
+    if (!isHiromaNode && referrerProfile) {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const isToday = referrerProfile.last_referral_date
+        ? new Date(referrerProfile.last_referral_date) >= today
+        : false
+      const dailyCount = isToday ? referrerProfile.daily_referral_count : 0
+      overflowToHiroma = dailyCount >= 10
     }
 
     const hashedPassword = await hashPassword(password)
 
-    // ── Register reseller in transaction ──
+    // ── Get referrer's binary tree node ──
+    const referrerNode = await prisma.binaryTreeNode.findUnique({
+      where: { user_id: referrer.id },
+      select: { id: true },
+    })
+
     await prisma.$transaction(async (tx) => {
       // 1. Create user
       const newUser = await tx.user.create({
@@ -289,77 +225,161 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // 4. Create binary tree node at found slot
+      // 4. Create binary tree node at chosen slot
       await tx.binaryTreeNode.create({
         data: {
           user_id: newUser.id,
-          parent_id: actualParentId,
-          position: actualPosition,
-          sponsor_id: referrer.id, // always the original referrer
+          parent_id: actual_parent_node_id,
+          position: actual_position,
+          sponsor_id: referrer.id,
           left_count: 0,
           right_count: 0,
-          is_overflow: false,
+          is_overflow: overflowToHiroma,
         },
       })
 
       // 5. Update parent node leg count
       await tx.binaryTreeNode.update({
-        where: { id: actualParentId },
-        data: actualPosition === 'left'
+        where: { id: actual_parent_node_id },
+        data: actual_position === 'left'
           ? { left_count: { increment: 1 } }
           : { right_count: { increment: 1 } },
       })
 
-      // 6. Update referrer's daily referral count (only for resellers)
-      if (!isHiromaNode) {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const referrerProfile = await tx.resellerProfile.findUnique({
-          where: { user_id: referrer.id },
-          select: { daily_referral_count: true, last_referral_date: true },
-        })
-        if (referrerProfile) {
-          const isToday = referrerProfile.last_referral_date
-            ? new Date(referrerProfile.last_referral_date) >= today
-            : false
-          await tx.resellerProfile.update({
-            where: { user_id: referrer.id },
-            data: {
-              daily_referral_count: isToday
-                ? { increment: 1 }
-                : 1,
-              last_referral_date: new Date(),
-            },
-          })
-        }
-      }
-
-      // 7. Mark PIN as used
+      // 6. Mark PIN as used
       await tx.pin.update({
         where: { id: pin.id },
-        data: {
-          status: 'used',
-          used_by: newUser.id,
-          used_at: new Date(),
-        },
+        data: { status: 'used', used_by: newUser.id, used_at: new Date() },
       })
 
-      // 8. Update name cap registry
+      // 7. Update name cap registry
       await tx.nameCapRegistry.upsert({
         where: { normalized_name: normalizedName },
         update: { count: { increment: 1 } },
         create: { normalized_name: normalizedName, count: 1, max_allowed: 7 },
       })
+
+      // 8. Update referrer daily count
+      if (!isHiromaNode && !overflowToHiroma && referrerNode) {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const isToday = referrerProfile?.last_referral_date
+          ? new Date(referrerProfile.last_referral_date) >= today
+          : false
+
+        await tx.resellerProfile.update({
+          where: { user_id: referrer.id },
+          data: {
+            daily_referral_count: isToday ? { increment: 1 } : 1,
+            last_referral_date: new Date(),
+          },
+        })
+
+        // 9. ── CHECK PAIRING BONUS ──
+        // A pairing bonus fires when the parent node now has BOTH left and right children
+        // and the sponsor of those children is the same referrer
+        if (referrerNode) {
+          const parentLeftChild = await tx.binaryTreeNode.findFirst({
+            where: { parent_id: actual_parent_node_id, position: 'left' },
+            select: { id: true, sponsor_id: true },
+          })
+          const parentRightChild = await tx.binaryTreeNode.findFirst({
+            where: { parent_id: actual_parent_node_id, position: 'right' },
+            select: { id: true, sponsor_id: true },
+          })
+
+          // Both slots filled under this parent node
+          if (parentLeftChild && parentRightChild) {
+            // Find the owner of the parent node to credit pairing bonus
+            const parentNode = await tx.binaryTreeNode.findUnique({
+              where: { id: actual_parent_node_id },
+              select: {
+                user_id: true,
+                user: {
+                  select: {
+                    reseller_profile: {
+                      select: {
+                        package: {
+                          select: {
+                            pairing_bonus_value: true,
+                            direct_referral_bonus: true,
+                          },
+                        },
+                      },
+                    },
+                    wallet: { select: { balance: true } },
+                  },
+                },
+              },
+            })
+
+            if (parentNode && parentNode.user.reseller_profile?.package) {
+              const pairingBonus = Number(
+                parentNode.user.reseller_profile.package.pairing_bonus_value
+              )
+
+              if (pairingBonus > 0) {
+                // Credit pairing bonus to parent node owner
+                await tx.commission.create({
+                  data: {
+                    user_id: parentNode.user_id,
+                    type: 'binary_pairing',
+                    amount: pairingBonus,
+                    source_user_id: newUser.id,
+                    is_pair_overflow: false,
+                  },
+                })
+
+                // Add to wallet
+                await tx.wallet.update({
+                  where: { user_id: parentNode.user_id },
+                  data: {
+                    balance: { increment: pairingBonus },
+                    total_earned: { increment: pairingBonus },
+                  },
+                })
+
+                console.log('[REGISTER] Pairing bonus ₱', pairingBonus, 'credited to', parentNode.user_id)
+              }
+            }
+          }
+        }
+
+        // 10. ── DIRECT REFERRAL BONUS ──
+        // Credit direct referral bonus to the referrer
+        if (referrerProfile?.package?.direct_referral_bonus) {
+          const directBonus = Number(referrerProfile.package.direct_referral_bonus)
+
+          if (directBonus > 0) {
+            await tx.commission.create({
+              data: {
+                user_id: referrer.id,
+                type: 'direct_referral',
+                amount: directBonus,
+                source_user_id: newUser.id,
+                is_pair_overflow: false,
+              },
+            })
+
+            await tx.wallet.update({
+              where: { user_id: referrer.id },
+              data: {
+                balance: { increment: directBonus },
+                total_earned: { increment: directBonus },
+              },
+            })
+
+            console.log('[REGISTER] Direct referral bonus ₱', directBonus, 'credited to referrer:', referrer.id)
+          }
+        }
+      }
     })
+
+    console.log('[REGISTER] ✅ Complete for:', username)
 
     return NextResponse.json({
       success: true,
       message: `${full_name} has been registered successfully.`,
-      placement_info: {
-        actual_parent_id: actualParentId,
-        actual_position: actualPosition,
-        is_direct: actualParentId === referrerNode.id,
-      },
     })
   } catch (error) {
     console.error('[REGISTER RESELLER ERROR]', error)

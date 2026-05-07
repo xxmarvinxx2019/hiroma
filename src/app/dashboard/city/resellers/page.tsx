@@ -28,13 +28,6 @@ interface VerifiedPin {
   package: { id: string; name: string; price: number } | null
 }
 
-interface Slot {
-  parentId: string
-  position: 'left' | 'right'
-  depth: number
-  direct: boolean
-}
-
 interface VerifiedReferral {
   id: string
   full_name: string
@@ -47,81 +40,131 @@ interface VerifiedReferral {
   right_available: boolean
   left_is_direct: boolean
   right_is_direct: boolean
-  left_slot: Slot | null
-  right_slot: Slot | null
+  node_id: string
+}
+
+interface TreeNode {
+  id: string
+  user_id: string
+  username: string
+  full_name: string
+  position: string | null
+  left_available: boolean
+  right_available: boolean
+  left_child: TreeNode | null
+  right_child: TreeNode | null
+  depth: number
+}
+
+interface SelectedSlot {
+  parent_node_id: string
+  position: 'left' | 'right'
+  parent_username: string
 }
 
 const PAGE_SIZE = 15
 
 // ============================================================
-// PLACEMENT CARD
+// VISUAL TREE NODE COMPONENT
 // ============================================================
 
-function PlacementCard({
-  side,
-  slot,
-  available,
-  isDirect,
-  selected,
-  onSelect,
-  referralData,
+function TreeNodeCard({
+  node,
+  onSelectSlot,
+  selectedSlot,
+  depth,
 }: {
-  side: 'left' | 'right'
-  slot: Slot | null
-  available: boolean
-  isDirect: boolean
-  selected: boolean
-  onSelect: () => void
-  referralData: VerifiedReferral
+  node: TreeNode
+  onSelectSlot: (slot: SelectedSlot) => void
+  selectedSlot: SelectedSlot | null
+  depth: number
 }) {
-  const label = side === 'left' ? 'Left leg' : 'Right leg'
-  const letter = side === 'left' ? 'L' : 'R'
-
-  if (!available || !slot) {
-    return (
-      <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center opacity-50 cursor-not-allowed">
-        <p className="text-2xl font-bold text-gray-300 mb-1">{letter}</p>
-        <p className="text-xs font-semibold text-gray-300">{label}</p>
-        <p className="text-xs text-gray-300 mt-1">No space available</p>
-      </div>
-    )
-  }
+  const isLeftSelected = selectedSlot?.parent_node_id === node.id && selectedSlot?.position === 'left'
+  const isRightSelected = selectedSlot?.parent_node_id === node.id && selectedSlot?.position === 'right'
 
   return (
-    <button
-      onClick={onSelect}
-      className={`border-2 rounded-xl p-4 text-center transition-all cursor-pointer w-full ${
-        selected
-          ? 'border-[#C9A84C] bg-[#fef9ee]'
-          : 'border-[#0D1B3E]/15 hover:border-[#C9A84C]/50 hover:bg-[#fef9ee]/30'
-      }`}
-    >
-      <p
-        className="text-2xl font-bold mb-1"
-        style={{ color: selected ? '#C9A84C' : '#c0c8d8' }}
-      >
-        {letter}
-      </p>
-      <p className={`text-xs font-semibold capitalize ${selected ? 'text-[#C9A84C]' : 'text-[#0D1B3E]'}`}>
-        {label}
-      </p>
+    <div className="flex flex-col items-center gap-1">
+      {/* Node */}
+      <div className="bg-[#0D1B3E] rounded-lg px-3 py-2 text-center min-w-[90px]">
+        <p className="text-white text-xs font-semibold truncate max-w-[80px]">
+          @{node.username}
+        </p>
+        <p className="text-white/40 text-xs truncate max-w-[80px]">
+          {node.full_name.split(' ')[0]}
+        </p>
+      </div>
 
-      {/* Direct or deep placement indicator */}
-      {isDirect ? (
-        <span className="inline-block mt-1.5 text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-0.5 rounded-full">
-          Direct slot
-        </span>
-      ) : (
-        <span className="inline-block mt-1.5 text-xs bg-[#eef0f8] text-[#0D1B3E] px-2 py-0.5 rounded-full">
-          Level {(slot.depth || 0) + 1} deep
-        </span>
-      )}
+      {/* Children row */}
+      <div className="flex gap-3 items-start">
 
-      {/* Daily cap warning */}
-      {!referralData.is_hiroma_node && referralData.daily_cap_reached && (
-        <p className="text-xs text-[#9a6f1e] mt-1">⚠️ Daily cap reached — overflow to Hiroma</p>
-      )}
-    </button>
+        {/* Left side */}
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-px h-3 bg-[#0D1B3E]/20" />
+          {node.left_available ? (
+            // Empty left slot — clickable
+            <button
+              onClick={() => onSelectSlot({
+                parent_node_id: node.id,
+                position: 'left',
+                parent_username: node.username,
+              })}
+              className={`border-2 border-dashed rounded-lg px-3 py-2 text-center min-w-[90px] transition-all cursor-pointer ${
+                isLeftSelected
+                  ? 'border-[#C9A84C] bg-[#fef9ee]'
+                  : 'border-[#C9A84C]/40 hover:border-[#C9A84C] hover:bg-[#fef9ee]/50'
+              }`}
+            >
+              <p className="text-lg font-bold" style={{ color: isLeftSelected ? '#C9A84C' : '#c0c8d8' }}>L</p>
+              <p className={`text-xs font-medium ${isLeftSelected ? 'text-[#C9A84C]' : 'text-gray-400'}`}>
+                {isLeftSelected ? '✓ Selected' : 'Open slot'}
+              </p>
+            </button>
+          ) : node.left_child ? (
+            // Has a child — go deeper
+            <TreeNodeCard
+              node={node.left_child}
+              onSelectSlot={onSelectSlot}
+              selectedSlot={selectedSlot}
+              depth={depth + 1}
+            />
+          ) : null}
+        </div>
+
+        {/* Right side */}
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-px h-3 bg-[#0D1B3E]/20" />
+          {node.right_available ? (
+            // Empty right slot — clickable
+            <button
+              onClick={() => onSelectSlot({
+                parent_node_id: node.id,
+                position: 'right',
+                parent_username: node.username,
+              })}
+              className={`border-2 border-dashed rounded-lg px-3 py-2 text-center min-w-[90px] transition-all cursor-pointer ${
+                isRightSelected
+                  ? 'border-[#C9A84C] bg-[#fef9ee]'
+                  : 'border-[#C9A84C]/40 hover:border-[#C9A84C] hover:bg-[#fef9ee]/50'
+              }`}
+            >
+              <p className="text-lg font-bold" style={{ color: isRightSelected ? '#C9A84C' : '#c0c8d8' }}>R</p>
+              <p className={`text-xs font-medium ${isRightSelected ? 'text-[#C9A84C]' : 'text-gray-400'}`}>
+                {isRightSelected ? '✓ Selected' : 'Open slot'}
+              </p>
+            </button>
+          ) : node.right_child ? (
+            // Has a child — go deeper
+            <TreeNodeCard
+              node={node.right_child}
+              onSelectSlot={onSelectSlot}
+              selectedSlot={selectedSlot}
+              depth={depth + 1}
+            />
+          ) : null}
+        </div>
+
+      </div>
+    </div>
   )
 }
 
@@ -150,12 +193,16 @@ export default function CityResellersPage() {
   const [pinError, setPinError] = useState('')
   const [pinLoading, setPinLoading] = useState(false)
 
-  // Step 2 — Referral
+  // Step 2 — Referral & placement
   const [referralInput, setReferralInput] = useState('')
   const [referralData, setReferralData] = useState<VerifiedReferral | null>(null)
   const [referralError, setReferralError] = useState('')
   const [referralLoading, setReferralLoading] = useState(false)
-  const [placement, setPlacement] = useState<'left' | 'right' | null>(null)
+  const [direction, setDirection] = useState<'left' | 'right' | null>(null)
+  const [treeData, setTreeData] = useState<TreeNode | null>(null)
+  const [treeLoading, setTreeLoading] = useState(false)
+  const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null)
+  const [directAvailable, setDirectAvailable] = useState(false)
 
   // Step 3 — Details
   const [form, setForm] = useState({
@@ -199,7 +246,7 @@ export default function CityResellersPage() {
 
   useEffect(() => { fetchResellers() }, [fetchResellers])
 
-  // Reset form
+  // Reset
   const resetForm = () => {
     setShowForm(false)
     setStep(1)
@@ -209,7 +256,10 @@ export default function CityResellersPage() {
     setReferralInput('')
     setReferralData(null)
     setReferralError('')
-    setPlacement(null)
+    setDirection(null)
+    setTreeData(null)
+    setSelectedSlot(null)
+    setDirectAvailable(false)
     setForm({ full_name: '', username: '', mobile: '', address: '', password: '', confirmPassword: '' })
     setNameCapInfo(null)
     setUsernameAvailable(null)
@@ -238,29 +288,53 @@ export default function CityResellersPage() {
     if (!referralInput.trim()) { setReferralError('Please enter a referral username.'); return }
     setReferralLoading(true)
     setReferralError('')
-    setPlacement(null)
+    setReferralData(null)
+    setDirection(null)
+    setTreeData(null)
+    setSelectedSlot(null)
+
     const res = await fetch('/api/city/resellers/verify-referral', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: referralInput.trim().toLowerCase() }),
     })
     const data = await res.json()
-    if (!res.ok) {
-      setReferralError(data.error || 'Referral not found.')
-    } else {
-      setReferralData(data.reseller)
-      // Auto-select if only one leg available
-      if (data.reseller.left_available && !data.reseller.right_available) {
-        setPlacement('left')
-      } else if (!data.reseller.left_available && data.reseller.right_available) {
-        setPlacement('right')
-      }
-    }
+    if (!res.ok) { setReferralError(data.error || 'Referral not found.') }
+    else { setReferralData(data.reseller) }
     setReferralLoading(false)
   }
 
+  // Load tree when direction is selected
+  const selectDirection = async (dir: 'left' | 'right') => {
+    if (!referralData) return
+    setDirection(dir)
+    setSelectedSlot(null)
+    setTreeData(null)
+    setDirectAvailable(false)
+    setTreeLoading(true)
+
+    const res = await fetch(
+      `/api/city/resellers/tree-nodes?node_id=${referralData.node_id}&direction=${dir}`
+    )
+    const data = await res.json()
+
+    if (data.direct_available) {
+      // Direct slot is open — auto select it
+      setDirectAvailable(true)
+      setSelectedSlot({
+        parent_node_id: referralData.node_id,
+        position: dir,
+        parent_username: referralData.username,
+      })
+    } else {
+      setDirectAvailable(false)
+      setTreeData(data.tree)
+    }
+    setTreeLoading(false)
+  }
+
   const proceedToStep3 = () => {
-    if (!placement) { setReferralError('Please choose a placement direction.'); return }
+    if (!selectedSlot) { setReferralError('Please select a placement slot.'); return }
     setReferralError('')
     setStep(3)
   }
@@ -273,10 +347,10 @@ export default function CityResellersPage() {
     setNameCapInfo(data)
   }
 
-  // Check username availability
-  const checkUsername = async (username: string) => {
-    if (!username.trim() || username.trim().length < 3) return
-    const res = await fetch(`/api/city/resellers/check-username?username=${encodeURIComponent(username.trim().toLowerCase())}`)
+  // Check username
+  const checkUsername = async (uname: string) => {
+    if (!uname.trim() || uname.trim().length < 3) return
+    const res = await fetch(`/api/city/resellers/check-username?username=${encodeURIComponent(uname.trim().toLowerCase())}`)
     const data = await res.json()
     setUsernameAvailable(data.available)
   }
@@ -303,6 +377,10 @@ export default function CityResellersPage() {
       setFormError('Username is already taken.')
       return
     }
+    if (!selectedSlot) {
+      setFormError('No placement slot selected.')
+      return
+    }
 
     setFormLoading(true)
     setFormError('')
@@ -318,7 +396,8 @@ export default function CityResellersPage() {
         password: form.password,
         pin_id: pinData?.id,
         referrer_username: referralData?.username,
-        placement,
+        actual_parent_node_id: selectedSlot.parent_node_id,
+        actual_position: selectedSlot.position,
       }),
     })
     const data = await res.json()
@@ -393,9 +472,7 @@ export default function CityResellersPage() {
         ) : resellers.length === 0 ? (
           <div className="px-4 py-12 text-center">
             <p className="text-gray-400 text-sm mb-2">No resellers found</p>
-            <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline">
-              Register your first reseller →
-            </button>
+            <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline">Register your first reseller →</button>
           </div>
         ) : (
           resellers.map((r) => (
@@ -405,11 +482,7 @@ export default function CityResellersPage() {
                 <p className="text-xs text-gray-400">@{r.username}</p>
               </div>
               <p className="text-xs text-gray-400">{r.mobile}</p>
-              <span>
-                <span className="text-xs bg-[#fef6e4] text-[#9a6f1e] px-2 py-0.5 rounded-full">
-                  {r.reseller_profile?.package?.name || '—'}
-                </span>
-              </span>
+              <span><span className="text-xs bg-[#fef6e4] text-[#9a6f1e] px-2 py-0.5 rounded-full">{r.reseller_profile?.package?.name || '—'}</span></span>
               <p className="text-xs font-medium text-[#C9A84C]">{r.reseller_profile?.total_points || 0} pts</p>
               <p className="text-xs font-medium text-[#0D1B3E]">₱{Number(r.wallet?.balance || 0).toLocaleString()}</p>
               <span>
@@ -424,9 +497,7 @@ export default function CityResellersPage() {
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
 
-      {/* ════════════════════════════════
-          REGISTRATION MODAL
-      ════════════════════════════════ */}
+      {/* ════════════ REGISTRATION MODAL ════════════ */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
@@ -436,13 +507,13 @@ export default function CityResellersPage() {
               <div>
                 <h2 className="text-white font-semibold text-sm">Register new reseller</h2>
                 <p className="text-white/40 text-xs mt-0.5">
-                  Step {step} of 3 — {step === 1 ? 'Verify PIN' : step === 2 ? 'Verify referral & placement' : 'Reseller details'}
+                  Step {step} of 3 — {step === 1 ? 'Verify PIN' : step === 2 ? 'Referral & placement' : 'Reseller details'}
                 </p>
               </div>
               <button onClick={resetForm} className="text-white/50 hover:text-white text-lg cursor-pointer">✕</button>
             </div>
 
-            {/* Progress bar */}
+            {/* Progress */}
             <div className="flex flex-shrink-0">
               {[1, 2, 3].map((s) => (
                 <div key={s} className="flex-1 h-1 transition-all duration-300" style={{ background: s <= step ? '#C9A84C' : '#F0F2F8' }} />
@@ -475,13 +546,13 @@ export default function CityResellersPage() {
                 </div>
               )}
 
-              {/* ══ STEP 2: REFERRAL & PLACEMENT ══ */}
+              {/* ══ STEP 2: REFERRAL & VISUAL TREE PLACEMENT ══ */}
               {step === 2 && (
-                <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-4">
 
                   {/* PIN confirmed */}
                   <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-4 py-3">
-                    <p className="text-xs text-[#1a7a4a] font-semibold">✓ PIN verified: {pinData?.pin_code}</p>
+                    <p className="text-xs text-[#1a7a4a] font-semibold">✓ PIN: {pinData?.pin_code}</p>
                     <p className="text-xs text-gray-400 mt-0.5">Package: {pinData?.package?.name} · ₱{Number(pinData?.package?.price || 0).toLocaleString()}</p>
                   </div>
 
@@ -491,7 +562,14 @@ export default function CityResellersPage() {
                     <div className="flex gap-2">
                       <input
                         value={referralInput}
-                        onChange={(e) => { setReferralInput(e.target.value.toLowerCase()); setReferralError(''); setReferralData(null); setPlacement(null) }}
+                        onChange={(e) => {
+                          setReferralInput(e.target.value.toLowerCase())
+                          setReferralError('')
+                          setReferralData(null)
+                          setDirection(null)
+                          setTreeData(null)
+                          setSelectedSlot(null)
+                        }}
                         onKeyDown={(e) => e.key === 'Enter' && verifyReferral()}
                         placeholder="Enter referrer's username"
                         className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
@@ -504,13 +582,18 @@ export default function CityResellersPage() {
                         {referralLoading ? '...' : 'Verify'}
                       </button>
                     </div>
-                    {referralError && <div className="mt-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2"><p className="text-red-500 text-xs">{referralError}</p></div>}
+                    {referralError && (
+                      <div className="mt-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        <p className="text-red-500 text-xs">{referralError}</p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Referrer info + placement */}
+                  {/* Referrer confirmed + direction + visual tree */}
                   {referralData && (
                     <div className="flex flex-col gap-3">
-                      {/* Referrer confirmed */}
+
+                      {/* Referrer info */}
                       <div className="bg-[#F0F2F8] rounded-lg px-4 py-3 flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
                           <span className="text-[#C9A84C] font-bold text-sm">
@@ -521,69 +604,103 @@ export default function CityResellersPage() {
                           <p className="text-xs font-semibold text-[#0D1B3E]">{referralData.full_name}</p>
                           <p className="text-xs text-gray-400">@{referralData.username} · {referralData.is_hiroma_node ? 'Top node' : `Package: ${referralData.package}`}</p>
                           {referralData.daily_cap_reached && (
-                            <p className="text-xs text-[#9a6f1e] mt-0.5">⚠️ Daily cap reached (10/10) — new member will overflow to Hiroma</p>
+                            <p className="text-xs text-[#9a6f1e] mt-0.5">⚠️ Daily cap reached — overflow to Hiroma</p>
                           )}
                         </div>
                       </div>
 
-                      {/* Placement selector */}
+                      {/* Direction buttons */}
                       <div>
-                        <p className="text-xs font-medium text-[#0D1B3E] mb-1">
-                          Choose placement direction
+                        <p className="text-xs font-medium text-[#0D1B3E] mb-2">
+                          Choose direction in referrer's tree
                         </p>
-                        <p className="text-xs text-gray-400 mb-3">
-                          The referrer picks which side. If the direct slot is occupied, the system finds the next available slot deeper in that direction.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <PlacementCard
-                            side="left"
-                            slot={referralData.left_slot}
-                            available={referralData.left_available}
-                            isDirect={referralData.left_is_direct}
-                            selected={placement === 'left'}
-                            onSelect={() => setPlacement('left')}
-                            referralData={referralData}
-                          />
-                          <PlacementCard
-                            side="right"
-                            slot={referralData.right_slot}
-                            available={referralData.right_available}
-                            isDirect={referralData.right_is_direct}
-                            selected={placement === 'right'}
-                            onSelect={() => setPlacement('right')}
-                            referralData={referralData}
-                          />
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['left', 'right'] as const).map((dir) => {
+                            const available = dir === 'left' ? referralData.left_available : referralData.right_available
+                            return (
+                              <button
+                                key={dir}
+                                onClick={() => available && selectDirection(dir)}
+                                disabled={!available}
+                                className={`border-2 rounded-xl p-3 text-center transition-all ${
+                                  direction === dir
+                                    ? 'border-[#C9A84C] bg-[#fef9ee]'
+                                    : available
+                                    ? 'border-[#0D1B3E]/15 hover:border-[#C9A84C]/50 cursor-pointer'
+                                    : 'border-gray-200 opacity-40 cursor-not-allowed'
+                                }`}
+                              >
+                                <p className="text-xl font-bold mb-0.5" style={{ color: direction === dir ? '#C9A84C' : available ? '#0D1B3E' : '#d1d5db' }}>
+                                  {dir === 'left' ? 'L' : 'R'}
+                                </p>
+                                <p className={`text-xs font-semibold capitalize ${direction === dir ? 'text-[#C9A84C]' : available ? 'text-[#0D1B3E]' : 'text-gray-300'}`}>
+                                  {dir} leg
+                                </p>
+                                <p className="text-xs mt-0.5" style={{ color: direction === dir ? '#C9A84C' : available ? '#8892a4' : '#d1d5db' }}>
+                                  {!available ? 'No space' : dir === 'left' ? (referralData.left_is_direct ? 'Direct slot' : 'Has space below') : (referralData.right_is_direct ? 'Direct slot' : 'Has space below')}
+                                </p>
+                              </button>
+                            )
+                          })}
                         </div>
-
-                        {placement && (
-                          <div className="mt-3 bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg px-3 py-2.5">
-                            <p className="text-xs text-[#9a6f1e] font-medium">
-                              📍 Placement preview
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {placement === 'left'
-                                ? referralData.left_is_direct
-                                  ? `Direct left leg of @${referralData.username}`
-                                  : `Left direction — level ${(referralData.left_slot?.depth || 0) + 1} under @${referralData.username}`
-                                : referralData.right_is_direct
-                                ? `Direct right leg of @${referralData.username}`
-                                : `Right direction — level ${(referralData.right_slot?.depth || 0) + 1} under @${referralData.username}`
-                              }
-                            </p>
-                          </div>
-                        )}
                       </div>
+
+                      {/* Visual tree or direct slot indicator */}
+                      {direction && (
+                        <div>
+                          {treeLoading ? (
+                            <div className="flex items-center justify-center py-6">
+                              <div className="w-5 h-5 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin mr-2" />
+                              <p className="text-xs text-gray-400">Loading tree...</p>
+                            </div>
+                          ) : directAvailable ? (
+                            <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-4 py-3">
+                              <p className="text-xs text-[#1a7a4a] font-semibold">
+                                ✓ Direct {direction} slot available under @{referralData.username}
+                              </p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                New reseller will be placed directly on the {direction} leg — auto selected.
+                              </p>
+                            </div>
+                          ) : treeData ? (
+                            <div>
+                              <p className="text-xs font-medium text-[#0D1B3E] mb-2">
+                                Click an open slot (dashed box) to place the new reseller:
+                              </p>
+                              <div className="bg-[#F0F2F8] rounded-xl p-4 overflow-x-auto">
+                                <div className="flex justify-center min-w-max">
+                                  <TreeNodeCard
+                                    node={treeData}
+                                    onSelectSlot={setSelectedSlot}
+                                    selectedSlot={selectedSlot}
+                                    depth={0}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {/* Selected slot confirmation */}
+                          {selectedSlot && !directAvailable && (
+                            <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg px-3 py-2.5 mt-2">
+                              <p className="text-xs text-[#9a6f1e] font-medium">📍 Selected placement</p>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {selectedSlot.position} leg under <strong>@{selectedSlot.parent_username}</strong>
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  <div className="flex gap-2">
-                    <button onClick={() => { setStep(1); setReferralData(null); setPlacement(null) }} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => { setStep(1); setReferralData(null); setDirection(null); setSelectedSlot(null) }} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">
                       ← Back
                     </button>
                     <button
                       onClick={proceedToStep3}
-                      disabled={!referralData || !placement}
+                      disabled={!selectedSlot}
                       className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60"
                     >
                       Continue →
@@ -598,10 +715,10 @@ export default function CityResellersPage() {
 
                   {/* Summary */}
                   <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-4 py-3">
-                    <p className="text-xs text-[#1a7a4a] font-semibold mb-1">✓ PIN & referral verified</p>
+                    <p className="text-xs text-[#1a7a4a] font-semibold mb-1">✓ PIN & placement confirmed</p>
                     <p className="text-xs text-gray-500">PIN: <strong>{pinData?.pin_code}</strong> · Package: <strong>{pinData?.package?.name}</strong></p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Referred by: <strong>@{referralData?.username}</strong> · {placement === 'left' ? referralData?.left_is_direct ? 'Direct left leg' : `Left direction (level ${(referralData?.left_slot?.depth || 0) + 1})` : referralData?.right_is_direct ? 'Direct right leg' : `Right direction (level ${(referralData?.right_slot?.depth || 0) + 1})`}
+                      Referred by: <strong>@{referralData?.username}</strong> · <strong>{selectedSlot?.position}</strong> leg under <strong>@{selectedSlot?.parent_username}</strong>
                     </p>
                   </div>
 
@@ -632,7 +749,11 @@ export default function CityResellersPage() {
                       onChange={(e) => { setForm({ ...form, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }); setUsernameAvailable(null) }}
                       onBlur={(e) => checkUsername(e.target.value)}
                       placeholder="juandc"
-                      className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${usernameAvailable === true ? 'border-[#1a7a4a] bg-[#f0faf5]' : usernameAvailable === false ? 'border-red-400 bg-red-50' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`}
+                      className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${
+                        usernameAvailable === true ? 'border-[#1a7a4a] bg-[#f0faf5]'
+                        : usernameAvailable === false ? 'border-red-400 bg-red-50'
+                        : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'
+                      }`}
                     />
                     {usernameAvailable === true && <p className="text-xs text-[#1a7a4a] mt-1">✓ Username is available</p>}
                     {usernameAvailable === false && <p className="text-xs text-red-500 mt-1">✕ Username is already taken</p>}
@@ -674,13 +795,16 @@ export default function CityResellersPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Confirm password <span className="text-[#C9A84C]">*</span></label>
+                      <label className="block text-xs text-gray-400 mb-1">Confirm <span className="text-[#C9A84C]">*</span></label>
                       <input
                         type="password"
                         value={form.confirmPassword}
                         onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
                         placeholder="Re-enter password"
-                        className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`}
+                        className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${
+                          form.confirmPassword && form.password !== form.confirmPassword
+                            ? 'border-red-400' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'
+                        }`}
                       />
                       {form.confirmPassword && form.password !== form.confirmPassword && (
                         <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
@@ -701,9 +825,7 @@ export default function CityResellersPage() {
                   )}
 
                   <div className="flex gap-2 pt-1">
-                    <button onClick={() => { setStep(2); setFormError('') }} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">
-                      ← Back
-                    </button>
+                    <button onClick={() => { setStep(2); setFormError('') }} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">← Back</button>
                     <button
                       onClick={handleRegister}
                       disabled={
