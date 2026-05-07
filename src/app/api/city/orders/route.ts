@@ -265,10 +265,15 @@ export async function PATCH(req: NextRequest) {
           { buyer_id: user.id, status: 'pending' },
         ],
       },
+      include: { items: true },
     })
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found or action not allowed.' }, { status: 404 })
+    }
+
+    if (order.status === 'delivered' || order.status === 'cancelled') {
+      return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 
     // Buyers can only cancel, not move to other statuses
@@ -276,9 +281,46 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
     }
 
-    const updated = await prisma.order.update({
-      where: { id: order_id },
-      data:  { status },
+    // Transaction: update status + credit buyer inventory if delivered
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.order.update({
+        where: { id: order_id },
+        data:  { status },
+      })
+
+      // When city dist delivers to a reseller — credit reseller inventory
+      // When someone delivers to city dist — credit city inventory
+      if (status === 'delivered') {
+        for (const item of order.items) {
+          // Credit buyer's inventory
+          await tx.inventory.upsert({
+            where: {
+              owner_id_product_id: {
+                owner_id:   order.buyer_id,
+                product_id: item.product_id,
+              },
+            },
+            update: { quantity: { increment: item.quantity } },
+            create: {
+              owner_id:            order.buyer_id,
+              product_id:          item.product_id,
+              quantity:            item.quantity,
+              low_stock_threshold: 10,
+            },
+          })
+
+          // Deduct seller's inventory
+          await tx.inventory.updateMany({
+            where: {
+              owner_id:   order.seller_id,
+              product_id: item.product_id,
+            },
+            data: { quantity: { decrement: item.quantity } },
+          })
+        }
+      }
+
+      return updatedOrder
     })
 
     return NextResponse.json({ success: true, order: updated })
