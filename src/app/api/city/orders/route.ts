@@ -200,14 +200,41 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
     let total_amount = 0
 
-    const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
+    /*const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
       const unit_price = item.unit_price ?? Number(product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
-    })
+    })*/
+    const orderItems = items.map(
+  (item: {
+    product_id: string
+    quantity: number
+    unit_price?: number
+  }) => {
 
+    const product = productMap.get(item.product_id)
+
+    if (!product) {
+      throw new Error(`Product not found: ${item.product_id}`)
+    }
+
+    const unit_price =
+      item.unit_price ?? Number(product.price)
+
+    const subtotal = unit_price * item.quantity
+
+    total_amount += subtotal
+
+    return {
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_price,
+      subtotal,
+    }
+  }
+)
     const order = await prisma.order.create({
       data: {
         buyer_id:          user.id,
