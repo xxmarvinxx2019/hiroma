@@ -30,7 +30,7 @@ export async function GET() {
       select: {
         quantity: true,
         product: {
-          select: { id: true, name: true, type: true, price: true },
+          select: { id: true, name: true, type: true, reseller_price: true },
         },
       },
       orderBy: { product: { name: 'asc' } },
@@ -38,10 +38,12 @@ export async function GET() {
 
     const products = inventory.map((i) => ({
       ...i.product,
+      price: Number(i.product.reseller_price),
       available_quantity: i.quantity,
     }))
 
-    return NextResponse.json({ products })
+    const mapped = products.map((p: any) => ({ ...p, price: Number(p.reseller_price) }))
+    return NextResponse.json({ products: mapped })
   } catch (error) {
     console.error('[RESELLER PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

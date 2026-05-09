@@ -78,6 +78,7 @@ export default function DistributorsPage() {
   const [form, setForm] = useState({
     full_name: '',
     username: '',
+    email: '',
     mobile: '',
     password: '',
     address: '',
@@ -259,7 +260,7 @@ export default function DistributorsPage() {
     } else {
       setFormSuccess('Distributor registered successfully!')
       setForm({
-        full_name: '', username: '', mobile: '', password: '', address: '',
+        full_name: '', username: '', email: '', mobile: '', password: '', address: '',
         dist_level: 'city', coverage_area: '', parent_dist_id: '',
         region_code: '', region_name: '',
         province_code: '', province_name: '',
@@ -443,6 +444,17 @@ export default function DistributorsPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Email address</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    placeholder="Optional"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Mobile <span className="text-[#C9A84C]">*</span></label>
                   <input

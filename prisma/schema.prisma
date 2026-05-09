@@ -141,6 +141,11 @@ model Product {
   image_url        String?
   is_active        Boolean                 @default(true)
   created_at       DateTime                @default(now())
+  cost_price       Decimal                 @default(0) @db.Decimal(10, 2)
+  regional_price   Decimal                 @default(0) @db.Decimal(10, 2)
+  provincial_price Decimal                 @default(0) @db.Decimal(10, 2)
+  city_price       Decimal                 @default(0) @db.Decimal(10, 2)
+  reseller_price   Decimal                 @default(0) @db.Decimal(10, 2)
   inventory        Inventory[]
   order_items      OrderItem[]
   package_products PackageProduct[]

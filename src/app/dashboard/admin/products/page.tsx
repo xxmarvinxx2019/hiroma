@@ -1,20 +1,25 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 
 // ============================================================
 // TYPES
 // ============================================================
 
 interface Product {
-  id: string
-  name: string
-  description: string | null
-  type: string
-  price: number
-  image_url: string | null
-  is_active: boolean
-  created_at: string
+  id:               string
+  name:             string
+  description:      string | null
+  type:             string
+  cost_price:       number
+  regional_price:   number
+  provincial_price: number
+  city_price:       number
+  reseller_price:   number
+  image_url:        string | null
+  is_active:        boolean
+  created_at:       string
 }
 
 // ============================================================
@@ -25,41 +30,60 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'physical' | 'digital'>('all')
+  const [page, setPage] = useState(1)
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [stats, setStats] = useState({ total: 0, physical: 0, digital: 0, active: 0, inactive: 0 })
   const [showForm, setShowForm] = useState(false)
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [form, setForm] = useState({
-    name: '',
-    description: '',
-    type: 'physical',
-    price: '',
-    image_url: '',
+    name:             '',
+    description:      '',
+    type:             'physical',
+    cost_price:       '',
+    regional_price:   '',
+    provincial_price: '',
+    city_price:       '',
+    reseller_price:   '',
+    image_url:        '',
   })
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
 
-  const fetchProducts = () => {
+  // Debounce search
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  useEffect(() => { setPage(1) }, [typeFilter, search])
+
+  const fetchProducts = useCallback(() => {
     setLoading(true)
-    fetch('/api/admin/products')
+    const params = new URLSearchParams({
+      page: String(page), pageSize: '15',
+      ...(typeFilter !== 'all' && { type: typeFilter }),
+      ...(search && { search }),
+    })
+    fetch(`/api/admin/products?${params}`)
       .then((r) => r.json())
-      .then((data) => setProducts(data.products || []))
-      .finally(() => setLoading(false))
-  }
+      .then((data) => {
+        setProducts(data.products || [])
+        if (data.meta)  setMeta(data.meta)
+        if (data.stats) setStats(data.stats)
+        setLoading(false)
+      })
+  }, [page, typeFilter, search])
 
-  useEffect(() => { fetchProducts() }, [])
+  useEffect(() => { fetchProducts() }, [fetchProducts])
 
-  const filtered = products.filter((p) => {
-    const matchType = typeFilter === 'all' || p.type === typeFilter
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.description || '').toLowerCase().includes(search.toLowerCase())
-    return matchType && matchSearch
-  })
+  const filtered = products
 
   const openCreate = () => {
     setEditProduct(null)
-    setForm({ name: '', description: '', type: 'physical', price: '', image_url: '' })
+    setForm({ name: '', description: '', type: 'physical', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '' })
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -68,11 +92,15 @@ export default function ProductsPage() {
   const openEdit = (p: Product) => {
     setEditProduct(p)
     setForm({
-      name: p.name,
-      description: p.description || '',
-      type: p.type,
-      price: String(p.price),
-      image_url: p.image_url || '',
+      name:             p.name,
+      description:      p.description      || '',
+      type:             p.type,
+      cost_price:       String(p.cost_price),
+      regional_price:   String(p.regional_price),
+      provincial_price: String(p.provincial_price),
+      city_price:       String(p.city_price),
+      reseller_price:   String(p.reseller_price),
+      image_url:        p.image_url         || '',
     })
     setFormError('')
     setFormSuccess('')
@@ -80,23 +108,21 @@ export default function ProductsPage() {
   }
 
   const handleSubmit = async () => {
-    if (!form.name || !form.price) {
-      setFormError('Name and price are required.')
+    if (!form.name || !form.reseller_price) {
+      setFormError('Name and reseller price are required.')
       return
     }
     setFormLoading(true)
     setFormError('')
     setFormSuccess('')
 
-    const url = editProduct
-      ? `/api/admin/products/${editProduct.id}`
-      : '/api/admin/products'
-    const method = editProduct ? 'PUT' : 'POST'
+    const url    = '/api/admin/products'
+    const method = editProduct ? 'PATCH' : 'POST'
 
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, price: parseFloat(form.price) }),
+      body: JSON.stringify({ ...(editProduct && { id: editProduct.id }), ...form }),
     })
     const data = await res.json()
 
@@ -111,17 +137,14 @@ export default function ProductsPage() {
   }
 
   const handleToggleActive = async (id: string, current: boolean) => {
-    await fetch(`/api/admin/products/${id}`, {
+    await fetch('/api/admin/products', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !current }),
+      body: JSON.stringify({ id, is_active: !current }),
     })
     fetchProducts()
   }
 
-  const totalActive = products.filter((p) => p.is_active).length
-  const totalPhysical = products.filter((p) => p.type === 'physical').length
-  const totalDigital = products.filter((p) => p.type === 'digital').length
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -143,21 +166,18 @@ export default function ProductsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {[
-          { label: 'Total products', value: products.length, accent: 'navy' },
-          { label: 'Physical', value: totalPhysical, accent: 'gold' },
-          { label: 'Digital', value: totalDigital, accent: 'navy' },
+          { label: 'Total',    value: stats.total,    accent: '#0D1B3E' },
+          { label: 'Physical', value: stats.physical, accent: '#0D1B3E' },
+          { label: 'Digital',  value: stats.digital,  accent: '#2563eb' },
+          { label: 'Active',   value: stats.active,   accent: '#1a7a4a' },
+          { label: 'Inactive', value: stats.inactive, accent: '#e05252' },
         ].map((s) => (
-          <div
-            key={s.label}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent === 'gold' ? '#C9A84C' : '#0D1B3E'}` }}
-          >
+          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
+            style={{ borderTop: `2px solid ${s.accent}` }}>
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent === 'gold' ? '#C9A84C' : '#0D1B3E' }}>
-              {s.value}
-            </p>
+            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
           </div>
         ))}
       </div>
@@ -168,8 +188,8 @@ export default function ProductsPage() {
         {/* Search & Filter */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
           <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search products..."
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
@@ -234,9 +254,10 @@ export default function ProductsPage() {
                   {p.type === 'physical' ? '📦 Physical' : '💾 Digital'}
                 </span>
               </span>
-              <p className="text-xs font-semibold text-[#C9A84C]">
-                ₱{Number(p.price).toLocaleString()}
-              </p>
+              <div>
+                <p className="text-xs font-semibold text-[#C9A84C]">₱{Number(p.reseller_price).toLocaleString()} <span className="text-gray-400 font-normal">SRP</span></p>
+                <p className="text-[10px] text-gray-400">Cost: ₱{Number(p.cost_price).toLocaleString()}</p>
+              </div>
               <span>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   p.is_active
@@ -268,19 +289,20 @@ export default function ProductsPage() {
             </div>
           ))
         )}
+        <Pagination meta={meta} onPageChange={setPage} />
       </div>
 
       {/* Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4 py-6">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-full">
             <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">
                 {editProduct ? 'Edit product' : 'Add new product'}
               </h2>
               <button onClick={() => setShowForm(false)} className="text-white/50 hover:text-white text-lg cursor-pointer">✕</button>
             </div>
-            <div className="p-6 flex flex-col gap-4">
+            <div className="p-6 flex flex-col gap-4 overflow-y-auto">
 
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Product name <span className="text-[#C9A84C]">*</span></label>
@@ -303,27 +325,46 @@ export default function ProductsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Type <span className="text-[#C9A84C]">*</span></label>
-                  <select
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value })}
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                  >
-                    <option value="physical">Physical</option>
-                    <option value="digital">Digital</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Price (PHP) <span className="text-[#C9A84C]">*</span></label>
-                  <input
-                    type="number"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
-                    placeholder="e.g. 850"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                  />
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Type <span className="text-[#C9A84C]">*</span></label>
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                >
+                  <option value="physical">Physical</option>
+                  <option value="digital">Digital</option>
+                </select>
+              </div>
+
+              {/* Price points */}
+              <div className="bg-[#F0F2F8] rounded-xl p-3 space-y-3">
+                <p className="text-xs font-medium text-[#0D1B3E]">Price Points</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Cost Price',       key: 'cost_price',       hint: 'Production/source cost' },
+                    { label: 'Regional Price',   key: 'regional_price',   hint: 'Regional distributor pays' },
+                    { label: 'Provincial Price', key: 'provincial_price', hint: 'Provincial distributor pays' },
+                    { label: 'City Price',       key: 'city_price',       hint: 'City distributor pays' },
+                    { label: 'Reseller Price',   key: 'reseller_price',   hint: 'SRP / reseller reference *' },
+                  ].map((f) => (
+                    <div key={f.key} className={f.key === 'reseller_price' ? 'col-span-2' : ''}>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        {f.label} {f.key === 'reseller_price' && <span className="text-[#C9A84C]">*</span>}
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">₱</span>
+                        <input
+                          type="number" min={0}
+                          value={form[f.key as keyof typeof form]}
+                          onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                          placeholder="0.00"
+                          className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg pl-6 pr-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                        />
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{f.hint}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 

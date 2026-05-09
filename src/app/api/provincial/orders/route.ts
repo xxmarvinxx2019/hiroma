@@ -2,21 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-// ── Resolve provincial's supplier: Regional → Admin ──
+// ── Resolve provincial's supplier ──
+// Priority:
+// 1. Direct parent (regional via parent_dist_id)
+// 2. Regional covering same region (by region_code)
+// 3. Admin fallback
 async function resolveSupplier(provincialUserId: string) {
   const profile = await prisma.distributorProfile.findUnique({
     where: { user_id: provincialUserId },
-    include: {
+    select: {
+      region_code:    true,
+      parent_dist_id: true,
       parent: {
         include: {
-          user: { select: { id: true, full_name: true, username: true, role: true } },
+          user: { select: { id: true, full_name: true, username: true } },
         },
       },
     },
   })
 
-  // Try regional parent
-  if (profile?.parent && profile.parent.dist_level === 'regional' && profile.parent.is_active) {
+  // 1. Direct parent set — regional
+  if (profile?.parent?.dist_level === 'regional' && profile.parent.is_active) {
     return {
       id:        profile.parent.user.id,
       full_name: profile.parent.user.full_name,
@@ -25,7 +31,23 @@ async function resolveSupplier(provincialUserId: string) {
     }
   }
 
-  // Fallback to admin
+  // 2. No direct parent — find regional covering same region
+  if (profile?.region_code) {
+    const regional = await prisma.distributorProfile.findFirst({
+      where: { dist_level: 'regional', region_code: profile.region_code, is_active: true },
+      include: { user: { select: { id: true, full_name: true, username: true } } },
+    })
+    if (regional) {
+      return {
+        id:        regional.user.id,
+        full_name: regional.user.full_name,
+        username:  regional.user.username,
+        level:     'Regional Distributor',
+      }
+    }
+  }
+
+  // 3. Fallback to admin
   const admin = await prisma.user.findFirst({
     where: { role: 'admin' },
     select: { id: true, full_name: true, username: true },
@@ -141,7 +163,7 @@ export async function POST(req: NextRequest) {
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, price: true },
+      select: { id: true, price: true, provincial_price: true },
     })
 
     if (products.length !== productIds.length)
@@ -152,7 +174,7 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.price)
+      const unit_price = item.unit_price ?? Number(product.provincial_price || product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }

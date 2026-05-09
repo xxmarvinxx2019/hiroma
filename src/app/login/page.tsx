@@ -10,8 +10,8 @@ type Role = 'regional' | 'provincial' | 'city' | 'reseller'
 const roles: { value: Role; label: string; sub: string; icon: string }[] = [
   { value: 'reseller', label: 'Reseller', sub: 'MLM member', icon: '👤' },
   { value: 'city', label: 'City dist.', sub: 'Register resellers', icon: '🏙️' },
-  { value: 'regional', label: 'Regional', sub: 'Distribution', icon: '🗺️' },
   { value: 'provincial', label: 'Provincial', sub: 'Distribution', icon: '🏛️' },
+  { value: 'regional', label: 'Regional', sub: 'Distribution', icon: '🗺️' },
 ]
 
 export default function LoginPage() {
