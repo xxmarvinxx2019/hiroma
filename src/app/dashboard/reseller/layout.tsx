@@ -9,87 +9,73 @@ const navItems = [
   {
     section: 'Main',
     items: [
-      { label: 'Dashboard', href: '/dashboard/admin', icon: '📊' },
-      { label: 'Distributors', href: '/dashboard/admin/distributors', icon: '🗺️' },
-      { label: 'Resellers', href: '/dashboard/admin/resellers', icon: '👥' },
+      { label: 'Dashboard',     href: '/dashboard/reseller' },
     ],
   },
   {
-    section: 'Catalog',
+    section: 'My Network',
     items: [
-      { label: 'Products', href: '/dashboard/admin/products', icon: '🧴' },
-      { label: 'Packages', href: '/dashboard/admin/packages', icon: '📦' },
-      { label: 'PIN Manager', href: '/dashboard/admin/pins', icon: '🔑' },
-      { label: 'Inventory', href: '/dashboard/admin/inventory', icon: '🏭' },
+      { label: 'Binary Tree',   href: '/dashboard/reseller/tree' },
+      { label: 'Genealogy',     href: '/dashboard/reseller/genealogy' },
+      { label: 'Referral Link', href: '/dashboard/reseller/referral' },
     ],
   },
   {
-    section: 'Finance',
+    section: 'Earnings',
     items: [
-      { label: 'Orders', href: '/dashboard/admin/orders', icon: '🛒' },
-      { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
-      { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
-      { label: 'Reports', href: '/dashboard/admin/reports', icon: '📈' },
+      { label: 'Wallet',         href: '/dashboard/reseller/wallet' },
+      { label: 'Commissions',    href: '/dashboard/reseller/commissions' },
+      { label: 'Pairing Points', href: '/dashboard/reseller/points' },
     ],
   },
   {
-    section: 'System',
+    section: 'Orders',
     items: [
-      { label: 'Tier settings', href: '/dashboard/admin/tiers', icon: '⚙️' },
-      { label: 'Settings', href: '/dashboard/admin/settings', icon: '🔧' },
+      { label: 'Order History',  href: '/dashboard/reseller/orders' },
+    ],
+  },
+  {
+    section: 'Account',
+    items: [
+      { label: 'Profile',        href: '/dashboard/reseller/profile' },
     ],
   },
 ]
 
 function Sidebar({
   user,
-  pendingPayouts,
   pathname,
   onClose,
   onLogout,
 }: {
   user: { full_name: string; username: string } | null
-  pendingPayouts: number
   pathname: string
   onClose: () => void
   onLogout: () => void
 }) {
   const isActive = (href: string) => {
-    if (href === '/dashboard/admin') return pathname === href
+    if (href === '/dashboard/reseller') return pathname === href
     return pathname.startsWith(href)
   }
 
   return (
-    <div
-      className="bg-[#0D1B3E] flex flex-col w-56"
-      style={{ height: '100vh' }}
-    >
-      {/* ── Logo — never moves ── */}
+    <div className="bg-[#0D1B3E] flex flex-col w-56" style={{ height: '100vh' }}>
+
+      {/* Logo */}
       <div
         className="px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0"
         style={{ height: '56px' }}
       >
         <div className="w-8 h-8 relative flex-shrink-0">
-          <Image
-            src="/hiroma-logo.jpg"
-            alt="Hiroma"
-            fill
-            className="object-contain rounded-md"
-          />
+          <Image src="/hiroma-logo.jpg" alt="Hiroma" fill className="object-contain rounded-md" />
         </div>
-        <span className="text-white font-medium text-sm tracking-[0.2em]">
-          HIROMA
-        </span>
+        <span className="text-white font-medium text-sm tracking-[0.2em]">HIROMA</span>
       </div>
 
-      {/* ── Nav — scrolls if needed, hidden scrollbar ── */}
+      {/* Nav */}
       <nav
         className="flex-1 py-3 px-3"
-        style={{
-          overflowY: 'auto',
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-        }}
+        style={{ overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
         {navItems.map((group) => (
@@ -108,36 +94,24 @@ function Sidebar({
                     : 'text-white/50 hover:text-white hover:bg-white/5'
                 }`}
               >
-                <span className="text-base">{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
-                {item.badge && pendingPayouts > 0 && (
-                  <span className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                    {pendingPayouts}
-                  </span>
-                )}
               </Link>
             ))}
           </div>
         ))}
       </nav>
 
-      {/* ── User Footer — always visible at bottom ── */}
-      <div
-        className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0"
-      >
+      {/* User Footer */}
+      <div className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0">
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
             <span className="text-[#C9A84C] text-xs font-bold">
-              {user?.full_name?.charAt(0) || 'A'}
+              {user?.full_name?.charAt(0) || 'R'}
             </span>
           </div>
           <div className="overflow-hidden">
-            <p className="text-white text-xs font-medium truncate">
-              {user?.full_name || 'Admin'}
-            </p>
-            <p className="text-white/40 text-xs truncate">
-              @{user?.username || 'hiroadmin'}
-            </p>
+            <p className="text-white text-xs font-medium truncate">{user?.full_name || 'Reseller'}</p>
+            <p className="text-white/40 text-xs truncate">@{user?.username || ''}</p>
           </div>
         </div>
         <button
@@ -151,16 +125,11 @@ function Sidebar({
   )
 }
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function ResellerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
+  const router   = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
-  const [pendingPayouts, setPendingPayouts] = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -168,13 +137,6 @@ export default function AdminLayout({
       .then((data) => { if (data.user) setUser(data.user) })
       .catch(() => router.push('/login'))
   }, [router])
-
-  useEffect(() => {
-    fetch('/api/admin/payouts/pending-count')
-      .then((res) => res.json())
-      .then((data) => setPendingPayouts(data.count || 0))
-      .catch(() => {})
-  }, [])
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -185,29 +147,17 @@ export default function AdminLayout({
     navItems
       .flatMap((g) => g.items)
       .find((i) =>
-        i.href === '/dashboard/admin'
+        i.href === '/dashboard/reseller'
           ? pathname === i.href
           : pathname.startsWith(i.href)
       )?.label || 'Dashboard'
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        overflow: 'hidden',
-        background: '#F0F2F8',
-      }}
-    >
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#F0F2F8' }}>
+
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar
-          user={user}
-          pendingPayouts={pendingPayouts}
-          pathname={pathname}
-          onClose={() => {}}
-          onLogout={handleLogout}
-        />
+        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -218,27 +168,14 @@ export default function AdminLayout({
             onClick={() => setSidebarOpen(false)}
           />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar
-              user={user}
-              pendingPayouts={pendingPayouts}
-              pathname={pathname}
-              onClose={() => setSidebarOpen(false)}
-              onLogout={handleLogout}
-            />
+            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} />
           </div>
         </>
       )}
 
       {/* Main */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 0,
-          overflow: 'hidden',
-        }}
-      >
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+
         {/* Topbar */}
         <header
           className="bg-[#0D1B3E] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
@@ -257,21 +194,12 @@ export default function AdminLayout({
           </div>
 
           <div className="flex items-center gap-3">
-            {pendingPayouts > 0 && (
-              <Link
-                href="/dashboard/admin/payouts"
-                className="flex items-center gap-1.5 bg-[#C9A84C]/15 border border-[#C9A84C]/30 text-[#C9A84C] text-xs px-3 py-1.5 rounded-full hover:bg-[#C9A84C]/25 transition-colors"
-              >
-                <span>💸</span>
-                <span>{pendingPayouts} pending</span>
-              </Link>
-            )}
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
-              ADMIN
+              RESELLER
             </span>
             <div className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center">
               <span className="text-[#C9A84C] text-xs font-bold">
-                {user?.full_name?.charAt(0) || 'A'}
+                {user?.full_name?.charAt(0) || 'R'}
               </span>
             </div>
           </div>
