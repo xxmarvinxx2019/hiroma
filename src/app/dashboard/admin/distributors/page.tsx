@@ -1,11 +1,20 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 import Link from 'next/link'
 
 // ============================================================
 // TYPES
 // ============================================================
+
+interface AssignParentTarget {
+  user_id: string
+  full_name: string
+  username: string
+  dist_level: string
+  profile_id: string
+}
 
 interface Distributor {
   id: string
@@ -16,10 +25,19 @@ interface Distributor {
   status: string
   created_at: string
   distributor_profile: {
-    dist_level: string
+    id:            string
+    dist_level:    string
     coverage_area: string
-    is_active: boolean
+    is_active:     boolean
     contract_signed_at: string | null
+    region_name:    string | null
+    province_name:  string | null
+    city_muni_name: string | null
+    parent: {
+      user: { full_name: string; username: string }
+      dist_level: string
+      coverage_area: string
+    } | null
   } | null
 }
 
@@ -47,6 +65,14 @@ export default function DistributorsPage() {
   const [distributors, setDistributors] = useState<Distributor[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'regional' | 'provincial' | 'city'>('all')
+  const [page, setPage] = useState(1)
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [assignTarget, setAssignTarget] = useState<AssignParentTarget | null>(null)
+  const [assignParentId, setAssignParentId] = useState('')
+  const [assignOptions, setAssignOptions] = useState<{ id: string; full_name: string; username: string; dist_level: string; coverage_area: string }[]>([])
+  const [assignSaving, setAssignSaving] = useState(false)
+  const [assignError, setAssignError] = useState('')
+  const [assignSuccess, setAssignSuccess] = useState('')
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
@@ -57,32 +83,163 @@ export default function DistributorsPage() {
     address: '',
     dist_level: 'city',
     coverage_area: '',
+    parent_dist_id: '',
+    region_code: '', region_name: '',
+    province_code: '', province_name: '',
+    city_muni_code: '', city_muni_name: '',
   })
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
 
-  const fetchDistributors = () => {
-    setLoading(true)
-    fetch('/api/admin/distributors')
+  const [parentOptions, setParentOptions] = useState<{ id: string; full_name: string; username: string; dist_level: string; coverage_area: string }[]>([])
+
+  // PSGC location state
+  const [regions, setRegions]         = useState<{ code: string; name: string }[]>([])
+  const [provinces, setProvinces]     = useState<{ code: string; name: string }[]>([])
+  const [cityMunis, setCityMunis]     = useState<{ code: string; name: string }[]>([])
+  const [loadingProv, setLoadingProv] = useState(false)
+  const [loadingCity, setLoadingCity] = useState(false)
+
+  // Load regions on mount
+  useEffect(() => {
+    fetch('https://psgc.gitlab.io/api/regions/')
       .then((r) => r.json())
-      .then((data) => setDistributors(data.distributors || []))
-      .finally(() => setLoading(false))
+      .then((data) => setRegions(data.map((r: { code: string; name: string }) => ({ code: r.code, name: r.name })).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))))
+      .catch(() => {})
+  }, [])
+
+  // Load provinces when region changes
+  useEffect(() => {
+    if (!form.region_code) { setProvinces([]); setCityMunis([]); return }
+    setLoadingProv(true)
+    fetch(`https://psgc.gitlab.io/api/regions/${form.region_code}/provinces/`)
+      .then((r) => r.json())
+      .then((data) => setProvinces(data.map((p: { code: string; name: string }) => ({ code: p.code, name: p.name })).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))))
+      .catch(() => setProvinces([]))
+      .finally(() => setLoadingProv(false))
+    setForm((f) => ({ ...f, province_code: '', province_name: '', city_muni_code: '', city_muni_name: '' }))
+    setCityMunis([])
+  }, [form.region_code])
+
+  // Load cities when province changes
+  useEffect(() => {
+    if (!form.province_code) { setCityMunis([]); return }
+    setLoadingCity(true)
+    fetch(`https://psgc.gitlab.io/api/provinces/${form.province_code}/cities-municipalities/`)
+      .then((r) => r.json())
+      .then((data) => setCityMunis(data.map((c: { code: string; name: string }) => ({ code: c.code, name: c.name })).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))))
+      .catch(() => setCityMunis([]))
+      .finally(() => setLoadingCity(false))
+    setForm((f) => ({ ...f, city_muni_code: '', city_muni_name: '' }))
+  }, [form.province_code])
+
+  // Fetch parent options when level changes
+  useEffect(() => {
+    if (form.dist_level === 'regional') {
+      setParentOptions([])
+      setForm((f) => ({ ...f, parent_dist_id: '' }))
+      return
+    }
+    const parentLevel = form.dist_level === 'provincial' ? 'regional' : 'provincial,regional'
+    fetch(`/api/admin/distributors?parent_level=${parentLevel}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const filtered = (data.distributors || []).filter((d: { distributor_profile?: { dist_level: string } }) => {
+          if (form.dist_level === 'provincial') return d.distributor_profile?.dist_level === 'regional'
+          return ['provincial', 'regional'].includes(d.distributor_profile?.dist_level || '')
+        })
+        setParentOptions(filtered// eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((d: any) => ({
+          id: d.id,
+          full_name: d.full_name,
+          username: d.username,
+          dist_level: d.distributor_profile?.dist_level || '',
+          coverage_area: d.distributor_profile?.coverage_area || '',
+        })))
+      })
+    setForm((f) => ({ ...f, parent_dist_id: '' }))
+  }, [form.dist_level])
+
+  const openAssignModal = (dist: Distributor) => {
+    setAssignTarget({
+      user_id:    dist.id,
+      full_name:  dist.full_name,
+      username:   dist.username,
+      dist_level: dist.distributor_profile?.dist_level || '',
+      profile_id: dist.distributor_profile?.id || '',
+    })
+    setAssignParentId('')
+    setAssignError('')
+    setAssignSuccess('')
+    // Load eligible parents
+    const level = dist.distributor_profile?.dist_level
+    const parentLevel = level === 'provincial' ? 'regional' : level === 'city' ? 'provincial,regional' : ''
+    if (!parentLevel) return
+    fetch(`/api/admin/distributors?parent_level=${parentLevel}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setAssignOptions((data.distributors || [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .filter((d: any) => d.id !== dist.id)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((d: any) => ({
+            id:            d.distributor_profile?.id || '', // profile id for parent_dist_id
+            full_name:     d.full_name,
+            username:      d.username,
+            dist_level:    d.distributor_profile?.dist_level    || '',
+            coverage_area: d.distributor_profile?.coverage_area || '',
+          })))
+      })
   }
 
-  useEffect(() => { fetchDistributors() }, [])
+  const handleAssignParent = async () => {
+    if (!assignTarget) return
+    setAssignSaving(true)
+    setAssignError('')
+    setAssignSuccess('')
+    const res = await fetch('/api/admin/distributors', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        distributor_id: assignTarget.user_id,
+        parent_dist_id: assignParentId || null,
+      }),
+    })
+    const data = await res.json()
+    setAssignSaving(false)
+    if (res.ok) {
+      setAssignSuccess(data.message || 'Parent assigned successfully.')
+      fetchDistributors()
+    } else {
+      setAssignError(data.error || 'Something went wrong.')
+    }
+  }
 
-  const filtered = distributors.filter((d) => {
-    const matchLevel = filter === 'all' || d.distributor_profile?.dist_level === filter
-    const matchSearch =
-      d.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      d.username.toLowerCase().includes(search.toLowerCase()) ||
-      d.distributor_profile?.coverage_area.toLowerCase().includes(search.toLowerCase())
-    return matchLevel && matchSearch
-  })
+  useEffect(() => { setPage(1) }, [filter, search])
+
+  const fetchDistributors = useCallback(() => {
+    setLoading(true)
+    const params = new URLSearchParams({
+      page: String(page), pageSize: '15',
+      ...(filter !== 'all' && { level: filter }),
+      ...(search && { search }),
+    })
+    fetch(`/api/admin/distributors?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setDistributors(data.distributors || [])
+        if (data.meta) setMeta(data.meta)
+        setLoading(false)
+      })
+  }, [filter, search, page])
+
+  useEffect(() => { fetchDistributors() }, [fetchDistributors])
+
+  const filtered = distributors
 
   const handleFormSubmit = async () => {
-    if (!form.full_name || !form.username || !form.mobile || !form.password || !form.coverage_area) {
+    if (!form.full_name || !form.username || !form.mobile || !form.password || !form.region_code) {
       setFormError('Please fill in all required fields.')
       return
     }
@@ -101,7 +258,13 @@ export default function DistributorsPage() {
       setFormError(data.error || 'Failed to create distributor.')
     } else {
       setFormSuccess('Distributor registered successfully!')
-      setForm({ full_name: '', username: '', mobile: '', password: '', address: '', dist_level: 'city', coverage_area: '' })
+      setForm({
+        full_name: '', username: '', mobile: '', password: '', address: '',
+        dist_level: 'city', coverage_area: '', parent_dist_id: '',
+        region_code: '', region_name: '',
+        province_code: '', province_name: '',
+        city_muni_code: '', city_muni_name: '',
+      })
       fetchDistributors()
       setTimeout(() => { setShowForm(false); setFormSuccess('') }, 1500)
     }
@@ -178,8 +341,8 @@ export default function DistributorsPage() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
-          {['Distributor', 'Level', 'Coverage area', 'Status', 'Registered'].map((h) => (
+        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
+          {['Distributor', 'Level', 'Coverage area', 'Status', 'Registered', 'Parent'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">
               {h}
             </p>
@@ -200,7 +363,7 @@ export default function DistributorsPage() {
           filtered.map((dist) => (
             <div
               key={dist.id}
-              className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
+              className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
             >
               <div>
                 <p className="text-xs font-medium text-[#0D1B3E]">{dist.full_name}</p>
@@ -227,9 +390,20 @@ export default function DistributorsPage() {
               <p className="text-xs text-gray-400">
                 {new Date(dist.created_at).toLocaleDateString('en-PH')}
               </p>
+              <div>
+                {dist.distributor_profile?.dist_level !== 'regional' && (
+                  <button
+                    onClick={() => openAssignModal(dist)}
+                    className="text-xs text-[#C9A84C] hover:underline whitespace-nowrap"
+                  >
+                    {dist.distributor_profile?.parent ? 'Change Parent' : 'Assign Parent'}
+                  </button>
+                )}
+              </div>
             </div>
           ))
         )}
+        <Pagination meta={meta} onPageChange={setPage} />
       </div>
 
       {/* Register Form Modal */}
@@ -303,15 +477,75 @@ export default function DistributorsPage() {
                     <option value="city">City</option>
                   </select>
                 </div>
+                {/* Region */}
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Coverage area <span className="text-[#C9A84C]">*</span></label>
-                  <input
-                    value={form.coverage_area}
-                    onChange={(e) => setForm({ ...form, coverage_area: e.target.value })}
-                    placeholder="e.g. Region VII / Cebu / Iloilo"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                  />
+                  <label className="block text-xs text-gray-400 mb-1">Region <span className="text-[#C9A84C]">*</span></label>
+                  <select
+                    value={form.region_code}
+                    onChange={(e) => {
+                      const selected = regions.find((r) => r.code === e.target.value)
+                      setForm((f) => ({ ...f, region_code: e.target.value, region_name: selected?.name || '' }))
+                    }}
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                  >
+                    <option value="">Select region...</option>
+                    {regions.map((r) => (
+                      <option key={r.code} value={r.code}>{r.name}</option>
+                    ))}
+                  </select>
                 </div>
+
+                {/* Province — shown for provincial and city */}
+                {(form.dist_level === 'provincial' || form.dist_level === 'city') && (
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Province <span className="text-[#C9A84C]">*</span></label>
+                    <select
+                      value={form.province_code}
+                      onChange={(e) => {
+                        const selected = provinces.find((p) => p.code === e.target.value)
+                        setForm((f) => ({ ...f, province_code: e.target.value, province_name: selected?.name || '' }))
+                      }}
+                      disabled={!form.region_code || loadingProv}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"
+                    >
+                      <option value="">{loadingProv ? 'Loading...' : 'Select province...'}</option>
+                      {provinces.map((p) => (
+                        <option key={p.code} value={p.code}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* City/Municipality — shown for city only */}
+                {form.dist_level === 'city' && (
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">City / Municipality <span className="text-[#C9A84C]">*</span></label>
+                    <select
+                      value={form.city_muni_code}
+                      onChange={(e) => {
+                        const selected = cityMunis.find((c) => c.code === e.target.value)
+                        setForm((f) => ({ ...f, city_muni_code: e.target.value, city_muni_name: selected?.name || '' }))
+                      }}
+                      disabled={!form.province_code || loadingCity}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"
+                    >
+                      <option value="">{loadingCity ? 'Loading...' : 'Select city/municipality...'}</option>
+                      {cityMunis.map((c) => (
+                        <option key={c.code} value={c.code}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Coverage area preview */}
+                {form.region_name && (
+                  <div className="bg-[#e8f7ef] rounded-lg px-3 py-2">
+                    <p className="text-xs text-gray-400 mb-0.5">Coverage area (auto-generated)</p>
+                    <p className="text-xs font-medium text-[#1a7a4a]">
+                      {[form.city_muni_name, form.province_name, form.region_name].filter(Boolean).join(', ')}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -355,6 +589,67 @@ export default function DistributorsPage() {
         </div>
       )}
 
+      {/* Assign Parent Modal */}
+      {assignTarget && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-[#0D1B3E]">Assign Parent Distributor</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {assignTarget.full_name} (@{assignTarget.username}) · {assignTarget.dist_level}
+                </p>
+              </div>
+              <button onClick={() => setAssignTarget(null)} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Select {assignTarget.dist_level === 'provincial' ? 'Regional' : 'Provincial or Regional'} Parent
+                </label>
+                <select
+                  value={assignParentId}
+                  onChange={(e) => setAssignParentId(e.target.value)}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                >
+                  <option value="">— Remove parent (use location matching) —</option>
+                  {assignOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.full_name} (@{o.username}) · {o.coverage_area} [{o.dist_level}]
+                    </option>
+                  ))}
+                </select>
+                {assignOptions.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    No eligible parent distributors found.
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-[#F0F2F8] rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Selecting <span className="font-medium text-[#0D1B3E]">— Remove parent —</span> will clear the explicit assignment.
+                  The system will automatically route orders based on location matching.
+                </p>
+              </div>
+
+              {assignSuccess && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-3 py-2 rounded-lg">{assignSuccess}</p>}
+              {assignError   && <p className="text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{assignError}</p>}
+
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setAssignTarget(null)}
+                  className="flex-1 bg-[#F0F2F8] text-gray-500 text-sm py-2 rounded-lg hover:bg-[#e4e6ef] transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleAssignParent} disabled={assignSaving}
+                  className="flex-1 bg-[#0D1B3E] text-white text-sm py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50 font-medium">
+                  {assignSaving ? 'Saving...' : 'Save Assignment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

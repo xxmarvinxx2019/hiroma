@@ -268,7 +268,7 @@ export default function ResellerDashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'View Tree',      href: '/dashboard/reseller/tree',       icon: '🌳' },
-          { label: 'Referral Link',  href: '/dashboard/reseller/referral',   icon: '🔗' },
+          { label: 'Genealogy',      href: '/dashboard/reseller/genealogy',  icon: '👥' },
           { label: 'Request Payout', href: '/dashboard/reseller/wallet',     icon: '💸' },
           { label: 'Order History',  href: '/dashboard/reseller/orders',     icon: '🛒' },
         ].map((q) => (
