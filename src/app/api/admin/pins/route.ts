@@ -11,30 +11,68 @@ function generatePinCode(packageName: string): string {
   return `${prefix}-${year}-${tier}-${random}`
 }
 
-// ── GET all PINs ──
-export async function GET() {
+// ── GET all PINs with pagination, search, status filter ──
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const pins = await prisma.pin.findMany({
-      orderBy: { created_at: 'desc' },
-      take: 100,
-      select: {
-        id: true,
-        pin_code: true,
-        status: true,
-        created_at: true,
-        used_at: true,
-        package: { select: { name: true, price: true } },
-        city_distributor: { select: { full_name: true, username: true } },
-        used_by_user: { select: { full_name: true, username: true } },
-      },
-    })
+    const { searchParams } = req.nextUrl
+    const status   = searchParams.get('status')   || 'all'
+    const search   = searchParams.get('search')   || ''
+    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
-    return NextResponse.json({ pins })
+    const where: any = {
+      ...(status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          { pin_code:         { contains: search, mode: 'insensitive' } },
+          { city_distributor: { full_name: { contains: search, mode: 'insensitive' } } },
+          { city_distributor: { username:  { contains: search, mode: 'insensitive' } } },
+          { used_by_user:     { full_name: { contains: search, mode: 'insensitive' } } },
+        ],
+      }),
+    }
+
+    const [total, pins, summaryRaw] = await Promise.all([
+      prisma.pin.count({ where }),
+
+      prisma.pin.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true, pin_code: true, status: true,
+          created_at: true, used_at: true,
+          package:          { select: { name: true, price: true } },
+          city_distributor: { select: { full_name: true, username: true } },
+          used_by_user:     { select: { full_name: true, username: true } },
+        },
+      }),
+
+      prisma.pin.groupBy({
+        by: ['status'],
+        _count: { status: true },
+      }),
+    ])
+
+    const summary = { total: 0, unused: 0, used: 0, expired: 0 }
+    for (const row of summaryRaw) {
+      summary.total += row._count.status
+      if (row.status === 'unused')  summary.unused  = row._count.status
+      if (row.status === 'used')    summary.used    = row._count.status
+      if (row.status === 'expired') summary.expired = row._count.status
+    }
+
+    return NextResponse.json({
+      pins,
+      summary,
+      meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    })
   } catch (error) {
     console.error('[GET PINS ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

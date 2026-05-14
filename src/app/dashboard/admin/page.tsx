@@ -18,6 +18,18 @@ interface DashboardStats {
   activePins: number
   totalPinRevenue: number
   totalPinsSold: number
+  totalUnitsSold: number
+  totalRevenue: number
+  totalCost: number
+  grossProfit: number
+  topProducts: {
+    product_id: string
+    name: string
+    units_sold: number
+    revenue: number
+    cost: number
+    profit: number
+  }[]
 }
 
 interface RecentReseller {
@@ -103,7 +115,7 @@ export default function AdminDashboardPage() {
   const [distSales, setDistSales] = useState<DistributorSales[]>([])
   const [packageSales, setPackageSales] = useState<PackageSales[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'overview' | 'pin-sales'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'pin-sales' | 'products'>('overview')
 
   useEffect(() => {
     Promise.all([
@@ -166,8 +178,9 @@ export default function AdminDashboardPage() {
       {/* ── Tabs ── */}
       <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         {[
-          { key: 'overview', label: 'Overview' },
-          { key: 'pin-sales', label: '💰 PIN Sales' },
+          { key: 'overview',  label: 'Overview' },
+          { key: 'pin-sales',  label: '💰 PIN Sales' },
+          { key: 'products',   label: '📦 Product Sales' },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -445,6 +458,77 @@ export default function AdminDashboardPage() {
               </div>
 
             </div>
+          </div>
+        </>
+      )}
+
+      {/* PRODUCT SALES TAB */}
+      {activeTab === 'products' && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            {[
+              { label: 'Total Units Sold', value: (stats?.totalUnitsSold || 0).toLocaleString(),      accent: '#0D1B3E' },
+              { label: 'Total Revenue',    value: `₱${(stats?.totalRevenue || 0).toLocaleString()}`,  accent: '#2563eb' },
+              { label: 'Total Cost',       value: `₱${(stats?.totalCost    || 0).toLocaleString()}`,  accent: '#e05252' },
+              { label: 'Gross Profit',     value: `₱${(stats?.grossProfit  || 0).toLocaleString()}`,  accent: '#1a7a4a' },
+            ].map((s) => (
+              <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
+                style={{ borderTop: `2px solid ${s.accent}` }}>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
+                <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {(stats?.totalRevenue || 0) > 0 && (
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-[#0D1B3E]">Gross Profit Margin</p>
+                <p className="text-sm font-semibold text-[#1a7a4a]">
+                  {(((stats?.grossProfit || 0) / (stats?.totalRevenue || 1)) * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="w-full bg-[#F0F2F8] rounded-full h-3">
+                <div className="h-3 rounded-full bg-[#1a7a4a]"
+                  style={{ width: `${Math.min(100, ((stats?.grossProfit || 0) / (stats?.totalRevenue || 1)) * 100)}%` }} />
+              </div>
+              <div className="flex justify-between text-xs text-gray-400 mt-1.5">
+                <span>Cost: ₱{(stats?.totalCost || 0).toLocaleString()}</span>
+                <span>Revenue: ₱{(stats?.totalRevenue || 0).toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
+              <p className="text-sm font-semibold text-[#0D1B3E]">Top Selling Products</p>
+              <p className="text-xs text-gray-400 mt-0.5">Based on delivered orders</p>
+            </div>
+            <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
+              {['Product', 'Units Sold', 'Revenue', 'Cost', 'Profit'].map((h) => (
+                <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+              ))}
+            </div>
+            {(stats?.topProducts || []).length === 0 ? (
+              <p className="text-center text-gray-400 text-sm py-10">No delivered orders yet.</p>
+            ) : (
+              (stats?.topProducts || []).map((p, i) => (
+                <div key={p.product_id}
+                  className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                      style={{ background: i === 0 ? '#C9A84C' : '#F0F2F8', color: i === 0 ? '#0D1B3E' : '#8892a4' }}>
+                      {i + 1}
+                    </span>
+                    <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+                  </div>
+                  <p className="text-xs font-semibold text-[#0D1B3E]">{p.units_sold.toLocaleString()}</p>
+                  <p className="text-xs font-semibold text-[#2563eb]">₱{p.revenue.toLocaleString()}</p>
+                  <p className="text-xs text-[#e05252]">₱{p.cost.toLocaleString()}</p>
+                  <p className="text-xs font-semibold text-[#1a7a4a]">₱{p.profit.toLocaleString()}</p>
+                </div>
+              ))
+            )}
           </div>
         </>
       )}
