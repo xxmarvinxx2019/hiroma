@@ -14,7 +14,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { username, password } = body
 
-    // ── Validate input ──
     if (!username || !password) {
       return NextResponse.json(
         { error: 'Username and password are required.' },
@@ -22,10 +21,23 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Find user by username ──
-    const user = await prisma.user.findUnique({
-      where: { username: username.trim().toLowerCase() },
-    })
+    // ── Test DB connection first ──
+    let user
+    try {
+      user = await prisma.user.findUnique({
+        where: { username: username.trim().toLowerCase() },
+      })
+    } catch (dbError: any) {
+      console.error('[LOGIN DB ERROR]', {
+        message: dbError?.message,
+        code:    dbError?.code,
+        stack:   dbError?.stack?.split('\n').slice(0, 3),
+      })
+      return NextResponse.json(
+        { error: `Database error: ${dbError?.message || 'Unknown DB error'}` },
+        { status: 500 }
+      )
+    }
 
     if (!user) {
       return NextResponse.json(
@@ -34,17 +46,14 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Check if account is active ──
     if (user.status !== 'active') {
       return NextResponse.json(
-        { error: 'Your account has been suspended. Please contact admin.' },
+        { error: 'Your account has been suspended.' },
         { status: 403 }
       )
     }
 
-    // ── Verify password ──
     const passwordValid = await verifyPassword(password, user.password_hash)
-
     if (!passwordValid) {
       return NextResponse.json(
         { error: 'Invalid username or password.' },
@@ -52,34 +61,34 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Sign JWT token ──
     const payload: JWTPayload = {
-      id: user.id,
-      username: user.username,
-      role: user.role as UserRole,
+      id:        user.id,
+      username:  user.username,
+      role:      user.role as UserRole,
       full_name: user.full_name,
     }
 
     const token = await signToken(payload)
-
-    // ── Set auth cookie ──
     await setAuthCookie(token)
 
-    // ── Return success with redirect route ──
     return NextResponse.json({
-      success: true,
+      success:  true,
       user: {
-        id: user.id,
-        username: user.username,
+        id:        user.id,
+        username:  user.username,
         full_name: user.full_name,
-        role: user.role,
+        role:      user.role,
       },
       redirect: getDashboardRoute(user.role as UserRole),
     })
-  } catch (error) {
-    console.error('[LOGIN ERROR]', error)
+  } catch (error: any) {
+    console.error('[LOGIN ERROR]', {
+      message: error?.message,
+      code:    error?.code,
+      stack:   error?.stack?.split('\n').slice(0, 5),
+    })
     return NextResponse.json(
-      { error: 'Something went wrong. Please try again.' },
+      { error: `Something went wrong: ${error?.message || 'Unknown error'}` },
       { status: 500 }
     )
   }

@@ -1,43 +1,33 @@
-import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 
-// ============================================================
-// Vercel Serverless-compatible Prisma Client
-// Uses a single connection pool with proper serverless settings
-// ============================================================
-
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
+declare global {
+  var prisma: PrismaClient | undefined
 }
 
-function createPrismaClient() {
-  // Use Supabase's transaction pooler URL (port 6543) for serverless
-  // This avoids connection limit issues on Vercel
-  const connectionString = process.env.DATABASE_URL!
+function getClient() {
+  const connectionString = process.env.DATABASE_URL
+
+  if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is not set')
+  }
 
   const pool = new Pool({
     connectionString,
-    // Serverless-optimized settings
-    max: 1,                        // Only 1 connection per function instance
-    idleTimeoutMillis: 10000,      // Release idle connections quickly
+    max:                     2,
+    idleTimeoutMillis:       10000,
     connectionTimeoutMillis: 10000,
-    allowExitOnIdle: true,         // Allow process to exit when idle
   })
 
   const adapter = new PrismaPg(pool)
-
-  return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-  })
+  return new PrismaClient({ adapter })
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+export const prisma = global.prisma || getClient()
 
-// Only cache in development — in production each invocation is fresh
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma
+  global.prisma = prisma
 }
 
 export default prisma
