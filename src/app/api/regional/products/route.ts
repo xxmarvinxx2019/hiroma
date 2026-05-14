@@ -44,13 +44,14 @@ export async function GET() {
         id:          true,
         name:        true,
         type:        true,
-        price:       true,
+        regional_price: true,
         description: true,
         image_url:   true,
       },
     })
 
-    return NextResponse.json({ products })
+    const mapped = products.map((p: any) => ({ ...p, price: Number(p.regional_price) }))
+    return NextResponse.json({ products: mapped })
   } catch (error) {
     console.error('[REGIONAL PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

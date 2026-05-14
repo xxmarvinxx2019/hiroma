@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 
 // ============================================================
 // TYPES
@@ -39,7 +40,11 @@ export default function PinsPage() {
   const [cityDists, setCityDists] = useState<CityDist[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired'>('all')
+  const [page, setPage] = useState(1)
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0 })
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
     package_id: '',
@@ -51,35 +56,38 @@ export default function PinsPage() {
   const [formSuccess, setFormSuccess] = useState('')
   const [generatedPins, setGeneratedPins] = useState<string[]>([])
 
-  const fetchData = () => {
-    setLoading(true)
+  // Fetch packages and city dists once on mount
+  useEffect(() => {
     Promise.all([
-      fetch('/api/admin/pins').then((r) => r.json()),
       fetch('/api/admin/packages').then((r) => r.json()),
-      fetch('/api/admin/distributors/city').then((r) => r.json()),
-    ])
-      .then(([pinsData, packagesData, distsData]) => {
-        setPins(pinsData.pins || [])
-        setPackages(packagesData.packages || [])
-        setCityDists(distsData.distributors || [])
+      fetch('/api/admin/distributors').then((r) => r.json()),
+    ]).then(([packagesData, distsData]) => {
+      setPackages(packagesData.packages || [])
+      setCityDists((distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city'))
+    })
+  }, [])
+
+  const fetchData = useCallback(() => {
+    setLoading(true)
+    const params = new URLSearchParams({
+      page: String(page), pageSize: '15',
+      ...(statusFilter !== 'all' && { status: statusFilter }),
+      ...(search && { search }),
+    })
+    fetch(`/api/admin/pins?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setPins(data.pins || [])
+        if (data.meta)    setMeta(data.meta)
+        if (data.summary) setSummary(data.summary)
+        setLoading(false)
       })
-      .finally(() => setLoading(false))
-  }
+  }, [page, statusFilter, search])
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchData() }, [fetchData])
 
-  const filtered = pins.filter((p) => {
-    const matchStatus = statusFilter === 'all' || p.status === statusFilter
-    const matchSearch =
-      p.pin_code.toLowerCase().includes(search.toLowerCase()) ||
-      (p.city_distributor?.username || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.used_by_user?.username || '').toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchSearch
-  })
+  const filtered = pins
 
-  const totalUnused = pins.filter((p) => p.status === 'unused').length
-  const totalUsed = pins.filter((p) => p.status === 'used').length
-  const totalExpired = pins.filter((p) => p.status === 'expired').length
 
   const handleGenerate = async () => {
     if (!form.package_id || !form.city_dist_id || !form.quantity) {
@@ -147,19 +155,20 @@ export default function PinsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Unused PINs', value: totalUnused, accent: 'gold' },
-          { label: 'Used PINs', value: totalUsed, accent: 'navy' },
-          { label: 'Expired PINs', value: totalExpired, accent: 'navy' },
+          { label: 'Total PINs', value: summary.total,   accent: '#0D1B3E' },
+          { label: 'Unused',     value: summary.unused,  accent: '#C9A84C' },
+          { label: 'Used',       value: summary.used,    accent: '#1a7a4a' },
+          { label: 'Expired',    value: summary.expired, accent: '#e05252' },
         ].map((s) => (
           <div
             key={s.label}
             className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent === 'gold' ? '#C9A84C' : '#0D1B3E'}` }}
+            style={{ borderTop: `2px solid ${s.accent}` }}
           >
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent === 'gold' ? '#C9A84C' : '#0D1B3E' }}>
+            <p className="text-2xl font-semibold" style={{ color: s.accent }}>
               {s.value}
             </p>
           </div>
@@ -263,6 +272,7 @@ export default function PinsPage() {
             </div>
           ))
         )}
+        <Pagination meta={meta} onPageChange={setPage} />
       </div>
 
       {/* Generate PIN Modal */}

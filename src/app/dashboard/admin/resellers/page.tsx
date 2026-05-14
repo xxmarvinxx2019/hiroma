@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 
 // ============================================================
 // TYPES
@@ -23,6 +24,13 @@ interface Reseller {
   wallet: { balance: number } | null
 }
 
+interface Stats {
+  total: number
+  active: number
+  inactive: number
+  suspended: number
+}
+
 // ============================================================
 // PAGE
 // ============================================================
@@ -33,25 +41,39 @@ export default function ResellersPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'suspended'>('all')
   const [selected, setSelected] = useState<Reseller | null>(null)
+  const [page, setPage] = useState(1)
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, inactive: 0, suspended: 0 })
+  const [searchInput, setSearchInput] = useState('')
 
-  const fetchResellers = () => {
+  // Debounce search
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  useEffect(() => { setPage(1) }, [statusFilter, search])
+
+  const fetchResellers = useCallback(() => {
     setLoading(true)
-    fetch('/api/admin/resellers')
+    const params = new URLSearchParams({
+      page: String(page), pageSize: '15',
+      ...(statusFilter !== 'all' && { status: statusFilter }),
+      ...(search && { search }),
+    })
+    fetch(`/api/admin/resellers?${params}`)
       .then((r) => r.json())
-      .then((data) => setResellers(data.resellers || []))
-      .finally(() => setLoading(false))
-  }
+      .then((data) => {
+        setResellers(data.resellers || [])
+        if (data.meta)  setMeta(data.meta)
+        if (data.stats) setStats(data.stats)
+        setLoading(false)
+      })
+  }, [page, statusFilter, search])
 
-  useEffect(() => { fetchResellers() }, [])
+  useEffect(() => { fetchResellers() }, [fetchResellers])
 
-  const filtered = resellers.filter((r) => {
-    const matchStatus = statusFilter === 'all' || r.status === statusFilter
-    const matchSearch =
-      r.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      r.username.toLowerCase().includes(search.toLowerCase()) ||
-      (r.address || '').toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchSearch
-  })
+  const filtered = resellers
 
   const handleStatusChange = async (userId: string, newStatus: string) => {
     await fetch(`/api/admin/resellers/${userId}/status`, {
@@ -63,11 +85,6 @@ export default function ResellersPage() {
     setSelected(null)
   }
 
-  const totalActive = resellers.filter((r) => r.status === 'active').length
-  const totalSuspended = resellers.filter((r) => r.status === 'suspended').length
-  const totalWalletBalance = resellers.reduce(
-    (acc, r) => acc + Number(r.wallet?.balance || 0), 0
-  )
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -85,21 +102,18 @@ export default function ResellersPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Total resellers', value: resellers.length, accent: 'navy' },
-          { label: 'Active', value: totalActive, accent: 'gold' },
-          { label: 'Suspended', value: totalSuspended, accent: 'navy' },
-          { label: 'Total wallet balance', value: `₱${totalWalletBalance.toLocaleString()}`, accent: 'gold' },
+          { label: 'Total Resellers', value: stats.total,     accent: '#0D1B3E' },
+          { label: 'Active',           value: stats.active,    accent: '#1a7a4a' },
+          { label: 'Inactive',         value: stats.inactive,  accent: '#C9A84C' },
+          { label: 'Suspended',        value: stats.suspended, accent: '#e05252' },
         ].map((s) => (
           <div
             key={s.label}
             className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent === 'gold' ? '#C9A84C' : '#0D1B3E'}` }}
+            style={{ borderTop: `2px solid ${s.accent}` }}
           >
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p
-              className="text-2xl font-semibold"
-              style={{ color: s.accent === 'gold' ? '#C9A84C' : '#0D1B3E' }}
-            >
+            <p className="text-2xl font-semibold" style={{ color: s.accent }}>
               {s.value}
             </p>
           </div>
@@ -206,6 +220,7 @@ export default function ResellersPage() {
             </div>
           ))
         )}
+        <Pagination meta={meta} onPageChange={setPage} />
       </div>
 
       {/* Detail Modal */}

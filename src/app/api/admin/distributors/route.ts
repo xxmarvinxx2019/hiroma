@@ -90,13 +90,23 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const {
-      full_name, username, mobile, password, address, dist_level, parent_dist_id,
+      full_name, username, email, mobile, password, address, dist_level, parent_dist_id,
       region_code, region_name, province_code, province_name,
       city_muni_code, city_muni_name,
     } = body
 
     if (!full_name || !username || !mobile || !password || !dist_level) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
+    }
+
+    // Check email uniqueness if provided
+    if (email?.trim()) {
+      const existingEmail = await prisma.user.findFirst({
+        where: { email: email.trim().toLowerCase() },
+      })
+      if (existingEmail) {
+        return NextResponse.json({ error: 'Email is already in use.' }, { status: 400 })
+      }
     }
 
     if (!region_code || !region_name) {

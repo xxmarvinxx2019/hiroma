@@ -4,19 +4,27 @@ import prisma from '@/app/lib/prisma'
 
 // ============================================================
 // HELPER — resolve who the city distributor buys from
-// Priority: Provincial → Regional → Admin
+// Priority:
+// 1. Direct parent (provincial or regional via parent_dist_id)
+// 2. Provincial in same city area (by city_muni_code)
+// 3. Regional in same region (by region_code)
+// 4. Admin fallback
 // ============================================================
 
 async function resolveSupplier(cityUserId: string) {
   const cityProfile = await prisma.distributorProfile.findUnique({
     where: { user_id: cityUserId },
-    include: {
+    select: {
+      region_code:   true,
+      province_code: true,
+      city_muni_code: true,
+      parent_dist_id: true,
       parent: {
         include: {
-          user: { select: { id: true, full_name: true, username: true, role: true } },
+          user: { select: { id: true, full_name: true, username: true } },
           parent: {
             include: {
-              user: { select: { id: true, full_name: true, username: true, role: true } },
+              user: { select: { id: true, full_name: true, username: true } },
             },
           },
         },
@@ -24,12 +32,8 @@ async function resolveSupplier(cityUserId: string) {
     },
   })
 
-  // 1. Try provincial parent
-  if (
-    cityProfile?.parent &&
-    cityProfile.parent.dist_level === 'provincial' &&
-    cityProfile.parent.is_active
-  ) {
+  // 1. Direct parent set — provincial
+  if (cityProfile?.parent?.dist_level === 'provincial' && cityProfile.parent.is_active) {
     return {
       id:        cityProfile.parent.user.id,
       full_name: cityProfile.parent.user.full_name,
@@ -38,30 +42,56 @@ async function resolveSupplier(cityUserId: string) {
     }
   }
 
-  // 2. Try regional (grandparent, or direct parent if no provincial)
-  const regional = cityProfile?.parent?.parent
-  if (regional && regional.dist_level === 'regional' && regional.is_active) {
+  // 2. Direct parent set — regional
+  if (cityProfile?.parent?.dist_level === 'regional' && cityProfile.parent.is_active) {
     return {
-      id:        regional.user.id,
-      full_name: regional.user.full_name,
-      username:  regional.user.username,
+      id:        cityProfile.parent.user.id,
+      full_name: cityProfile.parent.user.full_name,
+      username:  cityProfile.parent.user.username,
       level:     'Regional Distributor',
     }
   }
 
-  // 3. Fallback to admin
+  // 3. No direct parent — find provincial covering same province
+  if (cityProfile?.province_code) {
+    const provincial = await prisma.distributorProfile.findFirst({
+      where: { dist_level: 'provincial', province_code: cityProfile.province_code, is_active: true },
+      include: { user: { select: { id: true, full_name: true, username: true } } },
+    })
+    if (provincial) {
+      return {
+        id:        provincial.user.id,
+        full_name: provincial.user.full_name,
+        username:  provincial.user.username,
+        level:     'Provincial Distributor',
+      }
+    }
+  }
+
+  // 4. No provincial — find regional covering same region
+  if (cityProfile?.region_code) {
+    const regional = await prisma.distributorProfile.findFirst({
+      where: { dist_level: 'regional', region_code: cityProfile.region_code, is_active: true },
+      include: { user: { select: { id: true, full_name: true, username: true } } },
+    })
+    if (regional) {
+      return {
+        id:        regional.user.id,
+        full_name: regional.user.full_name,
+        username:  regional.user.username,
+        level:     'Regional Distributor',
+      }
+    }
+  }
+
+  // 5. Fallback to admin
   const admin = await prisma.user.findFirst({
     where: { role: 'admin' },
     select: { id: true, full_name: true, username: true },
   })
   if (!admin) return null
 
-  return {
-    id:        admin.id,
-    full_name: admin.full_name,
-    username:  admin.username,
-    level:     'Admin',
-  }
+  return { id: admin.id, full_name: admin.full_name, username: admin.username, level: 'Admin' }
 }
 
 // ============================================================
@@ -190,7 +220,7 @@ export async function POST(req: NextRequest) {
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, name: true, price: true },
+      select: { id: true, name: true, price: true, city_price: true },
     })
 
     if (products.length !== productIds.length) {
@@ -200,41 +230,14 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
     let total_amount = 0
 
-    /*const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
+    const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.price)
+      const unit_price = item.unit_price ?? Number(product.city_price || product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
-    })*/
-    const orderItems = items.map(
-  (item: {
-    product_id: string
-    quantity: number
-    unit_price?: number
-  }) => {
+    })
 
-    const product = productMap.get(item.product_id)
-
-    if (!product) {
-      throw new Error(`Product not found: ${item.product_id}`)
-    }
-
-    const unit_price =
-      item.unit_price ?? Number(product.price)
-
-    const subtotal = unit_price * item.quantity
-
-    total_amount += subtotal
-
-    return {
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit_price,
-      subtotal,
-    }
-  }
-)
     const order = await prisma.order.create({
       data: {
         buyer_id:          user.id,
@@ -269,6 +272,120 @@ export async function POST(req: NextRequest) {
 // City as seller: can process/deliver/cancel reseller orders
 // City as buyer: can only cancel their own pending orders
 // ============================================================
+
+// ============================================================
+// SPONSOR PAIRING POINT LOGIC
+// ============================================================
+
+async function checkSponsorPairingPoints(
+  tx: any,
+  buyerUserId: string,
+  orderItems: { product_id: string; quantity: number }[]
+) {
+  console.log('[POINTS] Checking for buyer:', buyerUserId)
+
+  const buyerNode = await tx.binaryTreeNode.findUnique({
+    where:  { user_id: buyerUserId },
+    select: { id: true, parent_id: true, position: true, sponsor_id: true },
+  })
+
+  console.log('[POINTS] Buyer node:', JSON.stringify(buyerNode))
+
+  if (!buyerNode?.sponsor_id || !buyerNode.parent_id) {
+    console.log('[POINTS] No sponsor or parent — skip')
+    return
+  }
+
+  const totalQty = orderItems.reduce((s, i) => s + i.quantity, 0)
+  console.log('[POINTS] Total qty:', totalQty)
+  if (totalQty < 2) {
+    console.log('[POINTS] Less than 2 — skip')
+    return
+  }
+
+  const siblingPosition = buyerNode.position === 'left' ? 'right' : 'left'
+  const siblingNode = await tx.binaryTreeNode.findFirst({
+    where:  { parent_id: buyerNode.parent_id, position: siblingPosition },
+    select: { id: true, user_id: true, sponsor_id: true },
+  })
+
+  console.log('[POINTS] Sibling:', JSON.stringify(siblingNode))
+
+  if (!siblingNode) {
+    console.log('[POINTS] No sibling — skip')
+    return
+  }
+
+  if (siblingNode.sponsor_id !== buyerNode.sponsor_id) {
+    console.log('[POINTS] Different sponsors — skip')
+    return
+  }
+
+  const sponsorId = buyerNode.sponsor_id
+  console.log('[POINTS] Same sponsor:', sponsorId)
+
+  const sponsorProfile = await tx.resellerProfile.findUnique({
+    where:  { user_id: sponsorId },
+    select: {
+      points_reset_at: true,
+      package: { select: { point_php_value: true, point_reset_days: true } },
+    },
+  })
+
+  if (!sponsorProfile?.package) {
+    console.log('[POINTS] No sponsor package — skip')
+    return
+  }
+
+  const resetDays = sponsorProfile.package.point_reset_days || 30
+  const resetAt   = sponsorProfile.points_reset_at
+    || new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
+
+  // Check sibling delivered qty since reset
+  const siblingOrders = await tx.order.findMany({
+    where: { buyer_id: siblingNode.user_id, status: 'delivered', created_at: { gte: resetAt } },
+    select: { items: { select: { quantity: true } } },
+  })
+
+  const siblingQty = siblingOrders.reduce(
+    (sum: number, o: any) => sum + o.items.reduce((s: number, i: any) => s + i.quantity, 0), 0
+  )
+
+  console.log('[POINTS] Sibling qty since reset:', siblingQty)
+
+  if (siblingQty < 2) {
+    console.log('[POINTS] Sibling has not reached 2 bottles yet — skip')
+    return
+  }
+
+  const phpValue = Number(sponsorProfile.package.point_php_value || 0)
+  console.log('[POINTS] ✅ Awarding 1 point to:', sponsorId, '| PHP:', phpValue)
+
+  await tx.resellerProfile.update({
+    where: { user_id: sponsorId },
+    data:  { total_points: { increment: 1 } },
+  })
+
+  if (phpValue > 0) {
+    await tx.commission.create({
+      data: {
+        user_id:          sponsorId,
+        type:             'sponsor_point',
+        amount:           phpValue,
+        points:           1,
+        source_user_id:   buyerUserId,
+        is_pair_overflow: false,
+      },
+    })
+
+    await tx.wallet.update({
+      where: { user_id: sponsorId },
+      data: { balance: { increment: phpValue }, total_earned: { increment: phpValue } },
+    })
+  }
+
+  console.log('[POINTS] ✅ Done for sponsor:', sponsorId)
+}
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -344,6 +461,20 @@ export async function PATCH(req: NextRequest) {
             },
             data: { quantity: { decrement: item.quantity } },
           })
+        }
+      }
+
+      // ── SPONSOR PAIRING POINT CHECK ──
+      // Only when a reseller's order is delivered
+      // Check if their SPONSOR should earn a pairing point
+      if (status === 'delivered') {
+        const buyerRole = await tx.user.findUnique({
+          where:  { id: order.buyer_id },
+          select: { role: true },
+        })
+
+        if (buyerRole?.role === 'reseller') {
+          await checkSponsorPairingPoints(tx, order.buyer_id, order.items)
         }
       }
 

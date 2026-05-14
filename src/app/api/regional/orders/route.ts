@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, price: true },
+      select: { id: true, price: true, regional_price: true },
     })
 
     if (products.length !== productIds.length)
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.price)
+      const unit_price = item.unit_price ?? Number(product.regional_price || product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }

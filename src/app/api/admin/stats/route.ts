@@ -50,6 +50,62 @@ export async function GET() {
       prisma.pin.count(),
     ])
 
+    // ── Product sales & cost data ──
+    // Total units sold across all delivered orders
+    const productSalesData = await prisma.orderItem.aggregate({
+      where: { order: { status: 'delivered' } },
+      _sum:  { quantity: true, subtotal: true },
+    })
+
+    // Total cost of products sold
+    // Join order items with product cost_price
+    const soldItems = await prisma.orderItem.findMany({
+      where: { order: { status: 'delivered' } },
+      select: {
+        quantity: true,
+        product:  { select: { cost_price: true } },
+      },
+    })
+
+    const totalCost = soldItems.reduce(
+      (sum, item) => sum + Number(item.product.cost_price) * item.quantity,
+      0
+    )
+
+    const totalRevenue  = Number(productSalesData._sum.subtotal  || 0)
+    const totalUnitsSold = Number(productSalesData._sum.quantity || 0)
+    const grossProfit    = totalRevenue - totalCost
+
+    // Top selling products
+    const topProducts = await prisma.orderItem.groupBy({
+      by:      ['product_id'],
+      where:   { order: { status: 'delivered' } },
+      _sum:    { quantity: true, subtotal: true },
+      orderBy: { _sum: { quantity: 'desc' } },
+      take: 5,
+    })
+
+    const topProductIds = topProducts.map((p) => p.product_id)
+    const topProductDetails = await prisma.product.findMany({
+      where:  { id: { in: topProductIds } },
+      select: { id: true, name: true, cost_price: true },
+    })
+    const productMap = new Map(topProductDetails.map((p) => [p.id, p]))
+
+    const topProductsFormatted = topProducts.map((p) => {
+      const product   = productMap.get(p.product_id)
+      const revenue   = Number(p._sum.subtotal  || 0)
+      const cost      = Number(product?.cost_price || 0) * Number(p._sum.quantity || 0)
+      return {
+        product_id:   p.product_id,
+        name:         product?.name || '—',
+        units_sold:   Number(p._sum.quantity || 0),
+        revenue,
+        cost,
+        profit:       revenue - cost,
+      }
+    })
+
     // PIN revenue today
     const pinRevenueToday = await prisma.order.aggregate({
       where: {
@@ -72,6 +128,12 @@ export async function GET() {
         totalPinRevenue: Number(totalPinRevenue._sum.total_amount || 0),
         totalPinRevenueToday: Number(pinRevenueToday._sum.total_amount || 0),
         totalPinsSold,
+        // Product sales & profitability
+        totalUnitsSold,
+        totalRevenue,
+        totalCost,
+        grossProfit,
+        topProducts: topProductsFormatted,
       },
     })
   } catch (error) {
