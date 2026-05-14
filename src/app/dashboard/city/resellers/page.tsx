@@ -219,6 +219,11 @@ export default function CityResellersPage() {
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
+  const [successData, setSuccessData] = useState<{
+    full_name: string
+    username: string
+    package: { name: string; price: number; products: { name: string; type: string; quantity: number }[] } | null
+  } | null>(null)
 
   // Debounce search
   useEffect(() => {
@@ -266,6 +271,7 @@ export default function CityResellersPage() {
     setUsernameAvailable(null)
     setFormError('')
     setFormSuccess('')
+    setSuccessData(null)
   }
 
   // Step 1 — Verify PIN
@@ -408,8 +414,13 @@ export default function CityResellersPage() {
       setFormError(data.error || 'Registration failed.')
     } else {
       setFormSuccess(`✓ ${form.full_name} registered successfully!`)
+      setSuccessData({
+        full_name: data.reseller?.full_name || form.full_name,
+        username:  data.reseller?.username  || form.username,
+        package:   data.package || null,
+      })
       fetchResellers()
-      setTimeout(() => resetForm(), 2500)
+      setTimeout(() => resetForm(), 6000)
     }
     setFormLoading(false)
   }
@@ -831,10 +842,46 @@ export default function CityResellersPage() {
                       <p className="text-red-500 text-xs">{formError}</p>
                     </div>
                   )}
-                  {formSuccess && (
-                    <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-4 py-3">
-                      <p className="text-[#1a7a4a] text-sm font-semibold">{formSuccess}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Closing form...</p>
+                  {formSuccess && successData && (
+                    <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-xl px-4 py-4 space-y-3">
+                      {/* Header */}
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-[#1a7a4a] flex items-center justify-center flex-shrink-0">
+                          <span className="text-white text-xs font-bold">✓</span>
+                        </div>
+                        <div>
+                          <p className="text-[#1a7a4a] text-sm font-semibold">{successData.full_name} registered!</p>
+                          <p className="text-xs text-gray-500">@{successData.username}</p>
+                        </div>
+                      </div>
+
+                      {/* Package */}
+                      {successData.package && (
+                        <div className="bg-white rounded-lg px-3 py-2.5 border border-[#1a7a4a]/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-[#0D1B3E]">📦 {successData.package.name}</p>
+                            <p className="text-xs font-semibold text-[#C9A84C]">₱{successData.package.price.toLocaleString()}</p>
+                          </div>
+                          {successData.package.products.length > 0 && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Products included:</p>
+                              {successData.package.products.map((p, i) => (
+                                <div key={i} className="flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] ${
+                                      p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'
+                                    }`}>{p.type}</span>
+                                    <span className="text-[#0D1B3E]">{p.name}</span>
+                                  </div>
+                                  <span className="text-gray-500 font-medium">×{p.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="text-[10px] text-gray-400 text-center">Form closing in a moment...</p>
                     </div>
                   )}
 

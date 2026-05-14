@@ -437,6 +437,27 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      // 3b. ── Deduct package products from city distributor inventory ──
+      const packageProducts = await tx.packageProduct.findMany({
+        where:  { package_id: pin.package_id },
+        select: { product_id: true, quantity: true },
+      })
+
+      for (const pp of packageProducts) {
+        const inventoryItem = await tx.inventory.findFirst({
+          where: { owner_id: user.id, product_id: pp.product_id },
+        })
+        if (inventoryItem) {
+          await tx.inventory.update({
+            where: { id: inventoryItem.id },
+            data:  { quantity: { decrement: pp.quantity } },
+          })
+          console.log(`[REGISTER] Deducted ${pp.quantity} of ${pp.product_id} from city dist inventory`)
+        } else {
+          console.warn(`[REGISTER] No inventory found for product ${pp.product_id}`)
+        }
+      }
+
       // 4. ── Check OTHER side BEFORE placing new node ──
       // We must check this before inserting to avoid false positives
       const otherSide    = actual_position === 'left' ? 'right' : 'left'
@@ -521,9 +542,37 @@ export async function POST(req: NextRequest) {
 
     console.log('[REGISTER] ✅ Complete:', username)
 
+    // Fetch package + products for success response
+    const packageWithProducts = await prisma.package.findUnique({
+      where: { id: pin.package_id },
+      select: {
+        name:  true,
+        price: true,
+        products: {
+          select: {
+            quantity: true,
+            product: { select: { name: true, type: true } },
+          },
+        },
+      },
+    })
+
     return NextResponse.json({
-      success: true,
-      message: `${full_name} has been registered successfully.`,
+      success:      true,
+      message:      `${full_name} has been registered successfully.`,
+      reseller: {
+        full_name,
+        username:  username.trim().toLowerCase(),
+      },
+      package: packageWithProducts ? {
+        name:     packageWithProducts.name,
+        price:    Number(packageWithProducts.price),
+        products: packageWithProducts.products.map((p) => ({
+          name:     p.product.name,
+          type:     p.product.type,
+          quantity: p.quantity,
+        })),
+      } : null,
     })
   } catch (error) {
     console.error('[REGISTER RESELLER ERROR]', error)
