@@ -39,6 +39,13 @@ interface Product {
   available_quantity: number
 }
 
+interface CityDist {
+  id: string
+  full_name: string
+  username: string
+  distributor_profile: { coverage_area: string } | null
+}
+
 interface CartItem {
   product: Product
   quantity: number
@@ -58,29 +65,45 @@ const STATUS_COLORS: Record<string, string> = {
 // ============================================================
 
 function CreateOrderModal({
-  supplier,
   onClose,
   onSuccess,
 }: {
-  supplier: Supplier
   onClose: () => void
   onSuccess: () => void
 }) {
+  const [cityDists, setCityDists]     = useState<CityDist[]>([])
+  const [selectedDistId, setSelectedDistId] = useState('')
   const [products, setProducts]     = useState<Product[]>([])
+  const [loadingDists, setLoadingDists] = useState(true)
   const [cart, setCart]             = useState<CartItem[]>([])
   const [orderType, setOrderType]   = useState<'online' | 'offline'>('online')
   const [notes, setNotes]           = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [search, setSearch]         = useState('')
-  const [loadingProducts, setLoadingProducts] = useState(true)
+  const [loadingProducts, setLoadingProducts] = useState(false)
 
   useEffect(() => {
-    fetch('/api/reseller/products')
+    // Load all city distributors
+    fetch('/api/reseller/city-distributors')
+      .then((r) => r.json())
+      .then((d) => {
+        setCityDists(d.distributors || [])
+        if (d.default_city_dist_id) setSelectedDistId(d.default_city_dist_id)
+      })
+      .finally(() => setLoadingDists(false))
+  }, [])
+
+  // Load products when city distributor changes
+  useEffect(() => {
+    if (!selectedDistId) { setProducts([]); setLoadingProducts(false); return }
+    setLoadingProducts(true)
+    fetch(`/api/reseller/products?city_dist_id=${selectedDistId}`)
       .then((r) => r.json())
       .then((d) => setProducts(d.products || []))
       .finally(() => setLoadingProducts(false))
-  }, [])
+    setCart([]) // reset cart when switching dist
+  }, [selectedDistId])
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -110,6 +133,7 @@ function CreateOrderModal({
   const total = cart.reduce((s, c) => s + c.product.price * c.quantity, 0)
 
   const handleSubmit = async () => {
+    if (!selectedDistId) { setError('Please select a city distributor.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
     setSubmitting(true)
     setError('')
@@ -117,7 +141,8 @@ function CreateOrderModal({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        order_type: orderType,
+        order_type:   orderType,
+        city_dist_id: selectedDistId,
         notes,
         items: cart.map((c) => ({
           product_id: c.product.id,
@@ -141,7 +166,7 @@ function CreateOrderModal({
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Place New Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              Ordering from: <span className="text-[#C9A84C] font-medium">{supplier.full_name}</span>
+              {selectedDistId ? `Ordering from: ${cityDists.find(d => d.id === selectedDistId)?.full_name || ""}` : "Select a city distributor"}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
@@ -151,12 +176,33 @@ function CreateOrderModal({
 
           {/* Left — product picker */}
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
-            <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0">
+            <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
+              {/* City distributor selector */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Select City Distributor</label>
+                {loadingDists ? (
+                  <div className="text-xs text-gray-400">Loading distributors...</div>
+                ) : (
+                  <select
+                    value={selectedDistId}
+                    onChange={(e) => setSelectedDistId(e.target.value)}
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors"
+                  >
+                    <option value="">Choose a city distributor...</option>
+                    {cityDists.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.full_name} (@{d.username}){d.distributor_profile?.coverage_area ? ` — ${d.distributor_profile.coverage_area}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search products..."
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
+                disabled={!selectedDistId}
               />
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -166,7 +212,11 @@ function CreateOrderModal({
                 </div>
               ) : filtered.length === 0 ? (
                 <p className="text-center text-xs text-gray-400 py-8">
-                  {products.length === 0 ? 'No products in stock from your city distributor.' : 'No products found.'}
+                  {!selectedDistId
+                    ? 'Select a city distributor to see available products.'
+                    : products.length === 0
+                    ? 'No products in stock from this distributor.'
+                    : 'No products found.'}
                 </p>
               ) : (
                 filtered.map((product) => {
@@ -214,10 +264,21 @@ function CreateOrderModal({
                     <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center">−</button>
-                      <span className="w-6 text-center text-[#0D1B3E]">{c.quantity}</span>
+                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">−</button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={c.product.available_quantity}
+                        value={c.quantity}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value)
+                          if (!isNaN(val)) updateQty(c.product.id, val)
+                        }}
+                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5"
+                      />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center">+</button>
+                        disabled={c.quantity >= c.product.available_quantity}
+                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0 disabled:opacity-40">+</button>
                       <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
                   </div>
@@ -324,20 +385,14 @@ export default function ResellerOrdersPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Order History</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {supplier
-              ? `Ordering from: ${supplier.full_name} (@${supplier.username})`
-              : 'Your orders'}
-          </p>
+          <p className="text-sm text-gray-400 mt-0.5">Your orders from city distributors</p>
         </div>
-        {supplier && (
-          <button
-            onClick={() => setShowCreate(true)}
-            className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium"
-          >
-            + New Order
-          </button>
-        )}
+        <button
+          onClick={() => setShowCreate(true)}
+          className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium"
+        >
+          + New Order
+        </button>
       </div>
 
       {/* Summary Cards */}
@@ -475,9 +530,8 @@ export default function ResellerOrdersPage() {
       </div>
 
       {/* Create Order Modal */}
-      {showCreate && supplier && (
+      {showCreate && (
         <CreateOrderModal
-          supplier={supplier}
           onClose={() => setShowCreate(false)}
           onSuccess={() => { setShowCreate(false); fetchOrders() }}
         />

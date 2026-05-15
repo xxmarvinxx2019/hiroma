@@ -201,10 +201,19 @@ function CreateOrderModal({
                     <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center">−</button>
-                      <span className="w-6 text-center text-[#0D1B3E]">{c.quantity}</span>
+                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center flex-shrink-0">−</button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={c.quantity}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value)
+                          if (!isNaN(val)) updateQty(c.product.id, val)
+                        }}
+                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5"
+                      />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center">+</button>
+                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center flex-shrink-0">+</button>
                       <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
                   </div>
