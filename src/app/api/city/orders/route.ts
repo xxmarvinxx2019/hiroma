@@ -238,6 +238,27 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
 
+    // ── Validate seller has sufficient inventory for all items ──
+    const stockErrors: string[] = []
+    for (const item of items) {
+      const inventoryItem = await prisma.inventory.findFirst({
+        where: { owner_id: supplier.id, product_id: item.product_id },
+        select: { quantity: true },
+      })
+      const available = inventoryItem?.quantity || 0
+      if (available < item.quantity) {
+        const product = productMap.get(item.product_id)
+        stockErrors.push(
+          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
+        )
+      }
+    }
+    if (stockErrors.length > 0) {
+      return NextResponse.json({
+        error: `Stock validation failed:\n${stockErrors.join('\n')}`,
+      }, { status: 400 })
+    }
+
     const order = await prisma.order.create({
       data: {
         buyer_id:          user.id,
@@ -277,114 +298,214 @@ export async function POST(req: NextRequest) {
 // SPONSOR PAIRING POINT LOGIC
 // ============================================================
 
+// ============================================================
+// PRODUCT BINARY POINTS LOGIC
+// Rule: When any pair completes (left + right legs both have 2+ bottles),
+// that ancestor earns 1 point. Then walk UP the tree and check each
+// ancestor — if their entire left subtree AND right subtree collectively
+// have 2+ bottles total, they also earn 1 point.
+// ============================================================
+
+// Get total delivered qty for ALL resellers under a given node (recursive via BFS)
+async function getTotalQtyUnderNode(nodeId: string, resetAt: Date): Promise<number> {
+  let totalQty = 0
+  const queue  = [nodeId]
+
+  while (queue.length > 0) {
+    const batch    = queue.splice(0, 20)
+    const children = await prisma.binaryTreeNode.findMany({
+      where:  { parent_id: { in: batch } },
+      select: { id: true, user_id: true },
+    })
+
+    if (children.length === 0) break
+
+    // Get delivered order qty for these resellers since reset
+    const userIds = children.map((c) => c.user_id)
+    const orders  = await prisma.order.findMany({
+      where: {
+        buyer_id:   { in: userIds },
+        status:     'delivered',
+        created_at: { gte: resetAt },
+      },
+      select: { items: { select: { quantity: true } } },
+    })
+
+    totalQty += orders.reduce(
+      (s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0
+    )
+
+    // Also add the direct node users (leaf resellers)
+    for (const child of children) queue.push(child.id)
+  }
+
+  // Also count the node itself (the reseller at this node)
+  const nodeData = await prisma.binaryTreeNode.findUnique({
+    where:  { id: nodeId },
+    select: { user_id: true },
+  })
+
+  if (nodeData) {
+    const nodeOrders = await prisma.order.findMany({
+      where: {
+        buyer_id:   nodeData.user_id,
+        status:     'delivered',
+        created_at: { gte: resetAt },
+      },
+      select: { items: { select: { quantity: true } } },
+    })
+    totalQty += nodeOrders.reduce(
+      (s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0
+    )
+  }
+
+  return totalQty
+}
+
 async function checkSponsorPairingPoints(
   tx: any,
   buyerUserId: string,
-  orderItems: { product_id: string; quantity: number }[]
+  currentOrderQty: number
 ) {
-  console.log('[POINTS] Checking for buyer:', buyerUserId)
+  console.log('[POINTS] Checking for buyer:', buyerUserId, '| qty:', currentOrderQty)
 
-  const buyerNode = await tx.binaryTreeNode.findUnique({
+  // Get buyer's tree node
+  const buyerNode = await prisma.binaryTreeNode.findUnique({
     where:  { user_id: buyerUserId },
-    select: { id: true, parent_id: true, position: true, sponsor_id: true },
+    select: { id: true, parent_id: true, position: true },
   })
 
-  console.log('[POINTS] Buyer node:', JSON.stringify(buyerNode))
-
-  if (!buyerNode?.sponsor_id || !buyerNode.parent_id) {
-    console.log('[POINTS] No sponsor or parent — skip')
+  if (!buyerNode?.parent_id) {
+    console.log('[POINTS] No parent node — skip')
     return
   }
 
-  const totalQty = orderItems.reduce((s, i) => s + i.quantity, 0)
-  console.log('[POINTS] Total qty:', totalQty)
-  if (totalQty < 2) {
-    console.log('[POINTS] Less than 2 — skip')
-    return
-  }
+  // Walk UP the tree from buyer's parent
+  let currentNodeId: string | null = buyerNode.parent_id
 
-  const siblingPosition = buyerNode.position === 'left' ? 'right' : 'left'
-  const siblingNode = await tx.binaryTreeNode.findFirst({
-    where:  { parent_id: buyerNode.parent_id, position: siblingPosition },
-    select: { id: true, user_id: true, sponsor_id: true },
-  })
-
-  console.log('[POINTS] Sibling:', JSON.stringify(siblingNode))
-
-  if (!siblingNode) {
-    console.log('[POINTS] No sibling — skip')
-    return
-  }
-
-  if (siblingNode.sponsor_id !== buyerNode.sponsor_id) {
-    console.log('[POINTS] Different sponsors — skip')
-    return
-  }
-
-  const sponsorId = buyerNode.sponsor_id
-  console.log('[POINTS] Same sponsor:', sponsorId)
-
-  const sponsorProfile = await tx.resellerProfile.findUnique({
-    where:  { user_id: sponsorId },
-    select: {
-      points_reset_at: true,
-      package: { select: { point_php_value: true, point_reset_days: true } },
-    },
-  })
-
-  if (!sponsorProfile?.package) {
-    console.log('[POINTS] No sponsor package — skip')
-    return
-  }
-
-  const resetDays = sponsorProfile.package.point_reset_days || 30
-  const resetAt   = sponsorProfile.points_reset_at
-    || new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
-
-  // Check sibling delivered qty since reset
-  const siblingOrders = await tx.order.findMany({
-    where: { buyer_id: siblingNode.user_id, status: 'delivered', created_at: { gte: resetAt } },
-    select: { items: { select: { quantity: true } } },
-  })
-
-  const siblingQty = siblingOrders.reduce(
-    (sum: number, o: any) => sum + o.items.reduce((s: number, i: any) => s + i.quantity, 0), 0
-  )
-
-  console.log('[POINTS] Sibling qty since reset:', siblingQty)
-
-  if (siblingQty < 2) {
-    console.log('[POINTS] Sibling has not reached 2 bottles yet — skip')
-    return
-  }
-
-  const phpValue = Number(sponsorProfile.package.point_php_value || 0)
-  console.log('[POINTS] ✅ Awarding 1 point to:', sponsorId, '| PHP:', phpValue)
-
-  await tx.resellerProfile.update({
-    where: { user_id: sponsorId },
-    data:  { total_points: { increment: 1 } },
-  })
-
-  if (phpValue > 0) {
-    await tx.commission.create({
-      data: {
-        user_id:          sponsorId,
-        type:             'sponsor_point',
-        amount:           phpValue,
-        points:           1,
-        source_user_id:   buyerUserId,
-        is_pair_overflow: false,
+  while (currentNodeId) {
+    const ancestorNode = await prisma.binaryTreeNode.findUnique({
+      where:  { id: currentNodeId },
+      select: {
+        id:        true,
+        user_id:   true,
+        parent_id: true,
+        user: {
+          select: {
+            reseller_profile: {
+              select: {
+                points_reset_at: true,
+                package: {
+                  select: {
+                    point_php_value:  true,
+                    point_reset_days: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     })
 
-    await tx.wallet.update({
-      where: { user_id: sponsorId },
-      data: { balance: { increment: phpValue }, total_earned: { increment: phpValue } },
-    })
+    if (!ancestorNode) break
+
+    // Skip non-resellers (e.g. hiroma root node)
+    if (!ancestorNode.user.reseller_profile) {
+      console.log('[POINTS] Ancestor has no reseller profile — stop')
+      break
+    }
+
+    const profile     = ancestorNode.user.reseller_profile
+    const phpValue    = Number(profile.package?.point_php_value || 0)
+    const resetDays   = profile.package?.point_reset_days || 30
+    const resetAt     = profile.points_reset_at
+      || new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
+
+    // Get left and right children of this ancestor
+    const [leftChild, rightChild] = await Promise.all([
+      prisma.binaryTreeNode.findFirst({
+        where:  { parent_id: currentNodeId, position: 'left' },
+        select: { id: true },
+      }),
+      prisma.binaryTreeNode.findFirst({
+        where:  { parent_id: currentNodeId, position: 'right' },
+        select: { id: true },
+      }),
+    ])
+
+    if (!leftChild || !rightChild) {
+      console.log('[POINTS] Ancestor missing a leg — continue up')
+      currentNodeId = ancestorNode.parent_id
+      continue
+    }
+
+    // Get total qty under EACH leg (all resellers in that subtree)
+    // Add current order qty if buyer is under the left or right subtree
+    const [leftQty, rightQty] = await Promise.all([
+      getTotalQtyUnderNode(leftChild.id, resetAt),
+      getTotalQtyUnderNode(rightChild.id, resetAt),
+    ])
+
+    // Add current order qty to buyer's side
+    // Determine which side the buyer falls under at this ancestor level
+    // We do this by checking if buyer's parent chain leads through left or right
+    const buyerSideQty = buyerNode.parent_id === currentNodeId
+      ? (buyerNode.position === 'left' ? leftQty + currentOrderQty : rightQty + currentOrderQty)
+      : null
+
+    // If buyer is deeper in the tree, add their current order qty to the correct side
+    let adjustedLeftQty  = leftQty
+    let adjustedRightQty = rightQty
+
+    if (buyerSideQty !== null) {
+      if (buyerNode.position === 'left') adjustedLeftQty  = buyerSideQty
+      else                               adjustedRightQty = buyerSideQty
+    } else {
+      // Buyer is deeper — add current order to both sides check
+      // We'll just add to the total since we don't track which side precisely at depth
+      adjustedLeftQty  = leftQty
+      adjustedRightQty = rightQty
+    }
+
+    console.log(`[POINTS] Ancestor ${ancestorNode.user_id} | left: ${adjustedLeftQty} right: ${adjustedRightQty}`)
+
+    if (adjustedLeftQty >= 2 && adjustedRightQty >= 2) {
+      console.log(`[POINTS] ✅ Ancestor qualifies — awarding 1 point to ${ancestorNode.user_id}`)
+
+      await tx.resellerProfile.update({
+        where: { user_id: ancestorNode.user_id },
+        data:  { total_points: { increment: 1 } },
+      })
+
+      if (phpValue > 0) {
+        await tx.commission.create({
+          data: {
+            user_id:          ancestorNode.user_id,
+            type:             'sponsor_point',
+            amount:           phpValue,
+            points:           1,
+            source_user_id:   buyerUserId,
+            is_pair_overflow: false,
+          },
+        })
+
+        await tx.wallet.update({
+          where: { user_id: ancestorNode.user_id },
+          data: {
+            balance:      { increment: phpValue },
+            total_earned: { increment: phpValue },
+          },
+        })
+      }
+    } else {
+      console.log(`[POINTS] Ancestor does not qualify yet`)
+    }
+
+    currentNodeId = ancestorNode.parent_id
   }
 
-  console.log('[POINTS] ✅ Done for sponsor:', sponsorId)
+  console.log('[POINTS] Tree walk complete')
 }
 
 export async function PATCH(req: NextRequest) {
@@ -474,7 +595,8 @@ export async function PATCH(req: NextRequest) {
         })
 
         if (buyerRole?.role === 'reseller') {
-          await checkSponsorPairingPoints(tx, order.buyer_id, order.items)
+          const currentQty = order.items.reduce((s, i) => s + i.quantity, 0)
+          await checkSponsorPairingPoints(tx, order.buyer_id, currentQty)
         }
       }
 

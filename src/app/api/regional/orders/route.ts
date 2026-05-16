@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, price: true, regional_price: true },
+      select: { id: true, name: true, price: true, regional_price: true },
     })
 
     if (products.length !== productIds.length)
@@ -133,6 +133,27 @@ export async function POST(req: NextRequest) {
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
+
+    // ── Validate seller has sufficient inventory for all items ──
+    const stockErrors: string[] = []
+    for (const item of items) {
+      const inventoryItem = await prisma.inventory.findFirst({
+        where: { owner_id: supplier.id, product_id: item.product_id },
+        select: { quantity: true },
+      })
+      const available = inventoryItem?.quantity || 0
+      if (available < item.quantity) {
+        const product = productMap.get(item.product_id)
+        stockErrors.push(
+          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
+        )
+      }
+    }
+    if (stockErrors.length > 0) {
+      return NextResponse.json({
+        error: `Stock validation failed:\n${stockErrors.join('\n')}`,
+      }, { status: 400 })
+    }
 
     const order = await prisma.order.create({
       data: {
