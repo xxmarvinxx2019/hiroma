@@ -119,6 +119,32 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 
+    // ── Validate seller inventory before delivering ──
+    if (status === 'delivered') {
+      const stockErrors: string[] = []
+      for (const item of order.items) {
+        const inv = await prisma.inventory.findFirst({
+          where:  { owner_id: order.seller_id, product_id: item.product_id },
+          select: { quantity: true },
+        })
+        const available = inv?.quantity || 0
+        if (available < item.quantity) {
+          const product = await prisma.product.findUnique({
+            where:  { id: item.product_id },
+            select: { name: true },
+          })
+          stockErrors.push(
+            `Insufficient stock for "${product?.name || item.product_id}": need ${item.quantity}, have ${available}`
+          )
+        }
+      }
+      if (stockErrors.length > 0) {
+        return NextResponse.json({
+          error: `Stock validation failed:\n${stockErrors.join('\n')}`,
+        }, { status: 400 })
+      }
+    }
+
     // Transaction: update status + upsert buyer inventory if delivered
     const updated = await prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.order.update({

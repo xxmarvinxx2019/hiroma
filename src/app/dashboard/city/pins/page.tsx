@@ -36,6 +36,7 @@ export default function CityPinsPage() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   // Summary counts
   const [summary, setSummary] = useState({
@@ -44,6 +45,21 @@ export default function CityPinsPage() {
     used: 0,
     expired: 0,
   })
+
+  const handleCopy = async (pinCode: string, pinId: string) => {
+    try {
+      await navigator.clipboard.writeText(pinCode)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = pinCode
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+    setCopiedId(pinId)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
 
   // Debounce search
   useEffect(() => {
@@ -171,9 +187,24 @@ export default function CityPinsPage() {
               className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
             >
               {/* PIN Code */}
-              <p className="text-xs font-mono font-medium text-[#0D1B3E] tracking-wide">
-                {pin.pin_code}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-mono font-medium text-[#0D1B3E] tracking-wide">
+                  {pin.pin_code}
+                </p>
+                {pin.status === 'unused' && (
+                  <button
+                    onClick={() => handleCopy(pin.pin_code, pin.id)}
+                    title="Copy PIN"
+                    className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full transition-all ${
+                      copiedId === pin.id
+                        ? 'bg-[#e8f7ef] text-[#1a7a4a]'
+                        : 'bg-[#F0F2F8] text-gray-400 hover:bg-[#0D1B3E] hover:text-white'
+                    }`}
+                  >
+                    {copiedId === pin.id ? '✓ Copied' : 'Copy'}
+                  </button>
+                )}
+              </div>
 
               {/* Package */}
               <div>
