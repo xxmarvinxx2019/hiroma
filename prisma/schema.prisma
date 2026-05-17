@@ -66,21 +66,22 @@ model DistributorProfile {
 }
 
 model ResellerProfile {
-  id                   String    @id @default(uuid())
-  user_id              String    @unique
-  package_id           String
-  city_dist_id         String
-  pin_id               String    @unique
-  total_points         Int       @default(0)
-  points_reset_at      DateTime?
-  daily_referral_count Int       @default(0)
-  last_referral_date   DateTime?
-  daily_pairs_count    Int       @default(0)
-  last_pairs_date      DateTime?
-  city_dist            User      @relation("ResellerRegisteredBy", fields: [city_dist_id], references: [id])
-  package              Package   @relation(fields: [package_id], references: [id])
-  pin                  Pin       @relation(fields: [pin_id], references: [id])
-  user                 User      @relation(fields: [user_id], references: [id])
+  id                      String    @id @default(uuid())
+  user_id                 String    @unique
+  package_id              String
+  city_dist_id            String
+  pin_id                  String    @unique
+  total_points            Int       @default(0)
+  points_reset_at         DateTime?
+  daily_referral_count    Int       @default(0)
+  last_referral_date      DateTime?
+  daily_pairs_count       Int       @default(0)
+  last_pairs_date         DateTime?
+  pending_pairing_balance Decimal   @default(0) @db.Decimal(10, 2)
+  city_dist               User      @relation("ResellerRegisteredBy", fields: [city_dist_id], references: [id])
+  package                 Package   @relation(fields: [package_id], references: [id])
+  pin                     Pin       @relation(fields: [pin_id], references: [id])
+  user                    User      @relation(fields: [user_id], references: [id])
 
   @@map("reseller_profiles")
 }

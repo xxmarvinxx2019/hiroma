@@ -9,6 +9,10 @@ interface Stats {
   pendingOrders: number
   deliveredOrders: number
   lowStockItems: number
+  totalRevenue:    number
+  totalCost:       number
+  totalProfit:     number
+  totalUnitsSold:  number
   outOfStockItems: number
   totalInventoryItems: number
   totalUnits: number
@@ -113,6 +117,25 @@ export default function RegionalDashboardPage() {
           </Link>
         ))}
       </div>
+
+          {/* Sales Summary */}
+          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5 mt-2">
+            <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Sales Summary</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Units Sold',    value: (stats?.totalUnitsSold || 0).toLocaleString(),                                                          accent: '#0D1B3E' },
+                { label: 'Total Revenue', value: `₱${(stats?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#2563eb' },
+                { label: 'Total Cost',    value: `₱${(stats?.totalCost    || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#e05252' },
+                { label: 'Net Profit',    value: `₱${(stats?.totalProfit  || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#1a7a4a' },
+              ].map((s) => (
+                <div key={s.label} className="bg-[#F0F2F8] rounded-xl p-3"
+                  style={{ borderTop: `2px solid ${s.accent}` }}>
+                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
+                  <p className="text-lg font-semibold" style={{ color: s.accent }}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
     </div>
   )

@@ -1,5 +1,28 @@
 'use client'
 
+
+// ── Generate username from full name ──
+// Format: firstname + middle initial + last initial + optional number
+// Example: "Juan Dela Cruz" → "juandc"
+function generateUsername(fullName: string): string {
+  const parts = fullName.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0].replace(/[^a-z0-9]/g, '')
+
+  const firstName = parts[0].replace(/[^a-z]/g, '')
+
+  // Get initials of all names except first
+  const initials = parts.slice(1).map((p) => p.replace(/[^a-z]/g, '')[0] || '').join('')
+
+  return (firstName + initials).replace(/[^a-z0-9]/g, '')
+}
+
+// ── Validate username format ──
+// Only letters and numbers, must start with letter
+function isValidUsername(username: string): boolean {
+  return /^[a-z][a-z0-9]*$/.test(username)
+}
+
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -216,14 +239,19 @@ export default function CityResellersPage() {
   })
   const [nameCapInfo, setNameCapInfo] = useState<{ count: number; max: number; remaining: number } | null>(null)
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
+  const [usernameEdited, setUsernameEdited] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
-  const [successData, setSuccessData] = useState<{
-    full_name: string
-    username: string
-    package: { name: string; price: number; products: { name: string; type: string; quantity: number }[] } | null
-  } | null>(null)
+
+  // Auto-generate username from full_name (only if user hasn't manually edited it)
+  useEffect(() => {
+    if (usernameEdited) return
+    if (!form.full_name.trim()) return
+    const generated = generateUsername(form.full_name)
+    setForm((f) => ({ ...f, username: generated }))
+    setUsernameAvailable(null)
+  }, [form.full_name, usernameEdited])
 
   // Debounce search
   useEffect(() => {
@@ -271,7 +299,6 @@ export default function CityResellersPage() {
     setUsernameAvailable(null)
     setFormError('')
     setFormSuccess('')
-    setSuccessData(null)
   }
 
   // Step 1 — Verify PIN
@@ -368,6 +395,17 @@ export default function CityResellersPage() {
       setFormError('Please fill in all required fields.')
       return
     }
+    if (!isValidUsername(form.username.toLowerCase())) {
+      setFormError('Username must start with a letter and contain only letters and numbers.')
+      return
+    }
+    // Enforce format: must follow firstname+initials pattern (allow numbers at end)
+    const expectedBase = generateUsername(form.full_name)
+    const usernameWithoutNumbers = form.username.toLowerCase().replace(/[0-9]+$/, '')
+    if (usernameWithoutNumbers !== expectedBase) {
+      setFormError(`Username must follow the format: "${expectedBase}" or "${expectedBase}1", "${expectedBase}2", etc.`)
+      return
+    }
     if (form.password !== form.confirmPassword) {
       setFormError('Passwords do not match.')
       return
@@ -414,13 +452,8 @@ export default function CityResellersPage() {
       setFormError(data.error || 'Registration failed.')
     } else {
       setFormSuccess(`✓ ${form.full_name} registered successfully!`)
-      setSuccessData({
-        full_name: data.reseller?.full_name || form.full_name,
-        username:  data.reseller?.username  || form.username,
-        package:   data.package || null,
-      })
       fetchResellers()
-      setTimeout(() => resetForm(), 6000)
+      setTimeout(() => resetForm(), 2500)
     }
     setFormLoading(false)
   }
@@ -842,46 +875,10 @@ export default function CityResellersPage() {
                       <p className="text-red-500 text-xs">{formError}</p>
                     </div>
                   )}
-                  {formSuccess && successData && (
-                    <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-xl px-4 py-4 space-y-3">
-                      {/* Header */}
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-[#1a7a4a] flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-xs font-bold">✓</span>
-                        </div>
-                        <div>
-                          <p className="text-[#1a7a4a] text-sm font-semibold">{successData.full_name} registered!</p>
-                          <p className="text-xs text-gray-500">@{successData.username}</p>
-                        </div>
-                      </div>
-
-                      {/* Package */}
-                      {successData.package && (
-                        <div className="bg-white rounded-lg px-3 py-2.5 border border-[#1a7a4a]/20">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-semibold text-[#0D1B3E]">📦 {successData.package.name}</p>
-                            <p className="text-xs font-semibold text-[#C9A84C]">₱{successData.package.price.toLocaleString()}</p>
-                          </div>
-                          {successData.package.products.length > 0 && (
-                            <div className="space-y-1">
-                              <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Products included:</p>
-                              {successData.package.products.map((p, i) => (
-                                <div key={i} className="flex items-center justify-between text-xs">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] ${
-                                      p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'
-                                    }`}>{p.type}</span>
-                                    <span className="text-[#0D1B3E]">{p.name}</span>
-                                  </div>
-                                  <span className="text-gray-500 font-medium">×{p.quantity}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <p className="text-[10px] text-gray-400 text-center">Form closing in a moment...</p>
+                  {formSuccess && (
+                    <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-4 py-3">
+                      <p className="text-[#1a7a4a] text-sm font-semibold">{formSuccess}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Closing form...</p>
                     </div>
                   )}
 

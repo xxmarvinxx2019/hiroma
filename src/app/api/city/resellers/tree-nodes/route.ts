@@ -3,8 +3,8 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 // ============================================================
-// GET available nodes in a direction under a referrer
-// Returns a tree structure for visual display
+// GET available nodes under a referrer for tree placement
+// Uses a single batch query instead of recursive individual queries
 // ============================================================
 
 interface TreeNode {
@@ -20,53 +20,76 @@ interface TreeNode {
   depth: number
 }
 
-async function buildTree(
-  nodeId: string,
-  depth: number,
-  maxDepth: number
-): Promise<TreeNode | null> {
-  if (depth > maxDepth) return null
+// Fetch ALL nodes in the subtree with one recursive CTE query
+async function fetchSubtree(rootNodeId: string, maxDepth: number) {
+  const nodes = await prisma.$queryRaw<{
+    id: string
+    user_id: string
+    parent_id: string | null
+    position: string | null
+    username: string
+    full_name: string
+    depth: number
+  }[]>`
+    WITH RECURSIVE subtree AS (
+      -- Root node
+      SELECT
+        n.id, n.user_id, n.parent_id, n.position,
+        u.username, u.full_name,
+        0 AS depth
+      FROM binary_tree_nodes n
+      JOIN users u ON u.id = n.user_id
+      WHERE n.id = ${rootNodeId}
 
-  const node = await prisma.binaryTreeNode.findUnique({
-    where: { id: nodeId },
-    select: {
-      id: true,
-      user_id: true,
-      position: true,
-      user: { select: { username: true, full_name: true } },
-    },
-  })
+      UNION ALL
 
+      -- Children up to maxDepth
+      SELECT
+        n.id, n.user_id, n.parent_id, n.position,
+        u.username, u.full_name,
+        s.depth + 1
+      FROM binary_tree_nodes n
+      JOIN users u ON u.id = n.user_id
+      JOIN subtree s ON n.parent_id = s.id
+      WHERE s.depth < ${maxDepth}
+    )
+    SELECT * FROM subtree
+  `
+
+  return nodes
+}
+
+// Build tree structure from flat node list in memory
+function buildTreeFromNodes(
+  nodes: {
+    id: string
+    user_id: string
+    parent_id: string | null
+    position: string | null
+    username: string
+    full_name: string
+    depth: number
+  }[],
+  rootId: string,
+  currentDepth: number
+): TreeNode | null {
+  const node = nodes.find((n) => n.id === rootId)
   if (!node) return null
 
-  const leftChild = await prisma.binaryTreeNode.findFirst({
-    where: { parent_id: nodeId, position: 'left' },
-    select: { id: true },
-  })
-
-  const rightChild = await prisma.binaryTreeNode.findFirst({
-    where: { parent_id: nodeId, position: 'right' },
-    select: { id: true },
-  })
-
-  const leftAvailable = !leftChild
-  const rightAvailable = !rightChild
+  const leftChild  = nodes.find((n) => n.parent_id === rootId && n.position === 'left')
+  const rightChild = nodes.find((n) => n.parent_id === rootId && n.position === 'right')
 
   return {
-    id: node.id,
-    user_id: node.user_id,
-    username: node.user.username,
-    full_name: node.user.full_name,
-    position: node.position,
-    left_available: leftAvailable,
-    right_available: rightAvailable,
-    left_child: leftChild
-      ? await buildTree(leftChild.id, depth + 1, maxDepth)
-      : null,
-    right_child: rightChild
-      ? await buildTree(rightChild.id, depth + 1, maxDepth)
-      : null,
-    depth,
+    id:              node.id,
+    user_id:         node.user_id,
+    username:        node.username,
+    full_name:       node.full_name,
+    position:        node.position,
+    left_available:  !leftChild,
+    right_available: !rightChild,
+    left_child:  leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  currentDepth + 1) : null,
+    right_child: rightChild ? buildTreeFromNodes(nodes, rightChild.id, currentDepth + 1) : null,
+    depth: currentDepth,
   }
 }
 
@@ -79,7 +102,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const referrerNodeId = searchParams.get('node_id')
-    const direction = searchParams.get('direction') as 'left' | 'right' | null
+    const direction      = searchParams.get('direction') as 'left' | 'right' | null
 
     if (!referrerNodeId || !direction) {
       return NextResponse.json(
@@ -88,32 +111,25 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // ── Get the child node in the chosen direction ──
+    // Check if direct slot is available
     const directionChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: referrerNodeId, position: direction },
+      where:  { parent_id: referrerNodeId, position: direction },
       select: { id: true },
     })
 
     if (!directionChild) {
-      // Direct slot is available — no tree needed
-      return NextResponse.json({
-        direct_available: true,
-        tree: null,
-      })
+      return NextResponse.json({ direct_available: true, tree: null })
     }
 
-    // ── Build tree from that child — max 4 levels deep ──
-    const tree = await buildTree(directionChild.id, 0, 4)
+    // Fetch entire subtree in ONE query instead of recursive individual queries
+    const allNodes = await fetchSubtree(directionChild.id, 4)
 
-    return NextResponse.json({
-      direct_available: false,
-      tree,
-    })
+    // Build tree structure in memory — no DB calls
+    const tree = buildTreeFromNodes(allNodes, directionChild.id, 0)
+
+    return NextResponse.json({ direct_available: false, tree })
   } catch (error) {
     console.error('[TREE NODES ERROR]', error)
-    return NextResponse.json(
-      { error: 'Something went wrong.' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
