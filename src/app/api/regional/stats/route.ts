@@ -53,6 +53,24 @@ export async function GET() {
       ? { full_name: adminUser.full_name, username: adminUser.username, level: 'Admin' }
       : null
 
+    // ── Sales summary ──
+    const deliveredSales = await prisma.order.findMany({
+      where: { seller_id: user.id, status: 'delivered' },
+      select: {
+        items: {
+          select: {
+            quantity: true, subtotal: true,
+            product: { select: { regional_price: true } },
+          },
+        },
+      },
+    })
+
+    const totalRevenue   = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
+    const totalCost      = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.regional_price) * i.quantity, 0), 0)
+    const totalProfit    = totalRevenue - totalCost
+    const totalUnitsSold = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
+
     return NextResponse.json({
       stats: {
         cityDistributors,
@@ -63,6 +81,10 @@ export async function GET() {
         outOfStockItems,
         totalInventoryItems: inventory.length,
         totalUnits,
+        totalRevenue,
+        totalCost,
+        totalProfit,
+        totalUnitsSold,
       },
       coverage_area: profile?.coverage_area || '',
       region_name: profile?.region_name || '',

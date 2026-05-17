@@ -34,6 +34,24 @@ export async function GET() {
       (i) => i.quantity <= i.low_stock_threshold
     ).length
 
+    // ── Sales summary ──
+    const deliveredSales = await prisma.order.findMany({
+      where: { seller_id: user.id, status: 'delivered' },
+      select: {
+        items: {
+          select: {
+            quantity: true, subtotal: true,
+            product: { select: { city_price: true } },
+          },
+        },
+      },
+    })
+
+    const totalRevenue   = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
+    const totalCost      = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price) * i.quantity, 0), 0)
+    const totalProfit    = totalRevenue - totalCost
+    const totalUnitsSold = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
+
     return NextResponse.json({
       stats: {
         totalResellers,
@@ -44,6 +62,10 @@ export async function GET() {
         pendingOrders,
         lowStockItems,
         totalInventoryItems: inventory.length,
+        totalRevenue,
+        totalCost,
+        totalProfit,
+        totalUnitsSold,
       },
     })
   } catch (error) {

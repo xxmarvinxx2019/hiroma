@@ -39,7 +39,14 @@ export async function GET(req: NextRequest) {
           low_stock_threshold: true,
           updated_at:          true,
           product: {
-            select: { id: true, name: true, type: true, price: true, is_active: true },
+            select: {
+              id:             true,
+              name:           true,
+              type:           true,
+              is_active:      true,
+              provincial_price:   true,
+              city_price: true,
+            },
           },
         },
       }),
@@ -48,18 +55,66 @@ export async function GET(req: NextRequest) {
     // Summary
     const all = await prisma.inventory.findMany({
       where: { owner_id: user.id },
-      select: { quantity: true, low_stock_threshold: true },
+      select: {
+        quantity: true, low_stock_threshold: true,
+        product: { select: { provincial_price: true, city_price: true } },
+      },
     })
+
+    // Delivered orders where this distributor is the seller
+    const deliveredOrders = await prisma.order.findMany({
+      where: { seller_id: user.id, status: 'delivered' },
+      select: {
+        items: {
+          select: {
+            quantity: true, subtotal: true,
+            product: { select: { provincial_price: true } },
+          },
+        },
+      },
+    })
+
+    const actualRevenue = deliveredOrders.reduce(
+      (s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0
+    )
+    const actualCost = deliveredOrders.reduce(
+      (s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.provincial_price) * i.quantity, 0), 0
+    )
+
+    // Product sales breakdown
+    const salesMap = new Map<string, { name: string; type: string; units_sold: number; revenue: number; cost: number }>()
+    for (const o of deliveredOrders) {
+      for (const item of o.items) {
+        const p = (item as any).product
+        const existing = salesMap.get(p.id) || { name: p.name, type: p.type, units_sold: 0, revenue: 0, cost: 0 }
+        existing.units_sold += item.quantity
+        existing.revenue    += Number(item.subtotal)
+        existing.cost       += Number(p.provincial_price) * item.quantity
+        salesMap.set(p.id, existing)
+      }
+    }
+
+    const productSales = Array.from(salesMap.entries())
+      .map(([product_id, data]) => ({ product_id, ...data, profit: data.revenue - data.cost }))
+      .sort((a, b) => b.units_sold - a.units_sold)
+
     const summary = {
-      total_products: all.length,
-      low_stock:  all.filter((i) => i.quantity <= i.low_stock_threshold && i.quantity > 0).length,
-      out_of_stock: all.filter((i) => i.quantity === 0).length,
-      total_units: all.reduce((s, i) => s + i.quantity, 0),
+      total_products:    all.length,
+      low_stock:         all.filter((i) => i.quantity > 0 && i.quantity <= i.low_stock_threshold).length,
+      out_of_stock:      all.filter((i) => i.quantity === 0).length,
+      total_units:       all.reduce((s, i) => s + i.quantity, 0),
+      total_cost_value:  all.reduce((s, i) => s + Number((i.product as any).provincial_price)   * i.quantity, 0),
+      total_sell_value:  all.reduce((s, i) => s + Number((i.product as any).city_price) * i.quantity, 0),
+      potential_profit:  all.reduce((s, i) => s + (Number((i.product as any).city_price) - Number((i.product as any).provincial_price)) * i.quantity, 0),
+      actual_revenue:    actualRevenue,
+      actual_cost:       actualCost,
+      actual_profit:     actualRevenue - actualCost,
     }
 
     return NextResponse.json({
       items,
       summary,
+      productSales,
       meta: {
         total,
         page,

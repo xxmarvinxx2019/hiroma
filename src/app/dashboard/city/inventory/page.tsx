@@ -7,6 +7,16 @@ import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 // TYPES
 // ============================================================
 
+interface ProductSale {
+  product_id: string
+  name: string
+  type: string
+  units_sold: number
+  revenue: number
+  cost: number
+  profit: number
+}
+
 interface InventoryItem {
   id: string
   quantity: number
@@ -36,8 +46,12 @@ export default function CityInventoryPage() {
   const [search, setSearch]   = useState('')
   const [page, setPage]       = useState(1)
 
+  const [tab, setTab] = useState<'inventory' | 'sales'>('inventory')
+  const [productSales, setProductSales] = useState<ProductSale[]>([])
   const [summary, setSummary] = useState({
     total_products: 0, low_stock: 0, out_of_stock: 0, total_units: 0,
+    total_cost_value: 0, total_selling_value: 0, potential_profit: 0,
+    actual_revenue: 0, actual_cost: 0, actual_profit: 0,
   })
 
   // Threshold edit state
@@ -64,7 +78,8 @@ export default function CityInventoryPage() {
       .then((data) => {
         setItems(data.items || [])
         setMeta(data.meta || { total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
-        if (data.summary) setSummary(data.summary)
+        if (data.summary)      setSummary(data.summary)
+        if (data.productSales) setProductSales(data.productSales)
       })
       .finally(() => setLoading(false))
   }, [typeFilter, page, search])
@@ -96,6 +111,21 @@ export default function CityInventoryPage() {
         <h1 className="text-xl font-semibold text-[#0D1B3E]">Inventory</h1>
         <p className="text-sm text-gray-400 mt-0.5">Stock levels for your coverage area</p>
       </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
+        {([
+          { key: 'inventory', label: '📦 Inventory' },
+          { key: 'sales',     label: '📊 Product Sales' },
+        ] as const).map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'inventory' && (<>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -238,6 +268,56 @@ export default function CityInventoryPage() {
 
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
+
+      </>)}
+
+      {/* ── PRODUCT SALES TAB ── */}
+      {tab === 'sales' && (
+        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
+            <p className="text-sm font-semibold text-[#0D1B3E]">Products Sold</p>
+            <p className="text-xs text-gray-400 mt-0.5">Based on all your delivered orders</p>
+          </div>
+          <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
+            {['Product', 'Units Sold', 'Revenue', 'Cost', 'Profit'].map((h) => (
+              <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+            ))}
+          </div>
+          {productSales.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm py-10">No delivered orders yet.</p>
+          ) : (
+            productSales.map((p, i) => (
+              <div key={p.product_id}
+                className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                    style={{ background: i === 0 ? '#C9A84C' : '#F0F2F8', color: i === 0 ? '#0D1B3E' : '#8892a4' }}>
+                    {i + 1}
+                  </span>
+                  <div>
+                    <p className="text-xs font-medium text-[#0D1B3E]">{p.name}</p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>{p.type}</span>
+                  </div>
+                </div>
+                <p className="text-xs font-semibold text-[#0D1B3E]">{p.units_sold.toLocaleString()}</p>
+                <p className="text-xs font-semibold text-[#2563eb]">₱{p.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-xs text-[#e05252]">₱{p.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-xs font-semibold text-[#1a7a4a]">₱{p.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+            ))
+          )}
+          {productSales.length > 0 && (
+            <div className="grid grid-cols-5 px-4 py-3 bg-[#F0F2F8] font-semibold border-t border-[#0D1B3E]/8">
+              <p className="text-xs text-[#0D1B3E]">TOTAL</p>
+              <p className="text-xs text-[#0D1B3E]">{productSales.reduce((s, p) => s + p.units_sold, 0).toLocaleString()}</p>
+              <p className="text-xs text-[#2563eb]">₱{productSales.reduce((s, p) => s + p.revenue, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-[#e05252]">₱{productSales.reduce((s, p) => s + p.cost, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-[#1a7a4a]">₱{productSales.reduce((s, p) => s + p.profit, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   )
 }

@@ -63,26 +63,67 @@ async function updateAncestorCounts(
   parentNodeId: string,
   positionUnderParent: 'left' | 'right'
 ) {
-  let currentId  = parentNodeId
-  let currentPos = positionUnderParent
+  // Single recursive CTE — walks entire ancestor chain in one DB round trip
+  // Much faster than looping with 2 queries per level
+  //
+  // Strategy:
+  // 1. Start at parentNodeId — increment based on positionUnderParent
+  // 2. Walk up — for each ancestor, increment based on which side
+  //    the previous node was positioned under it
+  //
+  // We do this by fetching the full ancestor chain first (1 query),
+  // then doing targeted updates per node (still parallel-safe)
 
-  while (currentId) {
-    await prisma.binaryTreeNode.update({
-      where: { id: currentId },
-      data:  currentPos === 'left'
-        ? { left_count: { increment: 1 } }
-        : { right_count: { increment: 1 } },
-    })
+  // Step 1: Fetch full ancestor chain in one recursive query
+  const ancestors = await prisma.$queryRaw<{
+    id: string
+    parent_id: string | null
+    position: string | null
+  }[]>`
+    WITH RECURSIVE ancestor_chain AS (
+      -- Start: the parent node of the newly placed reseller
+      SELECT id, parent_id, position
+      FROM binary_tree_nodes
+      WHERE id = ${parentNodeId}
 
-    const thisNode = await prisma.binaryTreeNode.findUnique({
-      where:  { id: currentId },
-      select: { parent_id: true, position: true },
-    })
+      UNION ALL
 
-    if (!thisNode?.parent_id) break
-    currentPos = thisNode.position as 'left' | 'right'
-    currentId  = thisNode.parent_id
+      -- Walk up to each ancestor
+      SELECT n.id, n.parent_id, n.position
+      FROM binary_tree_nodes n
+      INNER JOIN ancestor_chain a ON n.id = a.parent_id
+    )
+    SELECT id, parent_id, position FROM ancestor_chain
+  `
+
+  if (!ancestors || ancestors.length === 0) return
+
+  // Step 2: For each ancestor, determine which side to increment
+  // The first node (parentNodeId) increments based on positionUnderParent
+  // Each subsequent ancestor increments based on its child's position
+  const updates: Promise<any>[] = []
+
+  for (let i = 0; i < ancestors.length; i++) {
+    const node = ancestors[i]
+
+    // Which side do we increment for this ancestor?
+    // - For the first node: use positionUnderParent (the new reseller's position)
+    // - For subsequent nodes: use the position of the node below it (ancestors[i-1].position)
+    const side = i === 0
+      ? positionUnderParent
+      : (ancestors[i - 1].position as 'left' | 'right')
+
+    if (!side) continue
+
+    updates.push(
+      side === 'left'
+        ? prisma.$executeRaw`UPDATE binary_tree_nodes SET left_count = left_count + 1 WHERE id = ${node.id}`
+        : prisma.$executeRaw`UPDATE binary_tree_nodes SET right_count = right_count + 1 WHERE id = ${node.id}`
+    )
   }
+
+  // Run all updates in parallel — one round trip per update but all concurrent
+  await Promise.all(updates)
 }
 
 async function creditDirectReferralBonus(
@@ -108,19 +149,21 @@ async function creditDirectReferralBonus(
   })
 }
 
-async function creditPairingBonusWithCascade(
-  startNodeId: string,
+// ── Fire pairing bonus at a node ──
+// Bonus = lowest package value of the two paired resellers
+// + any pending_pairing_balance from previous higher-package pairings
+// Remainder saved back to pending_pairing_balance for next pairing
+async function firePairingAtNode(
+  nodeId: string,
   newUserId: string,
-  triggerBonusAmount: number
+  leftChildId: string,
+  rightChildId: string
 ) {
-  let currentNodeId: string | null = startNodeId
-  let remaining                    = triggerBonusAmount
-
-  while (currentNodeId && remaining > 0) {
-    const node = await prisma.binaryTreeNode.findUnique({
-      where:  { id: currentNodeId },
+  // Get both children's package values
+  const [leftNode, rightNode, parentNode] = await Promise.all([
+    prisma.binaryTreeNode.findUnique({
+      where:  { id: leftChildId },
       select: {
-        id: true, user_id: true, parent_id: true,
         user: {
           select: {
             reseller_profile: {
@@ -129,76 +172,140 @@ async function creditPairingBonusWithCascade(
           },
         },
       },
-    })
-
-    if (!node) break
-
-    const uplineTierBonus = Number(
-      node.user.reseller_profile?.package?.pairing_bonus_value || 0
-    )
-
-    if (uplineTierBonus <= 0) { currentNodeId = node.parent_id; continue }
-
-    const claimed = Math.min(uplineTierBonus, remaining)
-    remaining    -= claimed
-
-    await prisma.commission.create({
-      data: {
-        user_id:           node.user_id,
-        type:              'binary_pairing',
-        amount:            claimed,
-        source_user_id:    newUserId,
-        cascade_remainder: remaining > 0 ? remaining : null,
-        is_pair_overflow:  false,
+    }),
+    prisma.binaryTreeNode.findUnique({
+      where:  { id: rightChildId },
+      select: {
+        user: {
+          select: {
+            reseller_profile: {
+              select: { package: { select: { pairing_bonus_value: true } } },
+            },
+          },
+        },
       },
-    })
+    }),
+    prisma.binaryTreeNode.findUnique({
+      where:  { id: nodeId },
+      select: {
+        id:      true,
+        user_id: true,
+        parent_id: true,
+        user: {
+          select: {
+            reseller_profile: {
+              select: {
+                pending_pairing_balance: true,
+                package: { select: { pairing_bonus_value: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ])
 
-    await prisma.wallet.update({
-      where: { user_id: node.user_id },
-      data:  { balance: { increment: claimed }, total_earned: { increment: claimed } },
-    })
+  if (!parentNode?.user.reseller_profile) return
 
-    currentNodeId = node.parent_id
-  }
+  const leftBonus    = Number(leftNode?.user.reseller_profile?.package?.pairing_bonus_value  || 0)
+  const rightBonus   = Number(rightNode?.user.reseller_profile?.package?.pairing_bonus_value || 0)
+  const pendingBal   = Number(parentNode.user.reseller_profile.pending_pairing_balance || 0)
+
+  // Bonus = lowest of the two paired packages + any pending balance
+  const lowestBonus  = Math.min(leftBonus, rightBonus)
+  const remainder    = Math.abs(leftBonus - rightBonus) // difference stays pending
+  const totalBonus   = lowestBonus + pendingBal         // add any pending from before
+
+  console.log(`[PAIRING] Node ${nodeId} | left:₱${leftBonus} right:₱${rightBonus} pending:₱${pendingBal} | bonus:₱${totalBonus} new_remainder:₱${remainder}`)
+
+  if (totalBonus <= 0) return
+
+  // Credit bonus to this node's owner
+  await prisma.commission.create({
+    data: {
+      user_id:           parentNode.user_id,
+      type:              'binary_pairing',
+      amount:            totalBonus,
+      source_user_id:    newUserId,
+      cascade_remainder: remainder > 0 ? remainder : null,
+      is_pair_overflow:  false,
+    },
+  })
+
+  await prisma.wallet.update({
+    where: { user_id: parentNode.user_id },
+    data:  { balance: { increment: totalBonus }, total_earned: { increment: totalBonus } },
+  })
+
+  // Save remainder as pending for next pairing
+  await prisma.resellerProfile.update({
+    where: { user_id: parentNode.user_id },
+    data:  { pending_pairing_balance: remainder },
+  })
+
+  console.log(`[PAIRING] ✅ ₱${totalBonus} → ${parentNode.user_id} | new pending: ₱${remainder}`)
 }
 
+// ── Check and fire pairing bonus walking UP the tree ──
+// Uses recursive CTE to fetch entire ancestor chain in ONE query
+// then processes each level — safe for deep trees on Vercel
 async function checkAndFirePairingBonus(
   parentNodeId: string,
   newUserId: string,
   newPosition: 'left' | 'right'
 ) {
-  const otherPosition = newPosition === 'left' ? 'right' : 'left'
+  // Step 1: Fetch entire ancestor chain + their children in one CTE
+  const ancestors = await prisma.$queryRaw<{
+    id: string
+    parent_id: string | null
+    position: string | null
+  }[]>`
+    WITH RECURSIVE ancestor_chain AS (
+      SELECT id, parent_id, position
+      FROM binary_tree_nodes
+      WHERE id = ${parentNodeId}
 
-  const otherChild = await prisma.binaryTreeNode.findFirst({
-    where:  { parent_id: parentNodeId, position: otherPosition },
-    select: { id: true },
-  })
+      UNION ALL
 
-  if (!otherChild) return
+      SELECT n.id, n.parent_id, n.position
+      FROM binary_tree_nodes n
+      INNER JOIN ancestor_chain a ON n.id = a.parent_id
+    )
+    SELECT id, parent_id, position FROM ancestor_chain
+  `
 
-  const parentNode = await prisma.binaryTreeNode.findUnique({
-    where:  { id: parentNodeId },
-    select: {
-      id: true, user_id: true,
-      user: {
-        select: {
-          reseller_profile: {
-            select: { package: { select: { pairing_bonus_value: true } } },
-          },
-        },
-      },
-    },
-  })
+  if (!ancestors || ancestors.length === 0) return
 
-  if (!parentNode) return
+  // Step 2: Fetch ALL children for ALL ancestors in two batch queries
+  const ancestorIds = ancestors.map((a) => a.id)
 
-  const pairingBonusValue = Number(
-    parentNode.user.reseller_profile?.package?.pairing_bonus_value || 0
-  )
+  const [allLeftChildren, allRightChildren] = await Promise.all([
+    prisma.binaryTreeNode.findMany({
+      where:  { parent_id: { in: ancestorIds }, position: 'left' },
+      select: { id: true, parent_id: true },
+    }),
+    prisma.binaryTreeNode.findMany({
+      where:  { parent_id: { in: ancestorIds }, position: 'right' },
+      select: { id: true, parent_id: true },
+    }),
+  ])
 
-  if (pairingBonusValue <= 0) return
+  const leftMap  = new Map(allLeftChildren.map((c)  => [c.parent_id, c.id]))
+  const rightMap = new Map(allRightChildren.map((c) => [c.parent_id, c.id]))
 
-  await creditPairingBonusWithCascade(parentNodeId, newUserId, pairingBonusValue)
+  // Process each ancestor — only fire if both sides exist
+  // Run sequentially to preserve order (bottom up)
+  for (const ancestor of ancestors) {
+    const leftId  = leftMap.get(ancestor.id)
+    const rightId = rightMap.get(ancestor.id)
+
+    if (!leftId || !rightId) {
+      console.log(`[PAIRING] Node ${ancestor.id} missing a leg — skip`)
+      continue
+    }
+
+    await firePairingAtNode(ancestor.id, newUserId, leftId, rightId)
+  }
 }
 
 // ============================================================
@@ -224,6 +331,29 @@ export async function POST(req: NextRequest) {
 
     if (!['left', 'right'].includes(actual_position)) {
       return NextResponse.json({ error: 'Invalid position.' }, { status: 400 })
+    }
+
+    // ── Username format validation ──
+    // Must start with a letter, contain only letters and numbers
+    const cleanUsername = username.trim().toLowerCase()
+    if (!/^[a-z][a-z0-9]*$/.test(cleanUsername)) {
+      return NextResponse.json({
+        error: 'Username must start with a letter and contain only letters and numbers.',
+      }, { status: 400 })
+    }
+
+    // ── Generate expected username base from full name ──
+    // Format: firstname + initials of remaining names + optional trailing numbers
+    const nameParts    = full_name.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const firstName    = nameParts[0]?.replace(/[^a-z]/g, '') || ''
+    const initials     = nameParts.slice(1).map((p: string) => p.replace(/[^a-z]/g, '')[0] || '').join('')
+    const expectedBase = (firstName + initials).replace(/[^a-z0-9]/g, '')
+    const usernameBase = cleanUsername.replace(/[0-9]+$/, '')
+
+    if (usernameBase !== expectedBase) {
+      return NextResponse.json({
+        error: `Username must follow the format: "${expectedBase}" or "${expectedBase}1", "${expectedBase}2", etc.`,
+      }, { status: 400 })
     }
 
     // ── Run all pre-checks in parallel ──
@@ -296,13 +426,31 @@ export async function POST(req: NextRequest) {
     const [packageProducts, otherSideExists] = await Promise.all([
       prisma.packageProduct.findMany({
         where:  { package_id: pin.package_id },
-        select: { product_id: true, quantity: true },
+        select: { product_id: true, quantity: true, product: { select: { name: true } } },
       }),
       prisma.binaryTreeNode.findFirst({
         where:  { parent_id: actual_parent_node_id, position: actual_position === 'left' ? 'right' : 'left' },
         select: { id: true },
       }),
     ])
+
+    // ── Validate city distributor has enough stock — single batch query ──
+    const packageProductIds = packageProducts.map((pp) => pp.product_id)
+    const inventoryItems    = await prisma.inventory.findMany({
+      where:  { owner_id: user.id, product_id: { in: packageProductIds } },
+      select: { product_id: true, quantity: true },
+    })
+    const inventoryMap = new Map(inventoryItems.map((i) => [i.product_id, i.quantity]))
+
+    const stockErrors = packageProducts
+      .filter((pp) => (inventoryMap.get(pp.product_id) ?? 0) < pp.quantity)
+      .map((pp) => `"${pp.product.name}": need ${pp.quantity}, only ${inventoryMap.get(pp.product_id) ?? 0} in stock`)
+
+    if (stockErrors.length > 0) {
+      return NextResponse.json({
+        error: `Insufficient inventory to complete registration:\n${stockErrors.join('\n')}`,
+      }, { status: 400 })
+    }
 
     const hashedPassword = await hashPassword(password)
 
@@ -366,16 +514,18 @@ export async function POST(req: NextRequest) {
 
     // ── POST-TRANSACTION — non-critical work ──
 
-    // Deduct package inventory
-    for (const pp of packageProducts) {
-      try {
-        await prisma.inventory.updateMany({
-          where: { owner_id: user.id, product_id: pp.product_id },
-          data:  { quantity: { decrement: pp.quantity } },
-        })
-      } catch (e) {
-        console.error('[REGISTER] Inventory deduct error:', e)
-      }
+    // Deduct package inventory — all in parallel
+    try {
+      await Promise.all(
+        packageProducts.map((pp) =>
+          prisma.inventory.updateMany({
+            where: { owner_id: user.id, product_id: pp.product_id },
+            data:  { quantity: { decrement: pp.quantity } },
+          })
+        )
+      )
+    } catch (e) {
+      console.error('[REGISTER] Inventory deduct error:', e)
     }
 
     // Update ancestor counts
