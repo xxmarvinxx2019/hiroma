@@ -22,6 +22,13 @@ interface DashboardStats {
   totalRevenue: number
   totalCost: number
   grossProfit: number
+  adminSalesRevenue: number
+  adminSalesCost:    number
+  adminSalesProfit:    number
+  productNetProfit:    number
+  totalPinSalesRevenue: number
+  overallNetProfit:    number
+  chainRevenue:        number
   topProducts: {
     product_id: string
     name: string
@@ -225,6 +232,23 @@ export default function AdminDashboardPage() {
               sub="Across 3 levels"
               accent="gold"
             />
+          </div>
+
+          {/* Overall Profit Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            {[
+              { label: 'Overall Net Profit',   value: `₱${(stats?.overallNetProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,    accent: '#1a7a4a', sub: 'Total sales minus production cost' },
+              { label: 'Total Sales Revenue',  value: `₱${(stats?.adminSalesRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,  accent: '#2563eb', sub: 'PINs + products sold to distributors' },
+              { label: 'Total Cost',           value: `₱${(stats?.adminSalesCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,      accent: '#e05252', sub: 'Production cost of goods sold' },
+              { label: 'Chain Revenue',        value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,        accent: '#9a6f1e', sub: 'All delivered orders across levels' },
+            ].map((s) => (
+              <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
+                style={{ borderTop: `2px solid ${s.accent}` }}>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
+                <p className="text-xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>
+              </div>
+            ))}
           </div>
 
           {/* Main Grid */}
@@ -468,6 +492,10 @@ export default function AdminDashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {[
               { label: 'Total Units Sold', value: (stats?.totalUnitsSold || 0).toLocaleString(),      accent: '#0D1B3E' },
+              { label: 'Overall Net Profit',  value: `₱${(stats?.overallNetProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#1a7a4a' },
+              { label: 'Admin Sales Revenue',  value: `₱${(stats?.adminSalesRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#2563eb' },
+              { label: 'Admin Sales Cost',     value: `₱${(stats?.adminSalesCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,    accent: '#e05252' },
+              { label: 'Chain Revenue',        value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,       accent: '#9a6f1e' },
               { label: 'Total Revenue',    value: `₱${(stats?.totalRevenue || 0).toLocaleString()}`,  accent: '#2563eb' },
               { label: 'Total Cost',       value: `₱${(stats?.totalCost    || 0).toLocaleString()}`,  accent: '#e05252' },
               { label: 'Gross Profit',     value: `₱${(stats?.grossProfit  || 0).toLocaleString()}`,  accent: '#1a7a4a' },

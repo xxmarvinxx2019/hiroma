@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id: true, full_name: true, username: true,
+          id: true, full_name: true, username: true, email: true,
           mobile: true, address: true, status: true, created_at: true,
           reseller_profile: {
             select: {

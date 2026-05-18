@@ -11,6 +11,7 @@ interface Reseller {
   id: string
   full_name: string
   username: string
+  email: string | null
   mobile: string
   address: string | null
   status: string
@@ -28,7 +29,6 @@ interface Stats {
   total: number
   active: number
   inactive: number
-  suspended: number
 }
 
 // ============================================================
@@ -39,11 +39,16 @@ export default function ResellersPage() {
   const [resellers, setResellers] = useState<Reseller[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'suspended'>('all')
-  const [selected, setSelected] = useState<Reseller | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [selected, setSelected]   = useState<Reseller | null>(null)
+  const [showEdit, setShowEdit]     = useState(false)
+  const [editForm, setEditForm]     = useState({ full_name: '', username: '', mobile: '', address: '', email: '', password: '' })
+  const [editLoading, setEditLoading] = useState(false)
+  const [editError, setEditError]   = useState('')
+  const [editSuccess, setEditSuccess] = useState('')
   const [page, setPage] = useState(1)
   const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, inactive: 0, suspended: 0 })
+  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, inactive: 0 })
   const [searchInput, setSearchInput] = useState('')
 
   // Debounce search
@@ -85,6 +90,41 @@ export default function ResellersPage() {
     setSelected(null)
   }
 
+  const openEdit = (r: Reseller) => {
+    setEditForm({
+      full_name: r.full_name,
+      username:  r.username,
+      mobile:    r.mobile  || '',
+      address:   r.address || '',
+      email:     r.email   || '',
+      password:  '',
+    })
+    setEditError('')
+    setEditSuccess('')
+    setShowEdit(true)
+  }
+
+  const handleEditSubmit = async () => {
+    if (!selected) return
+    if (!editForm.full_name.trim()) { setEditError('Full name is required.'); return }
+    console.log('[EDIT] Sending:', { id: selected.id, username: editForm.username, selectedUsername: selected.username })
+    setEditLoading(true); setEditError(''); setEditSuccess('')
+    const res = await fetch(`/api/admin/resellers/${selected.id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editForm), // includes full_name, username, email, mobile, address
+    })
+    const data = await res.json()
+    setEditLoading(false)
+    if (res.ok) {
+      setEditSuccess('Reseller updated successfully.')
+      fetchResellers()
+      setTimeout(() => setShowEdit(false), 1500)
+    } else {
+      setEditError(data.error || 'Failed to update.')
+    }
+  }
+
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -105,7 +145,6 @@ export default function ResellersPage() {
           { label: 'Total Resellers', value: stats.total,     accent: '#0D1B3E' },
           { label: 'Active',           value: stats.active,    accent: '#1a7a4a' },
           { label: 'Inactive',         value: stats.inactive,  accent: '#C9A84C' },
-          { label: 'Suspended',        value: stats.suspended, accent: '#e05252' },
         ].map((s) => (
           <div
             key={s.label}
@@ -132,7 +171,7 @@ export default function ResellersPage() {
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">
-            {(['all', 'active', 'inactive', 'suspended'] as const).map((f) => (
+            {(['all', 'active', 'inactive'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setStatusFilter(f)}
@@ -202,8 +241,8 @@ export default function ResellersPage() {
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   r.status === 'active'
                     ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                    : r.status === 'suspended'
-                    ? 'bg-[#fdecea] text-[#a03030]'
+                    : r.status === 'inactive'
+                    ? 'bg-[#fef9ee] text-[#9a6f1e]'
                     : 'bg-[#F0F2F8] text-gray-400'
                 }`}>
                   {r.status}
@@ -231,12 +270,20 @@ export default function ResellersPage() {
             {/* Modal Header */}
             <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Reseller details</h2>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-white/50 hover:text-white text-lg cursor-pointer"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openEdit(selected)}
+                  className="text-[#C9A84C] hover:text-white text-xs font-medium px-2 py-1 rounded border border-[#C9A84C]/40 hover:border-white/30 transition-colors"
+                >
+                  ✏ Edit
+                </button>
+                <button
+                  onClick={() => setSelected(null)}
+                  className="text-white/50 hover:text-white text-lg cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div className="p-6">
@@ -282,22 +329,97 @@ export default function ResellersPage() {
                     ✓ Activate
                   </button>
                 )}
-                {selected.status !== 'suspended' && (
-                  <button
-                    onClick={() => handleStatusChange(selected.id, 'suspended')}
-                    className="flex-1 bg-[#fdecea] text-[#a03030] text-xs font-semibold rounded-lg py-2.5 hover:bg-[#fbd5d5] transition-colors"
-                  >
-                    ✕ Suspend
-                  </button>
-                )}
                 {selected.status !== 'inactive' && (
                   <button
                     onClick={() => handleStatusChange(selected.id, 'inactive')}
-                    className="flex-1 bg-[#F0F2F8] text-gray-400 text-xs font-semibold rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors"
+                    className="flex-1 bg-[#fdecea] text-[#a03030] text-xs font-semibold rounded-lg py-2.5 hover:bg-[#fbd5d5] transition-colors"
                   >
-                    Deactivate
+                    ✕ Deactivate
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Reseller Modal */}
+      {showEdit && selected && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-[#0D1B3E]">Edit Reseller</h2>
+                <p className="text-xs text-gray-400 mt-0.5">@{selected.username}</p>
+              </div>
+              <button onClick={() => setShowEdit(false)} className="text-gray-400 hover:text-[#0D1B3E] text-lg">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Full Name <span className="text-[#C9A84C]">*</span></label>
+                <input
+                  value={editForm.full_name}
+                  onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Username <span className="text-[#C9A84C]">*</span></label>
+                <input
+                  value={editForm.username}
+                  onChange={(e) => setEditForm({ ...editForm, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '') })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Mobile</label>
+                <input
+                  value={editForm.mobile}
+                  onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Address</label>
+                <input
+                  value={editForm.address}
+                  onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  New Password
+                  <span className="text-gray-300 ml-1">(leave blank to keep current)</span>
+                </label>
+                <input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="Enter new password"
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              {editError   && <p className="text-xs text-[#a03030]">{editError}</p>}
+              {editSuccess && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-3 py-2 rounded-lg">{editSuccess}</p>}
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setShowEdit(false)}
+                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleEditSubmit} disabled={editLoading}
+                  className="flex-1 bg-[#C9A84C] text-white text-sm rounded-lg py-2.5 hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
+                  {editLoading ? 'Saving...' : 'Save Changes'}
+                </button>
               </div>
             </div>
           </div>
