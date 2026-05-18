@@ -3,8 +3,50 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 // ============================================================
-// TYPES
+// FETCH SUBTREE USING RECURSIVE CTE — single query
 // ============================================================
+
+async function fetchSubtree(rootNodeId: string, maxDepth: number) {
+  const nodes = await prisma.$queryRaw<{
+    id: string
+    user_id: string
+    parent_id: string | null
+    position: string | null
+    depth: number
+    username: string
+    full_name: string
+    package_name: string | null
+  }[]>`
+    WITH RECURSIVE subtree AS (
+      SELECT
+        n.id, n.user_id, n.parent_id, n.position,
+        u.username, u.full_name,
+        p.name AS package_name,
+        0 AS depth
+      FROM binary_tree_nodes n
+      JOIN users u ON u.id = n.user_id
+      LEFT JOIN reseller_profiles rp ON rp.user_id = n.user_id
+      LEFT JOIN packages p ON p.id = rp.package_id
+      WHERE n.id = ${rootNodeId}
+
+      UNION ALL
+
+      SELECT
+        n.id, n.user_id, n.parent_id, n.position,
+        u.username, u.full_name,
+        p.name AS package_name,
+        s.depth + 1
+      FROM binary_tree_nodes n
+      JOIN users u ON u.id = n.user_id
+      LEFT JOIN reseller_profiles rp ON rp.user_id = n.user_id
+      LEFT JOIN packages p ON p.id = rp.package_id
+      JOIN subtree s ON n.parent_id = s.id
+      WHERE s.depth < ${maxDepth}
+    )
+    SELECT * FROM subtree
+  `
+  return nodes
+}
 
 interface TreeNode {
   id: string
@@ -17,70 +59,48 @@ interface TreeNode {
   right_child: TreeNode | null
   depth: number
   is_self: boolean
+  direct_referral_earned: number
+  binary_pairing_earned:  number
+  product_points_earned:  number
+  total_earned:           number
+  left_count:             number
+  right_count:            number
 }
 
-// ============================================================
-// RECURSIVE TREE BUILDER — max 4 levels deep
-// ============================================================
-
-async function buildTree(
-  nodeId: string,
-  depth: number,
-  maxDepth: number,
-  selfUserId: string
-): Promise<TreeNode | null> {
-  if (depth > maxDepth) return null
-
-  const node = await prisma.binaryTreeNode.findUnique({
-    where: { id: nodeId },
-    select: {
-      id:       true,
-      user_id:  true,
-      position: true,
-      user: {
-        select: {
-          username:          true,
-          full_name:         true,
-          reseller_profile: {
-            select: {
-              package: { select: { name: true } },
-            },
-          },
-        },
-      },
-    },
-  })
-
+function buildTreeFromNodes(
+  nodes: { id: string; user_id: string; parent_id: string | null; position: string | null; depth: number; username: string; full_name: string; package_name: string | null }[],
+  rootId: string,
+  selfUserId: string,
+  commissionMap: Map<string, { direct: number; pairing: number; points: number; total: number }>,
+  countMap: Map<string, { left: number; right: number }>
+): TreeNode | null {
+  const node = nodes.find((n) => n.id === rootId)
   if (!node) return null
 
-  const [leftChild, rightChild] = await Promise.all([
-    prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'left' },
-      select: { id: true },
-    }),
-    prisma.binaryTreeNode.findFirst({
-      where: { parent_id: nodeId, position: 'right' },
-      select: { id: true },
-    }),
-  ])
+  const leftChild   = nodes.find((n) => n.parent_id === rootId && n.position === 'left')
+  const rightChild  = nodes.find((n) => n.parent_id === rootId && n.position === 'right')
+  const commissions = commissionMap.get(node.user_id) || { direct: 0, pairing: 0, points: 0, total: 0 }
+  const counts      = countMap.get(node.id) || { left: 0, right: 0 }
 
   return {
     id:           node.id,
     user_id:      node.user_id,
-    username:     node.user.username,
-    full_name:    node.user.full_name,
-    package_name: node.user.reseller_profile?.package?.name || null,
+    username:     node.username,
+    full_name:    node.full_name,
+    package_name: node.package_name,
     position:     node.position,
     is_self:      node.user_id === selfUserId,
-    depth,
-    left_child:  leftChild  ? await buildTree(leftChild.id,  depth + 1, maxDepth, selfUserId) : null,
-    right_child: rightChild ? await buildTree(rightChild.id, depth + 1, maxDepth, selfUserId) : null,
+    depth:        node.depth,
+    left_child:   leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  selfUserId, commissionMap, countMap) : null,
+    right_child:  rightChild ? buildTreeFromNodes(nodes, rightChild.id, selfUserId, commissionMap, countMap) : null,
+    direct_referral_earned: commissions.direct,
+    binary_pairing_earned:  commissions.pairing,
+    product_points_earned:  commissions.points,
+    total_earned:           commissions.total,
+    left_count:             counts.left,
+    right_count:            counts.right,
   }
 }
-
-// ============================================================
-// GET — reseller's own binary tree
-// ============================================================
 
 export async function GET(req: NextRequest) {
   try {
@@ -90,28 +110,14 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const maxDepth = Math.min(
-      parseInt(searchParams.get('depth') || '4'),
-      6 // hard cap at 6 levels
-    )
+    const maxDepth = Math.min(parseInt(searchParams.get('depth') || '4'), 6)
 
-    // Get this reseller's tree node
     const myNode = await prisma.binaryTreeNode.findUnique({
-      where: { user_id: user.id },
+      where:  { user_id: user.id },
       select: {
-        id:          true,
-        position:    true,
-        left_count:  true,
-        right_count: true,
-        sponsor: {
-          select: { username: true, full_name: true },
-        },
-        parent: {
-          select: {
-            id:      true,
-            user: { select: { username: true, full_name: true } },
-          },
-        },
+        id: true, position: true, left_count: true, right_count: true,
+        sponsor: { select: { username: true, full_name: true } },
+        parent:  { select: { id: true, user: { select: { username: true, full_name: true } } } },
       },
     })
 
@@ -119,18 +125,65 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Tree node not found.' }, { status: 404 })
     }
 
-    // Build tree downward from this reseller
-    const tree = await buildTree(myNode.id, 0, maxDepth, user.id)
+    const [myCommissions, myWallet, myProfile] = await Promise.all([
+      prisma.commission.groupBy({
+        by:    ['type'],
+        where: { user_id: user.id },
+        _sum:  { amount: true },
+      }),
+      prisma.wallet.findUnique({
+        where:  { user_id: user.id },
+        select: { balance: true, total_earned: true, total_withdrawn: true },
+      }),
+      prisma.resellerProfile.findUnique({
+        where:  { user_id: user.id },
+        select: {
+          total_points:            true,
+          pending_pairing_balance: true,
+          daily_referral_count:    true,
+          package: { select: { name: true } },
+        },
+      }),
+    ])
 
-    // Summary counts
-    const totalDownline = await prisma.binaryTreeNode.count({
-      where: {
-        OR: [
-          // All nodes that have this node somewhere in their ancestry
-          // We approximate with left_count + right_count from the node itself
-        ],
-      },
-    })
+    const selfCommissions = { direct: 0, pairing: 0, points: 0, total: 0 }
+    for (const c of myCommissions) {
+      const amount = Number(c._sum.amount || 0)
+      if (c.type === 'direct_referral') selfCommissions.direct  += amount
+      if (c.type === 'binary_pairing')  selfCommissions.pairing += amount
+      if (c.type === 'sponsor_point')   selfCommissions.points  += amount
+      selfCommissions.total += amount
+    }
+
+    const allNodes = await fetchSubtree(myNode.id, maxDepth)
+    const userIds  = allNodes.map((n) => n.user_id)
+    const nodeIds  = allNodes.map((n) => n.id)
+
+    const [allCommissions, allCounts] = await Promise.all([
+      prisma.commission.groupBy({
+        by:    ['user_id', 'type'],
+        where: { user_id: { in: userIds } },
+        _sum:  { amount: true },
+      }),
+      prisma.binaryTreeNode.findMany({
+        where:  { id: { in: nodeIds } },
+        select: { id: true, left_count: true, right_count: true },
+      }),
+    ])
+
+    const commissionMap = new Map<string, { direct: number; pairing: number; points: number; total: number }>()
+    for (const c of allCommissions) {
+      const existing = commissionMap.get(c.user_id) || { direct: 0, pairing: 0, points: 0, total: 0 }
+      const amount   = Number(c._sum.amount || 0)
+      if (c.type === 'direct_referral') existing.direct  += amount
+      if (c.type === 'binary_pairing')  existing.pairing += amount
+      if (c.type === 'sponsor_point')   existing.points  += amount
+      existing.total += amount
+      commissionMap.set(c.user_id, existing)
+    }
+
+    const countMap = new Map(allCounts.map((n) => [n.id, { left: n.left_count, right: n.right_count }]))
+    const tree     = buildTreeFromNodes(allNodes, myNode.id, user.id, commissionMap, countMap)
 
     return NextResponse.json({
       tree,
@@ -141,6 +194,17 @@ export async function GET(req: NextRequest) {
         right_count: myNode.right_count,
         sponsor:     myNode.sponsor,
         parent:      myNode.parent,
+      },
+      my_earnings: {
+        direct_referral:         selfCommissions.direct,
+        binary_pairing:          selfCommissions.pairing,
+        product_points:          selfCommissions.points,
+        total_earned:            Number(myWallet?.total_earned || 0),
+        wallet_balance:          Number(myWallet?.balance || 0),
+        total_withdrawn:         Number(myWallet?.total_withdrawn || 0),
+        total_points:            myProfile?.total_points || 0,
+        pending_pairing_balance: Number(myProfile?.pending_pairing_balance || 0),
+        package:                 myProfile?.package?.name || null,
       },
     })
   } catch (error) {

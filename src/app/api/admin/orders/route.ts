@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── PATCH update order status + credit inventory on delivery ──
+// ── PATCH update order status + credit buyer + deduct admin inventory ──
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -106,9 +106,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
     }
 
-    // Fetch order WITH items so we have product_id + quantity for inventory
     const order = await prisma.order.findFirst({
-      where: { id: order_id, buyer: { role: { in: ['regional', 'provincial', 'city'] } } },
+      where:   { id: order_id, buyer: { role: { in: ['regional', 'provincial', 'city'] } } },
       include: { items: true },
     })
     if (!order) {
@@ -119,33 +118,38 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 
-    // ── Validate seller inventory before delivering ──
+    // ── Validate admin stock before delivering ──
     if (status === 'delivered') {
-      const stockErrors: string[] = []
-      for (const item of order.items) {
-        const inv = await prisma.inventory.findFirst({
-          where:  { owner_id: order.seller_id, product_id: item.product_id },
-          select: { quantity: true },
-        })
-        const available = inv?.quantity || 0
-        if (available < item.quantity) {
-          const product = await prisma.product.findUnique({
-            where:  { id: item.product_id },
-            select: { name: true },
-          })
-          stockErrors.push(
-            `Insufficient stock for "${product?.name || item.product_id}": need ${item.quantity}, have ${available}`
-          )
-        }
-      }
+      const productIds = order.items.map((i) => i.product_id)
+
+      const [adminInventory, products] = await Promise.all([
+        prisma.inventory.findMany({
+          where:  { owner_id: order.seller_id, product_id: { in: productIds } },
+          select: { product_id: true, quantity: true },
+        }),
+        prisma.product.findMany({
+          where:  { id: { in: productIds } },
+          select: { id: true, name: true },
+        }),
+      ])
+
+      const adminInvMap   = new Map(adminInventory.map((i) => [i.product_id, i.quantity]))
+      const productNameMap = new Map(products.map((p) => [p.id, p.name]))
+
+      const stockErrors = order.items
+        .filter((item) => (adminInvMap.get(item.product_id) ?? 0) < item.quantity)
+        .map((item) =>
+          `"${productNameMap.get(item.product_id) || item.product_id}": need ${item.quantity}, have ${adminInvMap.get(item.product_id) ?? 0}`
+        )
+
       if (stockErrors.length > 0) {
         return NextResponse.json({
-          error: `Stock validation failed:\n${stockErrors.join('\n')}`,
+          error: `Insufficient admin stock:\n${stockErrors.join('\n')}`,
         }, { status: 400 })
       }
     }
 
-    // Transaction: update status + upsert buyer inventory if delivered
+    // ── Transaction: update status + credit buyer + deduct admin ──
     const updated = await prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.order.update({
         where: { id: order_id },
@@ -154,6 +158,7 @@ export async function PATCH(req: NextRequest) {
 
       if (status === 'delivered') {
         for (const item of order.items) {
+          // 1. Credit buyer inventory
           await tx.inventory.upsert({
             where: {
               owner_id_product_id: {
@@ -161,9 +166,7 @@ export async function PATCH(req: NextRequest) {
                 product_id: item.product_id,
               },
             },
-            update: {
-              quantity: { increment: item.quantity },
-            },
+            update: { quantity: { increment: item.quantity } },
             create: {
               owner_id:            order.buyer_id,
               product_id:          item.product_id,
@@ -171,6 +174,29 @@ export async function PATCH(req: NextRequest) {
               low_stock_threshold: 10,
             },
           })
+
+          // 2. Deduct from admin (seller) inventory
+          const adminInv = await tx.inventory.findFirst({
+            where:  { owner_id: order.seller_id, product_id: item.product_id },
+            select: { id: true },
+          })
+
+          if (adminInv) {
+            await tx.inventory.update({
+              where: { id: adminInv.id },
+              data:  { quantity: { decrement: item.quantity } },
+            })
+          } else {
+            // No stock record yet — create negative entry so admin sees the deficit
+            await tx.inventory.create({
+              data: {
+                owner_id:            order.seller_id,
+                product_id:          item.product_id,
+                quantity:            -item.quantity,
+                low_stock_threshold: 10,
+              },
+            })
+          }
         }
       }
 

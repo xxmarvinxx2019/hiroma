@@ -29,6 +29,13 @@ export async function GET(req: NextRequest) {
         OR: [
           { full_name: { contains: search, mode: 'insensitive' } },
           { username:  { contains: search, mode: 'insensitive' } },
+          { email:     { contains: search, mode: 'insensitive' } },
+          { mobile:    { contains: search, mode: 'insensitive' } },
+          { address:   { contains: search, mode: 'insensitive' } },
+          { distributor_profile: { coverage_area: { contains: search, mode: 'insensitive' } } },
+          { distributor_profile: { region_name:   { contains: search, mode: 'insensitive' } } },
+          { distributor_profile: { province_name: { contains: search, mode: 'insensitive' } } },
+          { distributor_profile: { city_muni_name:{ contains: search, mode: 'insensitive' } } },
         ],
       }),
     }
@@ -55,8 +62,10 @@ export async function GET(req: NextRequest) {
             coverage_area: true,
             is_active:     true,
             contract_signed_at: true,
-            region_name:   true,
-            province_name: true,
+            region_code:    true,
+            region_name:    true,
+            province_code:  true,
+            province_name:  true,
             city_muni_name: true,
             parent: {
               select: {
@@ -70,8 +79,15 @@ export async function GET(req: NextRequest) {
       },
     })
 
+    // Include admin as a parent option (fallback)
+    const adminUser = await prisma.user.findFirst({
+      where:  { role: 'admin' },
+      select: { id: true, full_name: true, username: true },
+    })
+
     return NextResponse.json({
       distributors,
+      adminUser,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -95,7 +111,7 @@ export async function POST(req: NextRequest) {
       city_muni_code, city_muni_name,
     } = body
 
-    if (!full_name || !username || !mobile || !password || !dist_level) {
+    if (!full_name || !username || !email?.trim() || !mobile || !password || !dist_level) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
     }
 
@@ -129,14 +145,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Username already taken.' }, { status: 400 })
     }
 
-    // Parent is optional — city distributors can operate without provincial/regional
+    // If admin user ID was sent as parent, clear it — admin has no distributor profile
+    let resolvedParentId = parent_dist_id || null
+    if (resolvedParentId) {
+      const adminUser = await prisma.user.findFirst({
+        where:  { role: 'admin' },
+        select: { id: true },
+      })
+      if (adminUser && resolvedParentId === adminUser.id) {
+        resolvedParentId = null // admin is the supplier, not a parent dist
+      }
+    }
+
+    console.log('[DISTRIBUTOR REG] resolved parent_dist_id:', resolvedParentId)
+
     // Validate parent only if one is explicitly provided
-    if (parent_dist_id) {
+    if (resolvedParentId) {
       const parentProfile = await prisma.distributorProfile.findUnique({
-        where: { id: parent_dist_id },
+        where: { id: resolvedParentId },
         select: { dist_level: true, is_active: true },
       })
       if (!parentProfile) {
+        console.error('[DISTRIBUTOR REG] Parent profile not found for id:', resolvedParentId)
         return NextResponse.json({ error: 'Parent distributor not found.' }, { status: 400 })
       }
       if (!parentProfile.is_active) {
@@ -181,7 +211,7 @@ export async function POST(req: NextRequest) {
           user_id:           newUser.id,
           dist_level:        dist_level as any,
           coverage_area:     coverage_area,
-          parent_dist_id:    parent_dist_id || null,
+          parent_dist_id:    resolvedParentId,
           contract_signed_at: new Date(),
           is_active:         true,
           region_code:       region_code       || null,

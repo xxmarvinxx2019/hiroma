@@ -93,7 +93,7 @@ export default function DistributorsPage() {
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
 
-  const [parentOptions, setParentOptions] = useState<{ id: string; full_name: string; username: string; dist_level: string; coverage_area: string }[]>([])
+  const [parentOptions, setParentOptions] = useState<{ id: string; full_name: string; username: string; dist_level: string; coverage_area: string; region_code?: string; province_code?: string; is_admin?: boolean }[]>([])
 
   // PSGC location state
   const [regions, setRegions]         = useState<{ code: string; name: string }[]>([])
@@ -150,17 +150,54 @@ export default function DistributorsPage() {
           if (form.dist_level === 'provincial') return d.distributor_profile?.dist_level === 'regional'
           return ['provincial', 'regional'].includes(d.distributor_profile?.dist_level || '')
         })
-        setParentOptions(filtered// eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((d: any) => ({
-          id: d.id,
-          full_name: d.full_name,
-          username: d.username,
-          dist_level: d.distributor_profile?.dist_level || '',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const opts = filtered.map((d: any) => ({
+          id:            d.distributor_profile?.id || d.id, // profile ID for parent_dist_id
+          full_name:     d.full_name,
+          username:      d.username,
+          dist_level:    d.distributor_profile?.dist_level    || '',
           coverage_area: d.distributor_profile?.coverage_area || '',
-        })))
+          region_code:   d.distributor_profile?.region_code   || '',
+          province_code: d.distributor_profile?.province_code || '',
+          is_admin:      false,
+        }))
+        // Add admin as fallback option at the end
+        if (data.adminUser) {
+          opts.push({
+            id:            data.adminUser.id,
+            full_name:     data.adminUser.full_name,
+            username:      data.adminUser.username,
+            dist_level:    'admin',
+            coverage_area: 'All areas',
+            region_code:   '',
+            province_code: '',
+            is_admin:      true,
+          })
+        }
+        setParentOptions(opts)
       })
     setForm((f) => ({ ...f, parent_dist_id: '' }))
   }, [form.dist_level])
+
+  // Auto-select parent whenever parentOptions loads or location codes change
+  useEffect(() => {
+    if (parentOptions.length === 0) return
+
+    const adminOption = parentOptions.find((p) => p.is_admin)
+
+    if (form.dist_level === 'city' && form.province_code) {
+      const match = parentOptions.find(
+        (p) => p.dist_level === 'provincial' && p.province_code === form.province_code
+      )
+      setForm((f) => ({ ...f, parent_dist_id: match?.id || adminOption?.id || '' }))
+    } else if (form.dist_level === 'provincial' && form.region_code) {
+      const match = parentOptions.find(
+        (p) => p.dist_level === 'regional' && p.region_code === form.region_code
+      )
+      setForm((f) => ({ ...f, parent_dist_id: match?.id || adminOption?.id || '' }))
+    }
+  }, [parentOptions, form.province_code, form.region_code])
+
 
   const openAssignModal = (dist: Distributor) => {
     setAssignTarget({
@@ -251,7 +288,15 @@ export default function DistributorsPage() {
     const res = await fetch('/api/admin/distributors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        // Don't send admin user ID as parent — admin has no distributor profile
+        parent_dist_id: (() => {
+          const sel = parentOptions.find((p) => p.id === form.parent_dist_id)
+          if (!sel || sel.is_admin) return null
+          return form.parent_dist_id || null
+        })(),
+      }),
     })
     const data = await res.json()
 
@@ -321,7 +366,7 @@ export default function DistributorsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, username or area..."
+            placeholder="Search by name, username, email, mobile, area..."
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">
@@ -445,12 +490,12 @@ export default function DistributorsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Email address</label>
+                  <label className="block text-xs text-gray-400 mb-1">Email address <span className="text-[#C9A84C]">*</span></label>
                   <input
                     type="email"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    placeholder="Optional"
+                    placeholder="distributor@email.com"
                     className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
                   />
                 </div>
@@ -496,7 +541,8 @@ export default function DistributorsPage() {
                     value={form.region_code}
                     onChange={(e) => {
                       const selected = regions.find((r) => r.code === e.target.value)
-                      setForm((f) => ({ ...f, region_code: e.target.value, region_name: selected?.name || '' }))
+                      const regionCode = e.target.value
+                      setForm((f) => ({ ...f, region_code: regionCode, region_name: selected?.name || '' }))
                     }}
                     className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
                   >
@@ -559,6 +605,36 @@ export default function DistributorsPage() {
                   </div>
                 )}
               </div>
+
+              {/* Parent Distributor */}
+              {parentOptions.length > 0 && (
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">
+                    Parent Distributor
+                    {form.parent_dist_id
+                      ? <span className="text-[#1a7a4a] ml-1">✓ Auto-matched by location</span>
+                      : <span className="text-gray-300 ml-1">(will fallback to admin if no match)</span>
+                    }
+                  </label>
+                  <select
+                    value={form.parent_dist_id}
+                    onChange={(e) => setForm({ ...form, parent_dist_id: e.target.value })}
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                  >
+                    <option value="">No parent (assign later)</option>
+                    {parentOptions.filter((p) => !p.is_admin).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.full_name} (@{p.username}) · {p.coverage_area} [{p.dist_level}]
+                      </option>
+                    ))}
+                    {parentOptions.filter((p) => p.is_admin).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        ⬆ {p.full_name} (Admin — all areas)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Address</label>
