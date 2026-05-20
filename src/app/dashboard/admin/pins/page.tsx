@@ -68,7 +68,7 @@ export default function PinsPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/admin/packages?pageSize=100&active=true').then((r) => r.json()),
-      fetch('/api/admin/distributors').then((r) => r.json()),
+      fetch('/api/admin/distributors?pageSize=200&level=city').then((r) => r.json()),
     ]).then(([packagesData, distsData]) => {
       setPackages(packagesData.packages || [])
       setCityDists((distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city'))
@@ -375,7 +375,7 @@ export default function PinsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-white font-semibold text-sm">Generate PINs</h2>
               <button
                 onClick={() => setShowForm(false)}
