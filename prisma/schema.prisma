@@ -309,6 +309,7 @@ enum PinStatus {
   unused
   used
   expired
+  cancelled
 }
 
 enum ProductType {

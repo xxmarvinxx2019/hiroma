@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 // ============================================================
 // TYPES
@@ -10,13 +11,14 @@ interface Product {
   id: string
   name: string
   price: number
+  reseller_price: number
   type: string
 }
 
 interface PackageProduct {
   product_id: string
   quantity: number
-  product: { name: string; price: number }
+  product: { name: string; price: number; reseller_price: number }
 }
 
 interface Package {
@@ -38,7 +40,11 @@ interface Package {
 // ============================================================
 
 export default function PackagesPage() {
-  const [packages, setPackages] = useState<Package[]>([])
+  const [packages, setPackages]   = useState<Package[]>([])
+  const [page, setPage]           = useState(1)
+  const [meta, setMeta]           = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch]       = useState('')
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -70,6 +76,13 @@ export default function PackagesPage() {
       })
       .finally(() => setLoading(false))
   }
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  useEffect(() => { setPage(1) }, [search])
 
   useEffect(() => { fetchData() }, [])
 
@@ -219,8 +232,13 @@ export default function PackagesPage() {
                 <div>
                   <h3 className="text-white font-semibold text-sm">{pkg.name}</h3>
                   <p className="text-[#C9A84C] text-xs mt-0.5">
-                    ₱{Number(pkg.price).toLocaleString()}
+                    PIN: ₱{Number(pkg.price).toLocaleString()}
                   </p>
+                  {pkg.products.length > 0 && (
+                    <p className="text-[#e8f7ef] text-xs mt-0.5">
+                      Total: ₱{(Number(pkg.price) + pkg.products.reduce((s, p) => s + Number(p.product.reseller_price || p.product.price) * p.quantity, 0)).toLocaleString()}
+                    </p>
+                  )}
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   pkg.is_active
@@ -240,7 +258,7 @@ export default function PackagesPage() {
                   {[
                     { label: 'Direct referral bonus', value: `₱${Number(pkg.direct_referral_bonus).toLocaleString()}` },
                     { label: 'Binary pairing bonus', value: `₱${Number(pkg.pairing_bonus_value).toLocaleString()}` },
-                    { label: 'Point PHP value', value: `₱${Number(pkg.point_php_value).toLocaleString()} / pt` },
+                    { label: 'Product Binary Point Value', value: `₱${Number(pkg.point_php_value).toLocaleString()} / pt` },
                     { label: 'Point reset period', value: `Every ${pkg.point_reset_days} days` },
                   ].map((item) => (
                     <div key={item.label} className="flex justify-between py-1 border-b border-[#0D1B3E]/5">
@@ -315,7 +333,7 @@ export default function PackagesPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Price (PHP) <span className="text-[#C9A84C]">*</span></label>
+                  <label className="block text-xs text-gray-400 mb-1">PIN Price (PHP) <span className="text-[#C9A84C]">*</span></label>
                   <input
                     type="number"
                     value={form.price}
@@ -351,7 +369,7 @@ export default function PackagesPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Point PHP value <span className="text-[#C9A84C]">*</span></label>
+                    <label className="block text-xs text-gray-400 mb-1">Product Binary Point Value (PHP) <span className="text-[#C9A84C]">*</span></label>
                     <input
                       type="number"
                       value={form.point_php_value}
@@ -376,7 +394,29 @@ export default function PackagesPage() {
               {/* Products in package */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs text-gray-400">Included products</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-gray-400">Included products</label>
+                    {selectedProducts.length > 0 && (() => {
+                      const productTotal = selectedProducts.reduce((sum, sp) => {
+                        const prod = products.find((p) => p.id === sp.product_id)
+                        return sum + (Number(prod?.reseller_price || prod?.price || 0) * sp.quantity)
+                      }, 0)
+                      const pinPrice = parseFloat(form.price) || 0
+                      const margin   = pinPrice - productTotal
+                      return (
+                        <div className="text-right">
+                          <p className="text-[10px] text-gray-400">
+                            Products total: <span className="text-[#0D1B3E] font-medium">₱{productTotal.toLocaleString()}</span>
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            Package total value: <span className="text-[#1a7a4a] font-medium">
+                              ₱{(pinPrice + productTotal).toLocaleString()}
+                            </span>
+                          </p>
+                        </div>
+                      )
+                    })()}
+                  </div>
                   <button
                     onClick={addProduct}
                     className="text-xs text-[#C9A84C] hover:underline font-medium"
@@ -452,6 +492,10 @@ export default function PackagesPage() {
           </div>
         </div>
       )}
+
+      <div className="mt-4">
+        <Pagination meta={meta} onPageChange={setPage} />
+      </div>
 
     </div>
   )
