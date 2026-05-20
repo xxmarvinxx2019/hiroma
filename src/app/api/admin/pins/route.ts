@@ -60,12 +60,14 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const summary = { total: 0, unused: 0, used: 0, expired: 0 }
+    const summary = { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       summary.total += row._count.status
-      if (row.status === 'unused')  summary.unused  = row._count.status
-      if (row.status === 'used')    summary.used    = row._count.status
-      if (row.status === 'expired') summary.expired = row._count.status
+      const s = row.status as string
+      if (s === 'unused')    summary.unused    = row._count.status
+      if (s === 'used')      summary.used      = row._count.status
+      if (s === 'expired')   summary.expired   = row._count.status
+      if (s === 'cancelled') summary.cancelled = row._count.status
     }
 
     return NextResponse.json({
@@ -102,12 +104,15 @@ export async function POST(req: NextRequest) {
 
     // ── Get package details ──
     const pkg = await prisma.package.findUnique({
-      where: { id: package_id },
-      select: { name: true, price: true },
+      where:  { id: package_id },
+      select: { name: true, price: true, is_active: true },
     })
 
     if (!pkg) {
       return NextResponse.json({ error: 'Package not found.' }, { status: 404 })
+    }
+    if (!pkg.is_active) {
+      return NextResponse.json({ error: 'Cannot generate PINs for an inactive package.' }, { status: 400 })
     }
 
     // ── Generate unique PIN codes ──
@@ -168,5 +173,48 @@ export async function POST(req: NextRequest) {
       { error: 'Something went wrong. Please check server logs.' },
       { status: 500 }
     )
+  }
+}
+// ── PATCH — cancel PINs (single or bulk) ──
+export async function PATCH(req: NextRequest) {
+  try {
+    const user = await getCurrentUser()
+    if (!user || user.role !== 'admin') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { pin_ids } = await req.json()
+
+    if (!pin_ids || !Array.isArray(pin_ids) || pin_ids.length === 0) {
+      return NextResponse.json({ error: 'pin_ids array is required.' }, { status: 400 })
+    }
+
+    // Only unused PINs can be cancelled
+    const pins = await prisma.pin.findMany({
+      where: { id: { in: pin_ids } },
+      select: { id: true, status: true, pin_code: true },
+    })
+
+    const alreadyUsed = pins.filter((p) => (p.status as string) !== 'unused')
+    if (alreadyUsed.length > 0) {
+      return NextResponse.json({
+        error: `Cannot cancel PINs that are already ${alreadyUsed[0].status}: ${alreadyUsed.map((p) => p.pin_code).join(', ')}`,
+      }, { status: 400 })
+    }
+
+    // Use unsafeRaw to bypass stale Prisma enum for 'cancelled'
+    const idList = pin_ids.map((id: string) => `'${id}'`).join(',')
+    await prisma.$executeRawUnsafe(
+      `UPDATE pins SET status = 'cancelled' WHERE id IN (${idList}) AND status = 'unused'`
+    )
+
+    return NextResponse.json({
+      success: true,
+      message: `${pin_ids.length} PIN${pin_ids.length > 1 ? 's' : ''} cancelled successfully.`,
+      cancelled: pin_ids.length,
+    })
+  } catch (error) {
+    console.error('[CANCEL PINS ERROR]', error)
+    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }

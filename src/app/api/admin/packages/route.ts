@@ -3,27 +3,42 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 // ── GET all packages ──
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { searchParams } = req.nextUrl
+    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const search   = searchParams.get('search') || ''
+
+    const active = searchParams.get('active') === 'true'
+    const where: Record<string, unknown> = {
+      ...(search && { name: { contains: search, mode: 'insensitive' } }),
+      ...(active && { is_active: true }),
+    }
+
+    const total = await prisma.package.count({ where })
     const packages = await prisma.package.findMany({
+      where,
       orderBy: { created_at: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
       include: {
         products: {
           include: {
             product: {
-              select: { name: true, price: true },
+              select: { name: true, price: true, reseller_price: true },
             },
           },
         },
       },
     })
 
-    return NextResponse.json({ packages })
+    return NextResponse.json({ packages, meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })
   } catch (error) {
     console.error('[GET PACKAGES ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

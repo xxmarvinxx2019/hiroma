@@ -22,6 +22,7 @@ interface Package {
   id: string
   name: string
   price: number
+  is_active: boolean
 }
 
 interface CityDist {
@@ -37,21 +38,28 @@ interface CityDist {
 export default function PinsPage() {
   const [pins, setPins] = useState<Pin[]>([])
   const [packages, setPackages] = useState<Package[]>([])
-  const [cityDists, setCityDists] = useState<CityDist[]>([])
+  const [cityDists, setCityDists]       = useState<CityDist[]>([])
+  const [distSearch, setDistSearch]     = useState('')
+  const [showDistDrop, setShowDistDrop] = useState(false)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('all')
   const [page, setPage] = useState(1)
   const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0 })
+  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
     package_id: '',
     city_dist_id: '',
     quantity: '1',
   })
-  const [formLoading, setFormLoading] = useState(false)
+  const [formLoading, setFormLoading]   = useState(false)
+  const [selectedIds, setSelectedIds]   = useState<string[]>([])
+  const [cancelling, setCancelling]     = useState(false)
+  const [cancelSuccess, setCancelSuccess] = useState('')
+  const [showConfirm, setShowConfirm]     = useState(false)
+  const [cancelError, setCancelError]     = useState('')
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [generatedPins, setGeneratedPins] = useState<string[]>([])
@@ -59,13 +67,47 @@ export default function PinsPage() {
   // Fetch packages and city dists once on mount
   useEffect(() => {
     Promise.all([
-      fetch('/api/admin/packages').then((r) => r.json()),
+      fetch('/api/admin/packages?pageSize=100&active=true').then((r) => r.json()),
       fetch('/api/admin/distributors').then((r) => r.json()),
     ]).then(([packagesData, distsData]) => {
       setPackages(packagesData.packages || [])
       setCityDists((distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city'))
     })
   }, [])
+
+  const handleBulkCancel = () => {
+    if (selectedIds.length === 0) return
+    setCancelError('')
+    setShowConfirm(true)
+  }
+
+  const confirmCancel = async () => {
+    setCancelling(true)
+    setCancelError('')
+    const res = await fetch('/api/admin/pins', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin_ids: selectedIds }),
+    })
+    const data = await res.json()
+    setCancelling(false)
+    if (res.ok) {
+      setShowConfirm(false)
+      setCancelSuccess(data.message)
+      setSelectedIds([])
+      // Re-fetch by changing page state to trigger useEffect
+      window.dispatchEvent(new Event('pins-refresh'))
+      setTimeout(() => setCancelSuccess(''), 3000)
+    } else {
+      setCancelError(data.error || 'Failed to cancel PINs.')
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
 
   const fetchData = useCallback(() => {
     setLoading(true)
@@ -85,6 +127,12 @@ export default function PinsPage() {
   }, [page, statusFilter, search])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    const handler = () => fetchData()
+    window.addEventListener('pins-refresh', handler)
+    return () => window.removeEventListener('pins-refresh', handler)
+  }, [fetchData])
 
   const filtered = pins
 
@@ -187,7 +235,7 @@ export default function PinsPage() {
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">
-            {(['all', 'unused', 'used', 'expired'] as const).map((f) => (
+            {(['all', 'unused', 'used', 'expired', 'cancelled'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setStatusFilter(f)}
@@ -203,9 +251,41 @@ export default function PinsPage() {
           </div>
         </div>
 
+        {/* Bulk cancel bar */}
+        {selectedIds.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-2 bg-[#fef9ee] border-b border-[#C9A84C]/20">
+            <p className="text-xs text-[#9a6f1e]">{selectedIds.length} PIN(s) selected</p>
+            <div className="flex gap-2">
+              <button onClick={() => setSelectedIds([])}
+                className="text-xs text-gray-400 hover:text-[#0D1B3E] px-2 py-1">
+                Clear
+              </button>
+              <button onClick={handleBulkCancel} disabled={cancelling}
+                className="text-xs bg-[#fdecea] text-[#a03030] px-3 py-1.5 rounded-lg hover:bg-[#fcd9d9] disabled:opacity-50 font-medium">
+                {cancelling ? 'Cancelling...' : `✕ Cancel ${selectedIds.length} PIN(s)`}
+              </button>
+            </div>
+          </div>
+        )}
+        {cancelSuccess && (
+          <div className="px-4 py-2 bg-[#e8f7ef] text-[#1a7a4a] text-xs border-b border-[#1a7a4a]/10">
+            ✓ {cancelSuccess}
+          </div>
+        )}
+
         {/* Table Header */}
-        <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
-          {['PIN code', 'Package', 'City distributor', 'Used by', 'Status'].map((h) => (
+        <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: "32px 2fr 1fr 2fr 2fr 1fr 1fr" }}>
+          <div className="flex items-center">
+            <input type="checkbox"
+              checked={selectedIds.length > 0 && pins.filter((p) => p.status === 'unused').length > 0 && pins.filter((p) => p.status === 'unused').every((p) => selectedIds.includes(p.id))}
+              onChange={(e) => {
+                const unusedIds = pins.filter((p) => p.status === 'unused').map((p) => p.id)
+                setSelectedIds(e.target.checked ? unusedIds : [])
+              }}
+              className="w-3.5 h-3.5 accent-[#C9A84C]"
+            />
+          </div>
+          {['PIN Code', 'Package', 'City Distributor', 'Used By', 'Status', 'Created'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -224,9 +304,21 @@ export default function PinsPage() {
           filtered.map((pin) => (
             <div
               key={pin.id}
-              className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
+              className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center" style={{ gridTemplateColumns: "32px 2fr 1fr 2fr 2fr 1fr 1fr" }}
             >
-              <p className="text-xs font-mono font-medium text-[#0D1B3E]">
+              {/* Col 1: Checkbox */}
+              <div className="flex items-center">
+                {pin.status === 'unused' && (
+                  <input type="checkbox"
+                    checked={selectedIds.includes(pin.id)}
+                    onChange={() => toggleSelect(pin.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-3.5 h-3.5 accent-[#C9A84C] flex-shrink-0"
+                  />
+                )}
+              </div>
+              {/* Col 2: PIN Code */}
+              <p className="text-xs font-mono font-medium text-[#0D1B3E] truncate pr-2">
                 {pin.pin_code}
               </p>
               <span>
@@ -269,6 +361,10 @@ export default function PinsPage() {
                   {pin.status}
                 </span>
               </span>
+              {/* Created date */}
+              <p className="text-[10px] text-gray-400">
+                {new Date(pin.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
             </div>
           ))
         )}
@@ -278,7 +374,7 @@ export default function PinsPage() {
       {/* Generate PIN Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]">
             <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Generate PINs</h2>
               <button
@@ -309,22 +405,65 @@ export default function PinsPage() {
                 </select>
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-xs text-gray-400 mb-1">
                   City distributor <span className="text-[#C9A84C]">*</span>
                 </label>
-                <select
-                  value={form.city_dist_id}
-                  onChange={(e) => setForm({ ...form, city_dist_id: e.target.value })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                >
-                  <option value="">Select city distributor</option>
-                  {cityDists.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.full_name} (@{d.username})
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={distSearch || (form.city_dist_id ? (cityDists.find((d) => d.id === form.city_dist_id)?.full_name || '') : '')}
+                    onChange={(e) => {
+                      setDistSearch(e.target.value)
+                      setShowDistDrop(true)
+                      if (!e.target.value) setForm({ ...form, city_dist_id: '' })
+                    }}
+                    onFocus={() => setShowDistDrop(true)}
+                    onBlur={() => setTimeout(() => setShowDistDrop(false), 150)}
+                    placeholder="Search city distributor..."
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
+                  />
+                  {form.city_dist_id && (
+                    <button
+                      onClick={() => { setForm({ ...form, city_dist_id: '' }); setDistSearch('') }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs"
+                    >✕</button>
+                  )}
+                </div>
+                {showDistDrop && (
+                  <div className="absolute z-[200] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-36 overflow-y-auto">
+                    {cityDists
+                      .filter((d) =>
+                        !distSearch ||
+                        d.full_name.toLowerCase().includes(distSearch.toLowerCase()) ||
+                        d.username.toLowerCase().includes(distSearch.toLowerCase())
+                      )
+                      .map((d) => (
+                        <div
+                          key={d.id}
+                          onMouseDown={() => {
+                            setForm({ ...form, city_dist_id: d.id })
+                            setDistSearch('')
+                            setShowDistDrop(false)
+                          }}
+                          className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${
+                            form.city_dist_id === d.id ? 'bg-[#F0F2F8]' : ''
+                          }`}
+                        >
+                          <p className="text-xs font-medium text-[#0D1B3E]">{d.full_name}</p>
+                          <p className="text-[10px] text-gray-400">@{d.username}</p>
+                        </div>
+                      ))
+                    }
+                    {cityDists.filter((d) =>
+                      !distSearch ||
+                      d.full_name.toLowerCase().includes(distSearch.toLowerCase()) ||
+                      d.username.toLowerCase().includes(distSearch.toLowerCase())
+                    ).length === 0 && (
+                      <p className="text-xs text-gray-400 px-3 py-3 text-center">No distributor found</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -387,7 +526,47 @@ export default function PinsPage() {
                   disabled={formLoading}
                   className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60"
                 >
-                  {formLoading ? 'Generating...' : 'Generate PINs'}
+                  {formLoading ? '⏳ Generating...' : 'Generate PINs'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cancel Confirmation Modal ── */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
+              <h2 className="text-sm font-semibold text-[#0D1B3E]">Cancel PIN{selectedIds.length > 1 ? 's' : ''}</h2>
+              <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="flex items-start gap-3 bg-[#fdecea] rounded-xl p-3">
+                <span className="text-lg">⚠️</span>
+                <p className="text-xs text-[#a03030]">
+                  You are about to cancel <span className="font-semibold">{selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}</span>.
+                  Cancelled PINs cannot be used for reseller registration.
+                </p>
+              </div>
+              {cancelError && (
+                <p className="text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{cancelError}</p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setShowConfirm(false); setCancelError('') }}
+                  disabled={cancelling}
+                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors disabled:opacity-50"
+                >
+                  Keep PINs
+                </button>
+                <button
+                  onClick={confirmCancel}
+                  disabled={cancelling}
+                  className="flex-1 bg-[#fdecea] text-[#a03030] text-sm rounded-lg py-2.5 hover:bg-[#fcd9d9] transition-colors disabled:opacity-50 font-medium"
+                >
+                  {cancelling ? 'Cancelling...' : `✕ Cancel ${selectedIds.length} PIN${selectedIds.length > 1 ? 's' : ''}`}
                 </button>
               </div>
             </div>
