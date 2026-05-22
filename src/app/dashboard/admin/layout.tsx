@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
+import { useAutoLogout } from '@/app/hooks/useAutoLogout'
 
 const navItems = [
   {
@@ -159,6 +160,12 @@ export default function AdminLayout({
 }) {
   const pathname = usePathname()
   const router = useRouter()
+  const [showWarning, setShowWarning] = useState(false)
+
+  useAutoLogout({
+    onWarning: () => setShowWarning(true),
+    onLogout:  () => setShowWarning(false),
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
   const [pendingPayouts, setPendingPayouts] = useState(0)
@@ -200,6 +207,18 @@ export default function AdminLayout({
         background: '#F0F2F8',
       }}
     >
+      {/* Inactivity warning */}
+      {showWarning && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
+          <span>⚠️ You will be logged out in 30 seconds due to inactivity.</span>
+          <button
+            onClick={() => setShowWarning(false)}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+          >
+            Stay logged in
+          </button>
+        </div>
+      )}
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
         <Sidebar
