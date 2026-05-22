@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
+import { useAutoLogout } from '@/app/hooks/useAutoLogout'
 
 // ============================================================
 // NAV ITEMS
@@ -23,6 +24,7 @@ const navItems = [
       { label: 'PINs', href: '/dashboard/city/pins', icon: '🔑' },
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
+      { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
     ],
   },
   {
@@ -126,6 +128,12 @@ function Sidebar({
 export default function CityLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
+  const [showWarning, setShowWarning] = useState(false)
+
+  useAutoLogout({
+    onWarning: () => setShowWarning(true),
+    onLogout:  () => setShowWarning(false),
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
 
@@ -153,6 +161,18 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#F0F2F8' }}>
+      {/* Inactivity warning */}
+      {showWarning && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
+          <span>⚠️ You will be logged out in 30 seconds due to inactivity.</span>
+          <button
+            onClick={() => setShowWarning(false)}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+          >
+            Stay logged in
+          </button>
+        </div>
+      )}
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">

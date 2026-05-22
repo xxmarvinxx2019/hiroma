@@ -2,6 +2,48 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
+async function resolveSupplier(cityUserId: string) {
+  const cityProfile = await prisma.distributorProfile.findUnique({
+    where: { user_id: cityUserId },
+    select: {
+      region_code: true, province_code: true, parent_dist_id: true,
+      parent: {
+        include: {
+          user: { select: { id: true } },
+          parent: { include: { user: { select: { id: true } } } },
+        },
+      },
+    },
+  })
+
+  if (cityProfile?.parent?.dist_level === 'provincial' && cityProfile.parent.is_active)
+    return cityProfile.parent.user.id
+
+  if (cityProfile?.parent?.dist_level === 'regional' && cityProfile.parent.is_active)
+    return cityProfile.parent.user.id
+
+  if (cityProfile?.province_code) {
+    const provincial = await prisma.distributorProfile.findFirst({
+      where: { dist_level: 'provincial', province_code: cityProfile.province_code, is_active: true },
+      select: { user_id: true },
+    })
+    if (provincial) return provincial.user_id
+  }
+
+  if (cityProfile?.region_code) {
+    const regional = await prisma.distributorProfile.findFirst({
+      where: { dist_level: 'regional', region_code: cityProfile.region_code, is_active: true },
+      select: { user_id: true },
+    })
+    if (regional) return regional.user_id
+  }
+
+  const admin = await prisma.user.findFirst({
+    where: { role: 'admin' }, select: { id: true },
+  })
+  return admin?.id || null
+}
+
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -10,12 +52,71 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    // for_reseller=true → use reseller_price (walk-in orders)
-    // default          → use city_price (city dist ordering from supplier)
-    const forReseller = searchParams.get('for_reseller') === 'true'
+    const forOrdering  = searchParams.get('for_ordering') === 'true'
+    const forReseller  = searchParams.get('for_reseller') === 'true'
 
+    // ── For walk-in reseller orders: return city dist's own inventory ──
+    if (forReseller) {
+      const inventory = await prisma.inventory.findMany({
+        where: { owner_id: user.id, quantity: { gt: 0 } },
+        select: {
+          quantity: true,
+          product: {
+            select: {
+              id: true, name: true, type: true,
+              reseller_price: true, is_active: true,
+            },
+          },
+        },
+      })
+
+      const products = inventory
+        .filter((i) => i.product.is_active)
+        .map((i) => ({
+          id:                 i.product.id,
+          name:               i.product.name,
+          type:               i.product.type,
+          price:              Number(i.product.reseller_price),
+          available_quantity: i.quantity,
+        }))
+
+      return NextResponse.json({ products })
+    }
+
+    // ── For ordering from supplier: return supplier's inventory ──
+    if (forOrdering) {
+      const supplierId = await resolveSupplier(user.id)
+      if (!supplierId) return NextResponse.json({ products: [] })
+
+      const inventory = await prisma.inventory.findMany({
+        where: { owner_id: supplierId, quantity: { gt: 0 } },
+        select: {
+          quantity: true,
+          product: {
+            select: {
+              id: true, name: true, type: true,
+              city_price: true, is_active: true,
+            },
+          },
+        },
+      })
+
+      const products = inventory
+        .filter((i) => i.product.is_active)
+        .map((i) => ({
+          id:                 i.product.id,
+          name:               i.product.name,
+          type:               i.product.type,
+          price:              Number(i.product.city_price),
+          available_quantity: i.quantity,
+        }))
+
+      return NextResponse.json({ products })
+    }
+
+    // ── Default: return all active products visible to city dist (no stock check) ──
     const profile = await prisma.distributorProfile.findUnique({
-      where:  { user_id: user.id },
+      where: { user_id: user.id },
       select: { id: true },
     })
 
@@ -24,7 +125,7 @@ export async function GET(req: NextRequest) {
     }
 
     const visibilityRules = await prisma.productAreaVisibility.findMany({
-      where:  { distributor_id: profile.id },
+      where: { distributor_id: profile.id },
       select: { product_id: true, is_visible: true },
     })
 
@@ -39,42 +140,13 @@ export async function GET(req: NextRequest) {
       },
       orderBy: { name: 'asc' },
       select: {
-        id:              true,
-        name:            true,
-        type:            true,
-        city_price:      true,
-        reseller_price:  true,
-        description:     true,
-        image_url:       true,
+        id: true, name: true, type: true,
+        city_price: true, description: true, image_url: true,
       },
     })
 
-    // Get city distributor's inventory quantities
-    const productIds = products.map((p) => p.id)
-    const inventory  = await prisma.inventory.findMany({
-      where:  { owner_id: user.id, product_id: { in: productIds } },
-      select: { product_id: true, quantity: true },
-    })
-
-    const inventoryMap = new Map(inventory.map((i) => [i.product_id, i.quantity]))
-
-    const mapped = products.map((p) => ({
-      id:                 p.id,
-      name:               p.name,
-      type:               p.type,
-      description:        p.description,
-      image_url:          p.image_url,
-      // Use reseller_price for walk-in orders, city_price for supplier orders
-      price:              forReseller ? Number(p.reseller_price) : Number(p.city_price),
-      available_quantity: inventoryMap.get(p.id) ?? 0,
-    }))
-
-    // For walk-in: only show products actually in stock
-    const filtered = forReseller
-      ? mapped.filter((p) => p.available_quantity > 0)
-      : mapped
-
-    return NextResponse.json({ products: filtered })
+    const mapped = products.map((p: any) => ({ ...p, price: Number(p.city_price) }))
+    return NextResponse.json({ products: mapped })
   } catch (error) {
     console.error('[CITY PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

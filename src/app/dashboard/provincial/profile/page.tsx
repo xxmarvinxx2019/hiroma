@@ -36,22 +36,26 @@ function Section({ title, desc, children }: { title: string; desc: string; child
 }
 
 function InputField({
-  label, value, onChange, type = 'text', placeholder, disabled,
+  label, value, onChange, type = 'text', placeholder, disabled, hint,
 }: {
   label: string; value: string; onChange?: (v: string) => void
-  type?: string; placeholder?: string; disabled?: boolean
+  type?: string; placeholder?: string; disabled?: boolean; hint?: string
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-xs font-medium text-gray-500">{label}</label>
+        {disabled && <span className="text-[10px] text-gray-400 flex items-center gap-0.5">🔒 Admin only</span>}
+      </div>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-[#F0F2F8]"
       />
+      {hint && <p className="text-[10px] text-gray-400 mt-0.5">{hint}</p>}
     </div>
   )
 }
@@ -100,7 +104,7 @@ export default function ProvincialProfilePage() {
     const res = await fetch('/api/provincial/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profileForm),
+      body: JSON.stringify({ address: profileForm.address }),
     })
     const data = await res.json()
     setProfileSaving(false)
@@ -170,17 +174,18 @@ export default function ProvincialProfilePage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <InputField
             label="Full Name" value={profileForm.full_name}
-            onChange={(v) => setProfileForm((f) => ({ ...f, full_name: v }))}
+            disabled={true}
+            
             placeholder="Your full name"
           />
           <InputField
             label="Mobile" value={profileForm.mobile} type="tel"
-            onChange={(v) => setProfileForm((f) => ({ ...f, mobile: v }))}
+            disabled={true}
             placeholder="+63 9XX XXX XXXX"
           />
           <InputField
             label="Email" value={profileForm.email} type="email"
-            onChange={(v) => setProfileForm((f) => ({ ...f, email: v }))}
+            disabled={true}
             placeholder="Optional"
           />
           <InputField

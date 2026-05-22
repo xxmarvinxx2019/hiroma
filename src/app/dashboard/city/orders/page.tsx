@@ -17,6 +17,9 @@ interface Order {
   total_amount: number
   created_at: string
   notes: string | null
+  payment_method:    string | null
+  payment_reference: string | null
+  payment_status:    string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -64,6 +67,12 @@ const STATUS_NEXT: Record<string, string[]> = {
   cancelled:  [],
 }
 
+const PAYMENT_LABEL: Record<string, string> = {
+  cash_on_pickup: '💵 Cash on Pickup',
+  gcash:          '📱 GCash',
+  bank_transfer:  '🏦 Bank Transfer',
+}
+
 // ── City dist orders from supplier ──
 function CreateOrderModal({ supplier, onClose, onSuccess }: {
   supplier: Supplier; onClose: () => void; onSuccess: () => void
@@ -77,7 +86,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
   const [search, setSearch]         = useState('')
 
   useEffect(() => {
-    fetch('/api/city/products').then((r) => r.json()).then((d) => setProducts(d.products || []))
+    fetch('/api/city/products?for_ordering=true').then((r) => r.json()).then((d) => setProducts(d.products || []))
   }, [])
 
   const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
@@ -138,8 +147,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
                         <span className="text-xs text-gray-300">· {product.available_quantity} in stock</span>
                       </div>
                     </div>
-                    <button onClick={() => addToCart(product)}
-                      disabled={product.available_quantity === 0}
+                    <button onClick={() => addToCart(product)} disabled={product.available_quantity === 0}
                       className="text-xs bg-[#0D1B3E] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                       {product.available_quantity === 0 ? 'No stock' : '+ Add'}
                     </button>
@@ -161,19 +169,13 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center flex-shrink-0">−</button>
                       <input type="number" min={1} max={c.product.available_quantity} value={c.quantity}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value)
-                          if (!isNaN(v) && v > 0) updateQty(c.product.id, Math.min(v, c.product.available_quantity || 9999))
-                        }}
-                        className={`w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border outline-none focus:border-[#C9A84C] py-0.5 ${c.product.available_quantity && c.quantity >= c.product.available_quantity ? 'border-[#e05252]' : 'border-[#0D1B3E]/15'}`} />
+                        onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) updateQty(c.product.id, Math.min(v, c.product.available_quantity || 9999)) }}
+                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5" />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
                         disabled={!!c.product.available_quantity && c.quantity >= c.product.available_quantity}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center flex-shrink-0 disabled:opacity-30">+</button>
                       <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
-                    {!!c.product.available_quantity && c.quantity >= c.product.available_quantity && (
-                      <p className="text-[10px] text-[#e05252] mt-0.5">Max stock: {c.product.available_quantity}</p>
-                    )}
                   </div>
                 ))
               )}
@@ -205,6 +207,8 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
 function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [resellers, setResellers]           = useState<Reseller[]>([])
   const [selectedResellerId, setResellerId] = useState('')
+  const [resellerSearch, setResellerSearch] = useState('')
+  const [showResellerDrop, setShowResellerDrop] = useState(false)
   const [products, setProducts]             = useState<{ id: string; name: string; type: string; price: number; available_quantity: number }[]>([])
   const [cart, setCart]                     = useState<{ product: { id: string; name: string; type: string; price: number; available_quantity: number }; quantity: number }[]>([])
   const [orderType, setOrderType]           = useState<'online' | 'offline'>('offline')
@@ -248,11 +252,6 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   const handleSubmit = async () => {
     if (!selectedResellerId) { setError('Please select a reseller.'); return }
     if (cart.length === 0)   { setError('Add at least one item.'); return }
-    const overStock = cart.filter((c) => c.quantity > c.product.available_quantity)
-    if (overStock.length > 0) {
-      setError(`Insufficient stock: ${overStock.map((c) => `${c.product.name} (max ${c.product.available_quantity})`).join(', ')}`)
-      return
-    }
     setSubmitting(true); setError('')
     const res = await fetch('/api/city/orders/reseller-orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -277,13 +276,57 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
-              <div>
+              <div className="relative">
                 <label className="block text-xs text-gray-400 mb-1">Select Reseller</label>
-                <select value={selectedResellerId} onChange={(e) => setResellerId(e.target.value)}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
-                  <option value="">Choose reseller...</option>
-                  {resellers.map((r) => <option key={r.id} value={r.id}>{r.full_name} (@{r.username})</option>)}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={resellerSearch || (selectedResellerId ? (resellers.find((r) => r.id === selectedResellerId)?.full_name || '') : '')}
+                    onChange={(e) => {
+                      setResellerSearch(e.target.value)
+                      setShowResellerDrop(true)
+                      if (!e.target.value) setResellerId('')
+                    }}
+                    onFocus={() => setShowResellerDrop(true)}
+                    onBlur={() => setTimeout(() => setShowResellerDrop(false), 150)}
+                    placeholder="Search reseller..."
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
+                  />
+                  {selectedResellerId && (
+                    <button onClick={() => { setResellerId(''); setResellerSearch('') }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
+                  )}
+                </div>
+                {showResellerDrop && (
+                  <div className="absolute z-[100] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-40 overflow-y-auto">
+                    {resellers
+                      .filter((r) =>
+                        !resellerSearch ||
+                        r.full_name.toLowerCase().includes(resellerSearch.toLowerCase()) ||
+                        r.username.toLowerCase().includes(resellerSearch.toLowerCase())
+                      )
+                      .map((r) => (
+                        <div key={r.id}
+                          onMouseDown={() => {
+                            setResellerId(r.id)
+                            setResellerSearch('')
+                            setShowResellerDrop(false)
+                          }}
+                          className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${selectedResellerId === r.id ? 'bg-[#F0F2F8]' : ''}`}>
+                          <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
+                          <p className="text-[10px] text-gray-400">@{r.username}</p>
+                        </div>
+                      ))
+                    }
+                    {resellers.filter((r) =>
+                      !resellerSearch ||
+                      r.full_name.toLowerCase().includes(resellerSearch.toLowerCase()) ||
+                      r.username.toLowerCase().includes(resellerSearch.toLowerCase())
+                    ).length === 0 && (
+                      <p className="text-xs text-gray-400 px-3 py-3 text-center">No reseller found</p>
+                    )}
+                  </div>
+                )}
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products..."
                 disabled={!selectedResellerId}
@@ -321,11 +364,8 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">−</button>
                       <input type="number" min={1} max={c.product.available_quantity} value={c.quantity}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value)
-                          if (!isNaN(v) && v > 0) updateQty(c.product.id, Math.min(v, c.product.available_quantity || 9999))
-                        }}
-                        className={`w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border outline-none focus:border-[#C9A84C] py-0.5 ${c.product.available_quantity && c.quantity >= c.product.available_quantity ? 'border-[#e05252]' : 'border-[#0D1B3E]/15'}`} />
+                        onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) updateQty(c.product.id, Math.min(v, c.product.available_quantity || 9999)) }}
+                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5" />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
                         disabled={!!c.product.available_quantity && c.quantity >= c.product.available_quantity}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0 disabled:opacity-30">+</button>
@@ -418,6 +458,14 @@ export default function CityOrdersPage() {
     fetchOrders()
   }
 
+  const handleConfirmPayment = async (orderId: string) => {
+    await fetch('/api/city/orders', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId, payment_status: 'paid' }),
+    })
+    fetchOrders()
+  }
+
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -490,8 +538,13 @@ export default function CityOrdersPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
-          {[tab === 'my_orders' ? 'Supplier' : 'Buyer', 'Type', 'Amount', 'Status', 'Actions'].map((h) => (
+        {/* Table header — 6 cols for reseller orders (includes payment), 5 for my orders */}
+        <div className={`grid px-4 py-2 bg-[#F0F2F8]`}
+          style={{ gridTemplateColumns: tab === 'reseller_orders' ? '2fr 1fr 1fr 1fr 1fr 1.5fr' : '2fr 1fr 1fr 1fr 1fr' }}>
+          {(tab === 'reseller_orders'
+            ? ['Buyer', 'Payment', 'Type', 'Amount', 'Status', 'Actions']
+            : ['Supplier', 'Type', 'Amount', 'Status', 'Actions']
+          ).map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -511,19 +564,56 @@ export default function CityOrdersPage() {
             const nextStatuses = tab === 'reseller_orders' ? STATUS_NEXT[order.status] : (order.status === 'pending' ? ['cancelled'] : [])
             return (
               <div key={order.id}>
-                <div className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center cursor-pointer"
-                  onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}>
+                <div
+                  className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center cursor-pointer"
+                  style={{ gridTemplateColumns: tab === 'reseller_orders' ? '2fr 1fr 1fr 1fr 1fr 1.5fr' : '2fr 1fr 1fr 1fr 1fr' }}
+                  onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+                >
+                  {/* Counterparty */}
                   <div>
                     <p className="text-xs font-medium text-[#0D1B3E]">{counterparty.full_name}</p>
                     <p className="text-xs text-gray-400 capitalize">@{counterparty.username} · {counterparty.role}</p>
                   </div>
+
+                  {/* Payment info — only for reseller orders */}
+                  {tab === 'reseller_orders' && (
+                    <div>
+                      <p className="text-[10px] text-gray-500">{PAYMENT_LABEL[order.payment_method || 'cash_on_pickup'] || order.payment_method}</p>
+                      {order.payment_reference && (
+                        <p className="text-[10px] text-gray-400 truncate">Ref: {order.payment_reference}</p>
+                      )}
+                      {order.payment_status === 'paid' ? (
+                        <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
+                      ) : order.payment_method !== 'cash_on_pickup' ? (
+                        <span className="text-[10px] text-[#9a6f1e]">⏳ Unpaid</span>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Type */}
                   <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${order.order_type === 'online' ? 'bg-[#f0f7ff] text-[#2563eb]' : 'bg-[#eef0f8] text-[#0D1B3E]'}`}>{order.order_type}</span>
+
+                  {/* Amount */}
                   <div>
                     <p className="text-xs font-semibold text-[#0D1B3E]">₱{Number(order.total_amount).toLocaleString()}</p>
                     <p className="text-xs text-gray-400">{new Date(order.created_at).toLocaleDateString('en-PH')}</p>
                   </div>
+
+                  {/* Status */}
                   <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${STATUS_COLORS[order.status] || ''}`}>{order.status}</span>
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    {/* Confirm payment button */}
+                    {tab === 'reseller_orders' && order.payment_method && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                      <button
+                        onClick={() => handleConfirmPayment(order.id)}
+                        disabled={updatingId === order.id}
+                        className="text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] font-medium disabled:opacity-50"
+                      >
+                        ✓ Paid
+                      </button>
+                    )}
                     {nextStatuses.map((next) => (
                       <button key={next} disabled={updatingId === order.id} onClick={() => handleStatusUpdate(order.id, next)}
                         className={`text-xs px-2 py-1 rounded-lg capitalize transition-colors disabled:opacity-50 ${next === 'cancelled' ? 'bg-[#fdecea] text-[#a03030] hover:bg-[#fcd9d9]' : 'bg-[#0D1B3E] text-white hover:bg-[#162850]'}`}>
@@ -533,6 +623,7 @@ export default function CityOrdersPage() {
                     <span className="text-gray-300 text-xs ml-1">{expandedId === order.id ? '▲' : '▼'}</span>
                   </div>
                 </div>
+
                 {expandedId === order.id && (
                   <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>

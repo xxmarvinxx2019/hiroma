@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-// ── GET reseller's orders ──
+// ── GET reseller's orders + their city distributor as supplier ──
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -16,6 +16,14 @@ export async function GET(req: NextRequest) {
     const search   = searchParams.get('search')   || ''
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+
+    // Get city distributor from reseller profile
+    const profile = await prisma.resellerProfile.findUnique({
+      where: { user_id: user.id },
+      select: {
+        city_dist: { select: { id: true, full_name: true, username: true } },
+      },
+    })
 
     const where: Record<string, unknown> = {
       buyer_id: user.id,
@@ -78,6 +86,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       orders,
       summary,
+      supplier: profile?.city_dist || null,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -86,7 +95,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST place a new order to a chosen city distributor ──
+// ── POST place a new order to city distributor ──
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -94,33 +103,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, city_dist_id } = await req.json()
+    const { order_type, notes, items, payment_method, payment_reference } = await req.json()
 
-    if (!items || !Array.isArray(items) || items.length === 0)
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
-    if (!['online', 'offline'].includes(order_type))
-      return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
-    if (!city_dist_id)
-      return NextResponse.json({ error: 'Please select a city distributor.' }, { status: 400 })
+    }
 
-    // Validate city distributor
-    const cityDist = await prisma.user.findFirst({
-      where:  { id: city_dist_id, role: 'city', status: 'active' },
-      select: { id: true, full_name: true, username: true },
+    if (!['online', 'offline'].includes(order_type)) {
+      return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
+    }
+
+    // Get city distributor
+    const profile = await prisma.resellerProfile.findUnique({
+      where: { user_id: user.id },
+      select: {
+        city_dist: { select: { id: true, full_name: true, username: true } },
+      },
     })
 
-    if (!cityDist)
-      return NextResponse.json({ error: 'Selected city distributor not found or inactive.' }, { status: 404 })
+    if (!profile?.city_dist) {
+      return NextResponse.json({ error: 'City distributor not found.' }, { status: 400 })
+    }
 
     // Validate products
     const productIds = items.map((i: { product_id: string }) => i.product_id)
-    const products   = await prisma.product.findMany({
-      where:  { id: { in: productIds }, is_active: true },
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, is_active: true },
       select: { id: true, name: true, price: true, reseller_price: true },
     })
 
-    if (products.length !== productIds.length)
+    if (products.length !== productIds.length) {
       return NextResponse.json({ error: 'One or more products not found or inactive.' }, { status: 400 })
+    }
 
     const productMap = new Map(products.map((p) => [p.id, p]))
     let total_amount = 0
@@ -133,36 +147,18 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
 
-    // ── Validate seller has sufficient inventory for all items ──
-    const stockErrors: string[] = []
-    for (const item of items) {
-      const inventoryItem = await prisma.inventory.findFirst({
-        where: { owner_id: cityDist.id, product_id: item.product_id },
-        select: { quantity: true },
-      })
-      const available = inventoryItem?.quantity || 0
-      if (available < item.quantity) {
-        const product = productMap.get(item.product_id)
-        stockErrors.push(
-          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
-        )
-      }
-    }
-    if (stockErrors.length > 0) {
-      return NextResponse.json({
-        error: `Stock validation failed:\n${stockErrors.join('\n')}`,
-      }, { status: 400 })
-    }
-
     const order = await prisma.order.create({
       data: {
         buyer_id:          user.id,
-        seller_id:         cityDist.id,
+        seller_id:         profile.city_dist.id,
         order_type,
         status:            'pending',
         total_amount,
         is_cross_purchase: false,
         notes:             notes?.trim() || null,
+        payment_method:    payment_method || 'cash_on_pickup',
+        payment_reference: payment_reference?.trim() || null,
+        payment_status:    'unpaid',
         items:             { create: orderItems },
       },
       select: {
@@ -173,7 +169,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Order placed to ${cityDist.full_name}.`,
+      message: `Order placed to ${profile.city_dist.full_name}.`,
       order,
     })
   } catch (error) {
@@ -191,15 +187,17 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { order_id } = await req.json()
-    if (!order_id)
+    if (!order_id) {
       return NextResponse.json({ error: 'order_id is required.' }, { status: 400 })
+    }
 
     const order = await prisma.order.findFirst({
       where: { id: order_id, buyer_id: user.id, status: 'pending' },
     })
 
-    if (!order)
+    if (!order) {
       return NextResponse.json({ error: 'Order not found or cannot be cancelled.' }, { status: 404 })
+    }
 
     const updated = await prisma.order.update({
       where: { id: order_id },
