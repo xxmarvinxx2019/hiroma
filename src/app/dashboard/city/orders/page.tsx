@@ -86,7 +86,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
   const [search, setSearch]         = useState('')
 
   useEffect(() => {
-    fetch('/api/city/products').then((r) => r.json()).then((d) => setProducts(d.products || []))
+    fetch('/api/city/products?for_ordering=true').then((r) => r.json()).then((d) => setProducts(d.products || []))
   }, [])
 
   const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
