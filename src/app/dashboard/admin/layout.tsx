@@ -28,6 +28,7 @@ const navItems = [
     items: [
       { label: 'Orders', href: '/dashboard/admin/orders', icon: '🛒' },
       { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
+      { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
       { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
       { label: 'Reports', href: '/dashboard/admin/reports', icon: '📈' },
     ],

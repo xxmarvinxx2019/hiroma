@@ -27,6 +27,7 @@ model User {
   inventory             Inventory[]
   orders_bought         Order[]             @relation("OrderBuyer")
   orders_sold           Order[]             @relation("OrderSeller")
+  payment_methods       PaymentMethod[]
   payouts_approved      Payout[]            @relation("PayoutApprover")
   payouts               Payout[]            @relation("PayoutUser")
   pins_sold             Pin[]               @relation("PinSoldTo")
@@ -265,6 +266,9 @@ model Order {
   is_cross_purchase Boolean     @default(false)
   notes             String?
   created_at        DateTime    @default(now())
+  payment_method    String?     @default("cash_on_pickup") @db.VarChar
+  payment_reference String?     @db.VarChar
+  payment_status    String?     @default("unpaid") @db.VarChar
   items             OrderItem[]
   buyer             User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
   seller            User        @relation("OrderSeller", fields: [seller_id], references: [id])
@@ -345,4 +349,19 @@ enum PayoutStatus {
   pending
   approved
   rejected
+}
+
+model PaymentMethod {
+  id             String    @id @default(uuid())
+  user_id        String
+  type           String    @db.VarChar
+  account_name   String    @db.VarChar
+  account_number String    @db.VarChar
+  bank_name      String?   @db.VarChar
+  status         String    @default("pending") @db.VarChar
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(6)
+  user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("payment_methods")
 }

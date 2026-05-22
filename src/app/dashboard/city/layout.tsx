@@ -23,6 +23,7 @@ const navItems = [
       { label: 'PINs', href: '/dashboard/city/pins', icon: '🔑' },
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
+      { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
     ],
   },
   {
