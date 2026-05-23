@@ -257,7 +257,7 @@ export default function PackagesPage() {
                 <div className="flex flex-col gap-1.5 mb-4">
                   {[
                     { label: 'Direct referral bonus', value: `₱${Number(pkg.direct_referral_bonus).toLocaleString()}` },
-                    { label: 'Binary pairing bonus', value: `₱${Number(pkg.pairing_bonus_value).toLocaleString()}` },
+                    { label: 'Binary Points', value: `${Number(pkg.pairing_bonus_value).toLocaleString()} pts` },
                     { label: 'Product Binary Point Value', value: `₱${Number(pkg.point_php_value).toLocaleString()} / pt` },
                     { label: 'Point reset period', value: `Every ${pkg.point_reset_days} days` },
                   ].map((item) => (
@@ -345,50 +345,61 @@ export default function PackagesPage() {
               </div>
 
               {/* Bonus Values */}
-              <div className="bg-[#F0F2F8] rounded-lg p-3">
-                <p className="text-xs font-medium text-[#0D1B3E] mb-3">Bonus values</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Direct referral bonus (PHP) <span className="text-[#C9A84C]">*</span></label>
-                    <input
-                      type="number"
-                      value={form.direct_referral_bonus}
+              <div className="bg-[#F0F2F8] rounded-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-[#0D1B3E] mb-1">Bonus values</p>
+
+                {/* Each row: label left, input right — uniform alignment */}
+                {[
+                  {
+                    label: 'Direct Referral Bonus',
+                    hint:  'Fixed ₱ paid to sponsor on join',
+                    required: true,
+                    input: <input type="number" value={form.direct_referral_bonus}
                       onChange={(e) => setForm({ ...form, direct_referral_bonus: e.target.value })}
                       placeholder="e.g. 500"
-                      className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Binary pairing bonus (PHP) <span className="text-[#C9A84C]">*</span></label>
-                    <input
-                      type="number"
-                      value={form.pairing_bonus_value}
+                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                  },
+                  {
+                    label: 'Binary Points Value',
+                    hint: form.pairing_bonus_value && form.point_php_value
+                      ? `1 pair (${form.pairing_bonus_value}pts) = ₱${(Number(form.pairing_bonus_value) * Number(form.point_php_value)).toFixed(2)}`
+                      : 'Points added to upline on join',
+                    required: true,
+                    input: <input type="number" value={form.pairing_bonus_value}
                       onChange={(e) => setForm({ ...form, pairing_bonus_value: e.target.value })}
-                      placeholder="e.g. 300"
-                      className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Product Binary Point Value (PHP) <span className="text-[#C9A84C]">*</span></label>
-                    <input
-                      type="number"
-                      value={form.point_php_value}
+                      placeholder="e.g. 100"
+                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                  },
+                  {
+                    label: 'Product Point (₱/pt)',
+                    hint:  '0.50 means 100pts = ₱50',
+                    required: true,
+                    input: <input type="number" step="0.01" value={form.point_php_value}
                       onChange={(e) => setForm({ ...form, point_php_value: e.target.value })}
-                      placeholder="e.g. 50"
-                      className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Point reset (days)</label>
-                    <input
-                      type="number"
-                      value={form.point_reset_days}
+                      placeholder="e.g. 0.50"
+                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                  },
+                  {
+                    label: 'Product Pts Reset',
+                    hint:  'Days before product points reset',
+                    required: false,
+                    input: <input type="number" value={form.point_reset_days}
                       onChange={(e) => setForm({ ...form, point_reset_days: e.target.value })}
                       placeholder="e.g. 30"
-                      className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                    />
+                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                  },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-center justify-between gap-3 bg-white rounded-lg px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-[#0D1B3E]">
+                        {row.label}
+                        {row.required && <span className="text-[#C9A84C] ml-0.5">*</span>}
+                      </p>
+                      <p className="text-[10px] text-gray-400">{row.hint}</p>
+                    </div>
+                    {row.input}
                   </div>
-                </div>
+                ))}
               </div>
 
               {/* Products in package */}

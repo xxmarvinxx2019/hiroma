@@ -83,7 +83,11 @@ model ResellerProfile {
   package                 Package   @relation(fields: [package_id], references: [id])
   pin                     Pin       @relation(fields: [pin_id], references: [id])
   user                    User      @relation(fields: [user_id], references: [id])
-
+  left_points         Int       @default(0)
+  right_points        Int       @default(0)
+  daily_pairing_count Int       @default(0)
+  daily_pairing_date  DateTime? @db.Date
+  
   @@map("reseller_profiles")
 }
 

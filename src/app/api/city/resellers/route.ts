@@ -149,163 +149,193 @@ async function creditDirectReferralBonus(
   })
 }
 
-// ── Fire pairing bonus at a node ──
-// Bonus = lowest package value of the two paired resellers
-// + any pending_pairing_balance from previous higher-package pairings
-// Remainder saved back to pending_pairing_balance for next pairing
-async function firePairingAtNode(
-  nodeId: string,
-  newUserId: string,
-  leftChildId: string,
-  rightChildId: string
-) {
-  // Get both children's package values
-  const [leftNode, rightNode, parentNode] = await Promise.all([
-    prisma.binaryTreeNode.findUnique({
-      where:  { id: leftChildId },
-      select: {
-        user: {
-          select: {
-            reseller_profile: {
-              select: { package: { select: { pairing_bonus_value: true } } },
-            },
-          },
-        },
-      },
-    }),
-    prisma.binaryTreeNode.findUnique({
-      where:  { id: rightChildId },
-      select: {
-        user: {
-          select: {
-            reseller_profile: {
-              select: { package: { select: { pairing_bonus_value: true } } },
-            },
-          },
-        },
-      },
-    }),
-    prisma.binaryTreeNode.findUnique({
-      where:  { id: nodeId },
-      select: {
-        id:      true,
-        user_id: true,
-        parent_id: true,
-        user: {
-          select: {
-            reseller_profile: {
-              select: {
-                pending_pairing_balance: true,
-                package: { select: { pairing_bonus_value: true } },
-              },
-            },
-          },
-        },
-      },
-    }),
-  ])
+// ============================================================
+// BINARY PAIRING — Points-based system (correct implementation)
+// ============================================================
+//
+// Constants
+const POINTS_PER_PAIR      = 100   // 100 points = 1 pair
+const DAILY_PAIRING_CAP    = 12    // max 12 pairs per day per reseller
+const BINARY_POINT_TO_PESO = 0.50  // 1 binary point = ₱0.50 (fixed)
+//
+// How it works:
+// 1. New reseller's package pairing_bonus_value = their points contribution
+// 2. On registration, walk UP all ancestors
+// 3. Add new reseller's points to ancestor's left_points or right_points
+// 4. pairPoints = MIN(left_points, right_points)
+// 5. possiblePairs = floor(pairPoints / POINTS_PER_PAIR)
+// 6. paidPairs = MIN(possiblePairs, DAILY_CAP - usedToday)
+// 7. overflowPairs → credited to HIROMA
+// 8. earnings = paidPairs * POINTS_PER_PAIR * point_php_value
+// 9. Deduct pairPoints from BOTH left and right (remainder stays)
 
-  if (!parentNode?.user.reseller_profile) return
-
-  const leftBonus    = Number(leftNode?.user.reseller_profile?.package?.pairing_bonus_value  || 0)
-  const rightBonus   = Number(rightNode?.user.reseller_profile?.package?.pairing_bonus_value || 0)
-  const pendingBal   = Number(parentNode.user.reseller_profile.pending_pairing_balance || 0)
-
-  // Bonus = lowest of the two paired packages + any pending balance
-  const lowestBonus  = Math.min(leftBonus, rightBonus)
-  const remainder    = Math.abs(leftBonus - rightBonus) // difference stays pending
-  const totalBonus   = lowestBonus + pendingBal         // add any pending from before
-
-  console.log(`[PAIRING] Node ${nodeId} | left:₱${leftBonus} right:₱${rightBonus} pending:₱${pendingBal} | bonus:₱${totalBonus} new_remainder:₱${remainder}`)
-
-  if (totalBonus <= 0) return
-
-  // Credit bonus to this node's owner
-  await prisma.commission.create({
-    data: {
-      user_id:           parentNode.user_id,
-      type:              'binary_pairing',
-      amount:            totalBonus,
-      source_user_id:    newUserId,
-      cascade_remainder: remainder > 0 ? remainder : null,
-      is_pair_overflow:  false,
-    },
-  })
-
-  await prisma.wallet.update({
-    where: { user_id: parentNode.user_id },
-    data:  { balance: { increment: totalBonus }, total_earned: { increment: totalBonus } },
-  })
-
-  // Save remainder as pending for next pairing
-  await prisma.resellerProfile.update({
-    where: { user_id: parentNode.user_id },
-    data:  { pending_pairing_balance: remainder },
-  })
-
-  console.log(`[PAIRING] ✅ ₱${totalBonus} → ${parentNode.user_id} | new pending: ₱${remainder}`)
-}
-
-// ── Check and fire pairing bonus walking UP the tree ──
-// Uses recursive CTE to fetch entire ancestor chain in ONE query
-// then processes each level — safe for deep trees on Vercel
-async function checkAndFirePairingBonus(
+async function firePointsPairingBonus(
+  newUserId:    string,
+  newUserPts:   number,   // new reseller's package pairing_bonus_value (points)
   parentNodeId: string,
-  newUserId: string,
-  newPosition: 'left' | 'right'
+  newPosition:  'left' | 'right'
 ) {
-  // Step 1: Fetch entire ancestor chain + their children in one CTE
+  if (newUserPts <= 0) return
+
+  // Step 1: Fetch entire ancestor chain via CTE
   const ancestors = await prisma.$queryRaw<{
     id: string
+    user_id: string
     parent_id: string | null
     position: string | null
   }[]>`
     WITH RECURSIVE ancestor_chain AS (
-      SELECT id, parent_id, position
+      SELECT id, user_id, parent_id, position
       FROM binary_tree_nodes
       WHERE id = ${parentNodeId}
 
       UNION ALL
 
-      SELECT n.id, n.parent_id, n.position
+      SELECT n.id, n.user_id, n.parent_id, n.position
       FROM binary_tree_nodes n
       INNER JOIN ancestor_chain a ON n.id = a.parent_id
     )
-    SELECT id, parent_id, position FROM ancestor_chain
+    SELECT id, user_id, parent_id, position FROM ancestor_chain
   `
 
   if (!ancestors || ancestors.length === 0) return
 
-  // Step 2: Fetch ALL children for ALL ancestors in two batch queries
-  const ancestorIds = ancestors.map((a) => a.id)
+  // Step 2: Get HIROMA user for overflow
+  const hiromaUser = await prisma.user.findFirst({
+    where:  { username: 'hiroma' },
+    select: { id: true },
+  })
 
-  const [allLeftChildren, allRightChildren] = await Promise.all([
-    prisma.binaryTreeNode.findMany({
-      where:  { parent_id: { in: ancestorIds }, position: 'left' },
-      select: { id: true, parent_id: true },
-    }),
-    prisma.binaryTreeNode.findMany({
-      where:  { parent_id: { in: ancestorIds }, position: 'right' },
-      select: { id: true, parent_id: true },
-    }),
-  ])
+  // Step 3: Fetch all ancestor reseller profiles in one batch
+  const ancestorUserIds = ancestors.map((a) => a.user_id)
+  const profiles = await prisma.resellerProfile.findMany({
+    where:  { user_id: { in: ancestorUserIds } },
+    select: {
+      user_id:            true,
+      left_points:        true,
+      right_points:       true,
+      daily_pairing_count: true,
+      daily_pairing_date:  true,
+      // point_php_value is for product binary only — binary pairing uses fixed BINARY_POINT_TO_PESO
+    },
+  })
+  const profileMap = new Map(profiles.map((p) => [p.user_id, p]))
 
-  const leftMap  = new Map(allLeftChildren.map((c)  => [c.parent_id, c.id]))
-  const rightMap = new Map(allRightChildren.map((c) => [c.parent_id, c.id]))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
 
-  // Process each ancestor — only fire if both sides exist
-  // Run sequentially to preserve order (bottom up)
-  for (const ancestor of ancestors) {
-    const leftId  = leftMap.get(ancestor.id)
-    const rightId = rightMap.get(ancestor.id)
+  // Step 4: Walk up ancestors — add points and check pairs
+  // Track which leg we came from as we walk up
+  let currentLeg = newPosition
 
-    if (!leftId || !rightId) {
-      console.log(`[PAIRING] Node ${ancestor.id} missing a leg — skip`)
+  for (let i = 0; i < ancestors.length; i++) {
+    const ancestor = ancestors[i]
+    const profile  = profileMap.get(ancestor.user_id)
+
+    if (!profile) {
+      // No reseller profile (e.g. HIROMA root) — skip pairing but continue walk
+      // Update leg for next ancestor
+      if (ancestors[i + 1]) {
+        currentLeg = ancestor.position as 'left' | 'right' || currentLeg
+      }
       continue
     }
 
-    await firePairingAtNode(ancestor.id, newUserId, leftId, rightId)
+    // Add new reseller's points to the correct leg
+    let leftPts  = Number(profile.left_points  || 0)
+    let rightPts = Number(profile.right_points || 0)
+
+    if (currentLeg === 'left')  leftPts  += newUserPts
+    if (currentLeg === 'right') rightPts += newUserPts
+
+    // Calculate pairs
+    const pairPoints    = Math.min(leftPts, rightPts)
+    const possiblePairs = Math.floor(pairPoints / POINTS_PER_PAIR)
+
+    console.log(`[BINARY] Ancestor ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | possible pairs:${possiblePairs}`)
+
+    if (possiblePairs > 0) {
+      // Check daily cap
+      const lastPairDate = profile.daily_pairing_date
+        ? new Date(profile.daily_pairing_date) : null
+      const isToday    = lastPairDate && lastPairDate >= today
+      const usedToday  = isToday ? Number(profile.daily_pairing_count || 0) : 0
+      const remaining  = Math.max(0, DAILY_PAIRING_CAP - usedToday)
+
+      const paidPairs     = Math.min(possiblePairs, remaining)
+      const overflowPairs = possiblePairs - paidPairs
+
+      const paidEarnings     = paidPairs     * POINTS_PER_PAIR * BINARY_POINT_TO_PESO
+      const overflowEarnings = overflowPairs * POINTS_PER_PAIR * BINARY_POINT_TO_PESO
+
+      // Deduct paired points from BOTH sides (remainder naturally stays)
+      const deduct = possiblePairs * POINTS_PER_PAIR
+      leftPts  -= deduct
+      rightPts -= deduct
+
+      console.log(`[BINARY] ✅ ${ancestor.user_id} | paid:${paidPairs} overflow:${overflowPairs} | earning:₱${paidEarnings}`)
+
+      // Credit paid pairs to this reseller
+      if (paidPairs > 0 && paidEarnings > 0) {
+        await prisma.commission.create({
+          data: {
+            user_id:          ancestor.user_id,
+            type:             'binary_pairing',
+            amount:           paidEarnings,
+            points:           paidPairs * POINTS_PER_PAIR,
+            source_user_id:   newUserId,
+            is_pair_overflow: false,
+          },
+        })
+        await prisma.wallet.update({
+          where: { user_id: ancestor.user_id },
+          data:  { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } },
+        })
+      }
+
+      // Credit overflow pairs to HIROMA
+      if (overflowPairs > 0 && overflowEarnings > 0 && hiromaUser) {
+        await prisma.commission.create({
+          data: {
+            user_id:          hiromaUser.id,
+            type:             'binary_pairing',
+            amount:           overflowEarnings,
+            points:           overflowPairs * POINTS_PER_PAIR,
+            source_user_id:   newUserId,
+            overflow_to:      hiromaUser.id,
+            is_pair_overflow: true,
+          },
+        })
+        await prisma.wallet.upsert({
+          where:  { user_id: hiromaUser.id },
+          update: { balance: { increment: overflowEarnings }, total_earned: { increment: overflowEarnings } },
+          create: { user_id: hiromaUser.id, balance: overflowEarnings, total_earned: overflowEarnings, total_withdrawn: 0 },
+        })
+      }
+
+      // Update reseller's left/right points + daily count
+      await prisma.resellerProfile.update({
+        where: { user_id: ancestor.user_id },
+        data: {
+          left_points:         leftPts,
+          right_points:        rightPts,
+          daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs,
+          daily_pairing_date:  today,
+        },
+      })
+    } else {
+      // No pairs fired — just update the accumulated points
+      await prisma.resellerProfile.update({
+        where: { user_id: ancestor.user_id },
+        data:  { left_points: leftPts, right_points: rightPts },
+      })
+    }
+
+    // Move up — next ancestor's leg is this node's position
+    currentLeg = ancestor.position as 'left' | 'right' || currentLeg
   }
+
+  console.log('[BINARY] Tree walk complete')
 }
 
 // ============================================================
@@ -553,13 +583,19 @@ export async function POST(req: NextRequest) {
         const directBonus = Number(referrerProfile?.package?.direct_referral_bonus || 0)
         await creditDirectReferralBonus(referrer.id, newUser.id, directBonus)
 
-        if (otherSideExists) {
-          await checkAndFirePairingBonus(
-            actual_parent_node_id,
-            newUser.id,
-            actual_position as 'left' | 'right'
-          )
-        }
+        // Always fire points pairing — adds points to ancestors even if no pair yet
+        // Pairs fire when MIN(left, right) >= 100
+        const pkg = await prisma.package.findUnique({
+          where:  { id: pin.package_id },
+          select: { pairing_bonus_value: true },
+        })
+        const newUserPts = Number(pkg?.pairing_bonus_value || 0)
+        await firePointsPairingBonus(
+          newUser.id,
+          newUserPts,
+          actual_parent_node_id,
+          actual_position as 'left' | 'right'
+        )
       } catch (e) {
         console.error('[REGISTER] Commission error:', e)
       }
