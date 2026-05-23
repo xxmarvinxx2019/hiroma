@@ -19,6 +19,10 @@ interface TreeNode {
   total_earned:           number
   left_count:             number
   right_count:            number
+  pairing_bonus_value:     number
+  pending_pairing_balance: number
+  left_points:             number
+  right_points:            number
 }
 
 interface TreeMeta {
@@ -125,6 +129,26 @@ function NodeCard({ node, isRoot }: { node: TreeNode; isRoot?: boolean }) {
           <div className="flex justify-between text-[10px] text-white/40">
             <span>Left / Right</span>
             <span>{node.left_count} / {node.right_count}</span>
+          </div>
+          <div className="border-t border-white/10 pt-1 mt-1 space-y-1">
+            <div className="flex justify-between text-[10px] text-white/40">
+              <span>Binary Pts Value</span>
+              <span className="text-[#C9A84C]">{node.pairing_bonus_value} pts</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-white/40">
+              <span>Left Points</span>
+              <span className="text-[#2563eb]">{node.left_points} pts</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-white/40">
+              <span>Right Points</span>
+              <span className="text-[#2563eb]">{node.right_points} pts</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-white/40">
+              <span>Carry Over</span>
+              <span className={node.pending_pairing_balance > 0 ? 'text-[#9a6f1e]' : 'text-white/40'}>
+                {node.pending_pairing_balance} pts
+              </span>
+            </div>
           </div>
         </div>
       )}

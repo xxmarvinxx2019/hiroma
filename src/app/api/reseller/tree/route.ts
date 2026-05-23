@@ -63,8 +63,12 @@ interface TreeNode {
   binary_pairing_earned:  number
   product_points_earned:  number
   total_earned:           number
-  left_count:             number
-  right_count:            number
+  left_count:              number
+  right_count:             number
+  pairing_bonus_value:     number
+  pending_pairing_balance: number
+  left_points:             number
+  right_points:            number
 }
 
 function buildTreeFromNodes(
@@ -72,7 +76,8 @@ function buildTreeFromNodes(
   rootId: string,
   selfUserId: string,
   commissionMap: Map<string, { direct: number; pairing: number; points: number; total: number }>,
-  countMap: Map<string, { left: number; right: number }>
+  countMap: Map<string, { left: number; right: number }>,
+  profileMap: Map<string, { pairing_bonus_value: number; pending_pairing_balance: number; left_points: number; right_points: number }>
 ): TreeNode | null {
   const node = nodes.find((n) => n.id === rootId)
   if (!node) return null
@@ -91,14 +96,18 @@ function buildTreeFromNodes(
     position:     node.position,
     is_self:      node.user_id === selfUserId,
     depth:        node.depth,
-    left_child:   leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  selfUserId, commissionMap, countMap) : null,
-    right_child:  rightChild ? buildTreeFromNodes(nodes, rightChild.id, selfUserId, commissionMap, countMap) : null,
+    left_child:   leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  selfUserId, commissionMap, countMap, profileMap) : null,
+    right_child:  rightChild ? buildTreeFromNodes(nodes, rightChild.id, selfUserId, commissionMap, countMap, profileMap) : null,
     direct_referral_earned: commissions.direct,
     binary_pairing_earned:  commissions.pairing,
     product_points_earned:  commissions.points,
     total_earned:           commissions.total,
-    left_count:             counts.left,
-    right_count:            counts.right,
+    left_count:              counts.left,
+    right_count:             counts.right,
+    pairing_bonus_value:     profileMap.get(node.user_id)?.pairing_bonus_value     || 0,
+    pending_pairing_balance: profileMap.get(node.user_id)?.pending_pairing_balance || 0,
+    left_points:             profileMap.get(node.user_id)?.left_points             || 0,
+    right_points:            profileMap.get(node.user_id)?.right_points            || 0,
   }
 }
 
@@ -159,6 +168,26 @@ export async function GET(req: NextRequest) {
     const userIds  = allNodes.map((n) => n.user_id)
     const nodeIds  = allNodes.map((n) => n.id)
 
+    // Fetch pairing bonus values and pending balances for all nodes
+    const resellerProfiles = await prisma.resellerProfile.findMany({
+      where:  { user_id: { in: userIds } },
+      select: {
+        user_id:                 true,
+        pending_pairing_balance: true,
+        left_points:             true,
+        right_points:            true,
+        package: { select: { pairing_bonus_value: true } },
+      },
+    })
+    const profileMap = new Map(
+      resellerProfiles.map((p) => [p.user_id, {
+        pairing_bonus_value:     Number(p.package?.pairing_bonus_value || 0),
+        pending_pairing_balance: Math.max(Number(p.left_points || 0), Number(p.right_points || 0)),
+        left_points:             Number(p.left_points  || 0),
+        right_points:            Number(p.right_points || 0),
+      }])
+    )
+
     const [allCommissions, allCounts] = await Promise.all([
       prisma.commission.groupBy({
         by:    ['user_id', 'type'],
@@ -183,7 +212,7 @@ export async function GET(req: NextRequest) {
     }
 
     const countMap = new Map(allCounts.map((n) => [n.id, { left: n.left_count, right: n.right_count }]))
-    const tree     = buildTreeFromNodes(allNodes, myNode.id, user.id, commissionMap, countMap)
+    const tree     = buildTreeFromNodes(allNodes, myNode.id, user.id, commissionMap, countMap, profileMap)
 
     return NextResponse.json({
       tree,
