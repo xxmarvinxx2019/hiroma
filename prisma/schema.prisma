@@ -38,7 +38,8 @@ model User {
   creator               User?               @relation("UserCreatedBy", fields: [created_by], references: [id])
   created_users         User[]              @relation("UserCreatedBy")
   wallet                Wallet?
-
+  pairing_logs    PairingLog[]
+  
   @@map("users")
 }
 
@@ -291,6 +292,19 @@ model OrderItem {
   product    Product @relation(fields: [product_id], references: [id])
 
   @@map("order_items")
+}
+
+model PairingLog {
+  id                String   @id @default(uuid())
+  member_id         String
+  left_points_used  Int      @default(0)
+  right_points_used Int      @default(0)
+  pairs_created     Int      @default(0)
+  commission        Decimal  @db.Decimal(10, 2)
+  date_created      DateTime @default(now()) @db.Timestamptz(6)
+  member            User     @relation(fields: [member_id], references: [id])
+
+  @@map("pairing_logs")
 }
 
 model PaymentMethod {
