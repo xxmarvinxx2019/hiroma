@@ -23,6 +23,7 @@ const navItems = [
       { label: 'Inventory', href: '/dashboard/regional/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/regional/orders', icon: '🛒' },
       { label: 'Payment Methods', href: '/dashboard/regional/payment-methods', icon: '💳' },
+      { label: 'Provincial Distributors', href: '/dashboard/regional/distributors', icon: '🏢' },
     ],
   },
   {

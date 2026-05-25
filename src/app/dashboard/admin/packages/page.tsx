@@ -362,7 +362,7 @@ export default function PackagesPage() {
                   {
                     label: 'Binary Points Value',
                     hint: form.pairing_bonus_value && form.point_php_value
-                      ? `1 pair (${form.pairing_bonus_value}pts) = ₱${(Number(form.pairing_bonus_value) * Number(form.point_php_value)).toFixed(2)}`
+                      ? `1 pair (${form.pairing_bonus_value}pts) = ₱${(Number(form.pairing_bonus_value) * Number(0.50)).toFixed(2)}`
                       : 'Points added to upline on join',
                     required: true,
                     input: <input type="number" value={form.pairing_bonus_value}
