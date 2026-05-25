@@ -12,6 +12,7 @@ interface Product {
   name:             string
   description:      string | null
   type:             string
+  price:            number  // SRP
   cost_price:       number
   regional_price:   number
   provincial_price: number
@@ -41,6 +42,7 @@ export default function ProductsPage() {
     name:             '',
     description:      '',
     type:             'physical',
+    srp:              '',
     cost_price:       '',
     regional_price:   '',
     provincial_price: '',
@@ -83,7 +85,7 @@ export default function ProductsPage() {
 
   const openCreate = () => {
     setEditProduct(null)
-    setForm({ name: '', description: '', type: 'physical', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '' })
+    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '' })
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -95,6 +97,7 @@ export default function ProductsPage() {
       name:             p.name,
       description:      p.description      || '',
       type:             p.type,
+      srp:              String(p.price),
       cost_price:       String(p.cost_price),
       regional_price:   String(p.regional_price),
       provincial_price: String(p.provincial_price),
@@ -255,7 +258,8 @@ export default function ProductsPage() {
                 </span>
               </span>
               <div>
-                <p className="text-xs font-semibold text-[#C9A84C]">₱{Number(p.reseller_price).toLocaleString()} <span className="text-gray-400 font-normal">SRP</span></p>
+                <p className="text-xs font-semibold text-[#C9A84C]">₱{Number(p.price).toLocaleString()} <span className="text-gray-400 font-normal">SRP</span></p>
+                <p className="text-xs text-gray-400">Reseller: ₱{Number(p.reseller_price).toLocaleString()}</p>
                 <p className="text-[10px] text-gray-400">Cost: ₱{Number(p.cost_price).toLocaleString()}</p>
               </div>
               <span>
@@ -342,15 +346,16 @@ export default function ProductsPage() {
                 <p className="text-xs font-medium text-[#0D1B3E]">Price Points</p>
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Cost Price',       key: 'cost_price',       hint: 'Production/source cost' },
-                    { label: 'Regional Price',   key: 'regional_price',   hint: 'Regional distributor pays' },
-                    { label: 'Provincial Price', key: 'provincial_price', hint: 'Provincial distributor pays' },
-                    { label: 'City Price',       key: 'city_price',       hint: 'City distributor pays' },
-                    { label: 'Reseller Price',   key: 'reseller_price',   hint: 'SRP / reseller reference *' },
+                    { label: 'SRP',              key: 'srp',              hint: 'Suggested Retail Price shown to customers *',   required: true  },
+                    { label: 'Reseller Price',   key: 'reseller_price',   hint: 'Price reseller pays to city dist *',             required: true  },
+                    { label: 'Cost Price',       key: 'cost_price',       hint: 'Production / source cost',                      required: false },
+                    { label: 'City Price',       key: 'city_price',       hint: 'Price city distributor pays',                   required: false },
+                    { label: 'Provincial Price', key: 'provincial_price', hint: 'Price provincial distributor pays',             required: false },
+                    { label: 'Regional Price',   key: 'regional_price',   hint: 'Price regional distributor pays',               required: false },
                   ].map((f) => (
-                    <div key={f.key} className={f.key === 'reseller_price' ? 'col-span-2' : ''}>
+                    <div key={f.key} className="">
                       <label className="block text-xs text-gray-400 mb-1">
-                        {f.label} {f.key === 'reseller_price' && <span className="text-[#C9A84C]">*</span>}
+                        {f.label} {f.required && <span className="text-[#C9A84C]">*</span>}
                       </label>
                       <div className="relative">
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">₱</span>

@@ -18,7 +18,7 @@ interface Product {
 interface PackageProduct {
   product_id: string
   quantity: number
-  product: { name: string; price: number; reseller_price: number }
+  product: { name: string; price: number; reseller_price: number }  // price = SRP
 }
 
 interface Package {
@@ -236,7 +236,7 @@ export default function PackagesPage() {
                   </p>
                   {pkg.products.length > 0 && (
                     <p className="text-[#e8f7ef] text-xs mt-0.5">
-                      Total: ₱{(Number(pkg.price) + pkg.products.reduce((s, p) => s + Number(p.product.reseller_price || p.product.price) * p.quantity, 0)).toLocaleString()}
+                      Total: ₱{(Number(pkg.price) + pkg.products.reduce((s, p) => s + Number(p.product.price || p.product.reseller_price || 0) * p.quantity, 0)).toLocaleString()}
                     </p>
                   )}
                 </div>
@@ -348,7 +348,6 @@ export default function PackagesPage() {
               <div className="bg-[#F0F2F8] rounded-lg p-3 space-y-2">
                 <p className="text-xs font-medium text-[#0D1B3E] mb-1">Bonus values</p>
 
-                {/* Each row: label left, input right — uniform alignment */}
                 {[
                   {
                     label: 'Direct Referral Bonus',
@@ -410,7 +409,7 @@ export default function PackagesPage() {
                     {selectedProducts.length > 0 && (() => {
                       const productTotal = selectedProducts.reduce((sum, sp) => {
                         const prod = products.find((p) => p.id === sp.product_id)
-                        return sum + (Number(prod?.reseller_price || prod?.price || 0) * sp.quantity)
+                        return sum + (Number(prod?.price || prod?.reseller_price || 0) * Number(sp.quantity))
                       }, 0)
                       const pinPrice = parseFloat(form.price) || 0
                       const margin   = pinPrice - productTotal
@@ -449,7 +448,7 @@ export default function PackagesPage() {
                           <option value="">Select product</option>
                           {products.map((p) => (
                             <option key={p.id} value={p.id}>
-                              {p.name} — ₱{Number(p.price).toLocaleString()}
+                              {p.name} — SRP: ₱{Number(p.price).toLocaleString()}
                             </option>
                           ))}
                         </select>
