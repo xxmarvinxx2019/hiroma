@@ -39,13 +39,7 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const stats = {
-      total:    0,
-      physical: 0,
-      digital:  0,
-      active:   0,
-      inactive: 0,
-    }
+    const stats = { total: 0, physical: 0, digital: 0, active: 0, inactive: 0 }
     for (const row of summary) {
       stats.total    += row._count.id
       if (row.type === 'physical') stats.physical += row._count.id
@@ -55,8 +49,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      products,
-      stats,
+      products, stats,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -72,10 +65,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { name, description, type, cost_price, regional_price, provincial_price, city_price, reseller_price, image_url } = await req.json()
+    const {
+      name, description, type, image_url,
+      srp, cost_price,
+      regional_price, provincial_price, city_price, reseller_price,
+    } = await req.json()
 
-    if (!name || !reseller_price) {
-      return NextResponse.json({ error: 'Name and reseller price are required.' }, { status: 400 })
+    if (!name || !reseller_price || !srp) {
+      return NextResponse.json({ error: 'Name, reseller price and SRP are required.' }, { status: 400 })
     }
 
     const product = await prisma.product.create({
@@ -83,7 +80,7 @@ export async function POST(req: NextRequest) {
         name:             name.trim(),
         description:      description?.trim() || null,
         type:             type || 'physical',
-        price:            reseller_price, // keep price in sync with reseller_price
+        price:            parseFloat(srp),            // SRP — independent field
         cost_price:       parseFloat(cost_price       || 0),
         regional_price:   parseFloat(regional_price   || 0),
         provincial_price: parseFloat(provincial_price || 0),
@@ -100,7 +97,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
-// ── PATCH update product ──
+
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -108,7 +105,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { id, name, description, type, cost_price, regional_price, provincial_price, city_price, reseller_price, image_url, is_active } = await req.json()
+    const {
+      id, name, description, type, image_url, is_active,
+      srp, cost_price,
+      regional_price, provincial_price, city_price, reseller_price,
+    } = await req.json()
 
     if (!id) {
       return NextResponse.json({ error: 'Product ID is required.' }, { status: 400 })
@@ -120,11 +121,12 @@ export async function PATCH(req: NextRequest) {
         ...(name             != null && { name:             name.trim() }),
         ...(description      != null && { description:      description?.trim() || null }),
         ...(type             != null && { type }),
+        ...(srp              != null && { price:            parseFloat(srp) }),  // SRP independent
         ...(cost_price       != null && { cost_price:       parseFloat(cost_price) }),
         ...(regional_price   != null && { regional_price:   parseFloat(regional_price) }),
         ...(provincial_price != null && { provincial_price: parseFloat(provincial_price) }),
         ...(city_price       != null && { city_price:       parseFloat(city_price) }),
-        ...(reseller_price   != null && { reseller_price:   parseFloat(reseller_price), price: parseFloat(reseller_price) }),
+        ...(reseller_price   != null && { reseller_price:   parseFloat(reseller_price) }),
         ...(image_url        != null && { image_url:        image_url?.trim() || null }),
         ...(is_active        != null && { is_active }),
       },
@@ -137,7 +139,6 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// ── DELETE product ──
 export async function DELETE(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -150,7 +151,6 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Product ID is required.' }, { status: 400 })
     }
 
-    // Soft delete — just deactivate
     await prisma.product.update({
       where: { id },
       data:  { is_active: false },
