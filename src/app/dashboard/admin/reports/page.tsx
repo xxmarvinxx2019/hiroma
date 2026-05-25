@@ -1,28 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 
 // ============================================================
 // TYPES
 // ============================================================
 
-interface DailySale {
-  date:    string
-  orders:  number
-  revenue: number
-  units:   number
-}
-
-interface TopProduct {
-  product_id: string
-  name:       string
-  type:       string
-  units_sold: number
-  revenue:    number
-}
+interface DailySale   { date: string; orders: number; revenue: number }
+interface TopProduct  { product_id: string; name: string; type: string; units_sold: number; revenue: number }
+interface ProductSale { product_id: string; name: string; type: string; units_sold: number; revenue: number; cost: number; profit: number }
+interface PinSale     { package_id: string; package_name: string; pins_sold: number; revenue: number }
 
 interface ReportData {
-  period: { days: number; since: string }
+  period: { days: number; since: string; until: string; dateFrom: string | null; dateTo: string | null }
   network: {
     totalResellers: number; activeResellers: number; suspendedResellers: number
     totalDistributors: number; regionalCount: number; provincialCount: number; cityCount: number
@@ -49,6 +40,13 @@ interface ReportData {
     totalProducts: number; physicalProducts: number; digitalProducts: number
     totalPackages: number; totalPinsGenerated: number; unusedPins: number; usedPins: number
   }
+  overview: {
+    totalProductRevenue: number; totalProductCost: number; totalProductProfit: number; totalProductUnitsSold: number
+    totalPinRevenue: number; totalPinsSoldPeriod: number
+    overallRevenue: number; overallProfit: number
+  }
+  productSales: { breakdown: ProductSale[]; resellerOrders: { product_id: string; name: string; type: string; units_sold: number; revenue: number }[] }
+  pinSales: { breakdown: PinSale[]; totalRevenue: number; totalPinsSold: number }
   charts: { dailySales: DailySale[]; topProducts: TopProduct[] }
 }
 
@@ -56,17 +54,8 @@ interface ReportData {
 // HELPERS
 // ============================================================
 
-const fmt  = (n: number) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtN = (n: number) => n.toLocaleString()
-
-function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div className="mb-4">
-      <h2 className="text-base font-semibold text-[#0D1B3E]">{title}</h2>
-      {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
-    </div>
-  )
-}
+const fmt  = (n: number) => `₱${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtN = (n: number) => Number(n).toLocaleString()
 
 function StatCard({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
@@ -78,53 +67,38 @@ function StatCard({ label, value, accent, sub }: { label: string; value: string;
   )
 }
 
-// Simple bar chart using SVG
-function DailyChart({ data, days }: { data: DailySale[]; days: number }) {
-  if (!data.length) return <p className="text-center text-gray-400 text-sm py-8">No data yet.</p>
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-base font-semibold text-[#0D1B3E]">{title}</h2>
+      {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+    </div>
+  )
+}
 
-  const maxRevenue = Math.max(...data.map((d) => d.revenue), 1)
-  const barWidth   = Math.max(4, Math.floor(560 / data.length) - 2)
-
+// Simple SVG bar chart
+function BarChart({ data }: { data: DailySale[] }) {
+  if (!data.length) return null
+  const max = Math.max(...data.map((d) => d.revenue), 1)
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 600 160`} className="w-full" style={{ minWidth: '400px' }}>
-        {/* Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-          <line key={pct}
-            x1="30" y1={130 - pct * 110}
-            x2="590" y2={130 - pct * 110}
-            stroke="#e5e7eb" strokeWidth="0.5" />
-        ))}
-        {/* Y axis labels */}
-        {[0, 0.5, 1].map((pct) => (
-          <text key={pct}
-            x="28" y={134 - pct * 110}
-            textAnchor="end" fontSize="7" fill="#9ca3af">
-            {pct === 0 ? '0' : pct === 0.5 ? fmt(maxRevenue * 0.5).replace('₱', '') : fmt(maxRevenue).replace('₱', '')}
-          </text>
-        ))}
-        {/* Bars */}
-        {data.map((d, i) => {
-          const x      = 32 + i * (barWidth + 2)
-          const height = Math.max(1, (d.revenue / maxRevenue) * 110)
-          const y      = 130 - height
+      <div className="flex items-end gap-1 h-32 min-w-max px-1">
+        {data.map((d) => {
+          const h = Math.max(4, (d.revenue / max) * 120)
           return (
-            <g key={d.date}>
-              <rect x={x} y={y} width={barWidth} height={height}
-                fill={d.revenue > 0 ? '#C9A84C' : '#e5e7eb'} rx="1" opacity="0.85" />
-              {/* X label — only show every N days */}
-              {(i === 0 || i === Math.floor(data.length / 2) || i === data.length - 1) && (
-                <text x={x + barWidth / 2} y="148" textAnchor="middle" fontSize="7" fill="#9ca3af">
-                  {d.date.slice(5)}
-                </text>
-              )}
-            </g>
+            <div key={d.date} className="flex flex-col items-center gap-1 group relative">
+              <div className="absolute bottom-8 bg-[#0D1B3E] text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                {new Date(d.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}<br />
+                {fmt(d.revenue)}<br />
+                {d.orders} orders
+              </div>
+              <div className="w-5 bg-[#C9A84C] rounded-t transition-all" style={{ height: `${h}px` }} />
+              <p className="text-[8px] text-gray-400 rotate-45 origin-left whitespace-nowrap mt-1">
+                {new Date(d.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+              </p>
+            </div>
           )
         })}
-      </svg>
-      <div className="flex justify-between text-[10px] text-gray-400 mt-1 px-1">
-        <span>{data.reduce((s, d) => s + d.orders, 0)} total orders</span>
-        <span>{fmt(data.reduce((s, d) => s + d.revenue, 0))} total revenue</span>
       </div>
     </div>
   )
@@ -135,194 +109,509 @@ function DailyChart({ data, days }: { data: DailySale[]; days: number }) {
 // ============================================================
 
 export default function AdminReportsPage() {
-  const [report, setReport] = useState<ReportData | null>(null)
+  const [report, setReport]   = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [days, setDays]       = useState(30)
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'pins' | 'network' | 'mlm'>('overview')
 
-  useEffect(() => {
+  // Filters
+  const [days,     setDays]     = useState(30)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo,   setDateTo]   = useState('')
+  const [useRange, setUseRange] = useState(false)
+
+  const fetchReport = () => {
     setLoading(true)
-    fetch(`/api/admin/reports?days=${days}`)
+    const params = new URLSearchParams()
+    if (useRange && dateFrom) {
+      params.set('dateFrom', dateFrom)
+      if (dateTo) params.set('dateTo', dateTo)
+    } else {
+      params.set('days', String(days))
+    }
+    fetch(`/api/admin/reports?${params}`)
       .then((r) => r.json())
       .then((d) => setReport(d.report || null))
       .finally(() => setLoading(false))
-  }, [days])
-
-  if (loading) {
-    return (
-      <div className="max-w-7xl mx-auto py-20 text-center">
-        <div className="w-8 h-8 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-gray-400 text-sm">Loading report...</p>
-      </div>
-    )
   }
 
-  if (!report) return <p className="text-center text-gray-400 py-20">Failed to load report.</p>
+  useEffect(() => { fetchReport() }, [days, useRange])
 
-  const { network, financial, sales, mlm, catalog, charts } = report
+  const applyRange = () => { if (dateFrom) fetchReport() }
+
+
+  // ── Export to Excel ──
+  const exportExcel = () => {
+    if (!report) return
+    const wb = XLSX.utils.book_new()
+
+    // Overview sheet
+    const overviewData = [
+      ['HIROMA MLM - Sales Report'],
+      ['Period', report.period.dateFrom ? `${report.period.dateFrom} to ${report.period.dateTo || 'today'}` : `Last ${report.period.days} days`],
+      ['Generated', new Date().toLocaleString('en-PH')],
+      [],
+      ['OVERALL SUMMARY'],
+      ['Metric', 'Value'],
+      ['Total Revenue',          fmt(overview.overallRevenue)],
+      ['Total Profit',           fmt(overview.overallProfit)],
+      ['Product Revenue',        fmt(overview.totalProductRevenue)],
+      ['Product Cost',           fmt(overview.totalProductCost)],
+      ['Product Profit',         fmt(overview.totalProductProfit)],
+      ['Units Sold',             fmtN(overview.totalProductUnitsSold)],
+      ['PIN Revenue',            fmt(overview.totalPinRevenue)],
+      ['PINs Sold',              fmtN(overview.totalPinsSoldPeriod)],
+      [],
+      ['CHAIN REVENUE BY LEVEL'],
+      ['Level',        'Orders', 'Revenue'],
+      ['Regional',     fmtN(sales.regionalOrders),   fmt(sales.regionalRevenue)],
+      ['Provincial',   fmtN(sales.provincialOrders), fmt(sales.provincialRevenue)],
+      ['City',         fmtN(sales.cityOrders),        fmt(sales.cityRevenue)],
+      ['Total Chain',  fmtN(sales.chainOrders),       fmt(sales.chainRevenue)],
+    ]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(overviewData), 'Overview')
+
+    // Product Sales sheet
+    const productData = [
+      ['PRODUCT SALES BREAKDOWN'],
+      ['Product', 'Type', 'Units Sold', 'Revenue', 'Cost', 'Profit'],
+      ...productSales.breakdown.map((p) => [p.name, p.type, p.units_sold, p.revenue, p.cost, p.profit]),
+      [],
+      ['TOTALS', '', overview.totalProductUnitsSold, overview.totalProductRevenue, overview.totalProductCost, overview.totalProductProfit],
+    ]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(productData), 'Product Sales')
+
+    // PIN Sales sheet
+    const pinData = [
+      ['PIN SALES BREAKDOWN'],
+      ['Package', 'PINs Sold', 'Revenue', 'Share %'],
+      ...pinSales.breakdown.map((p) => [
+        p.package_name, p.pins_sold, p.revenue,
+        pinSales.totalRevenue > 0 ? ((p.revenue / pinSales.totalRevenue) * 100).toFixed(1) + '%' : '0%'
+      ]),
+      [],
+      ['TOTALS', pinSales.totalPinsSold, pinSales.totalRevenue, '100%'],
+    ]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pinData), 'PIN Sales')
+
+    // Daily Sales sheet
+    const dailyData = [
+      ['DAILY REVENUE'],
+      ['Date', 'Orders', 'Revenue'],
+      ...charts.dailySales.map((d) => [d.date, d.orders, d.revenue]),
+    ]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyData), 'Daily Sales')
+
+    // Network sheet
+    const networkData = [
+      ['NETWORK SUMMARY'],
+      ['Metric', 'Value'],
+      ['Total Resellers',    fmtN(network.totalResellers)],
+      ['Active Resellers',   fmtN(network.activeResellers)],
+      ['Inactive Resellers', fmtN(network.suspendedResellers)],
+      ['Regional Dists',     fmtN(network.regionalCount)],
+      ['Provincial Dists',   fmtN(network.provincialCount)],
+      ['City Dists',         fmtN(network.cityCount)],
+      [],
+      ['FINANCIAL'],
+      ['Total Wallet Balance',  fmt(financial.totalWalletBalance)],
+      ['Total Earned',          fmt(financial.totalEarned)],
+      ['Total Withdrawn',       fmt(financial.totalWithdrawn)],
+      ['Pending Payouts',       fmtN(financial.totalPendingPayouts)],
+      ['Pending Amount',        fmt(financial.totalPendingAmount)],
+      ['Total Commissions Paid',fmt(financial.totalCommissionsPaid)],
+      [],
+      ['MLM COMMISSIONS'],
+      ['Direct Referrals',   fmtN(mlm.directReferralCount)],
+      ['Binary Pairings',    fmtN(mlm.binaryPairingCount)],
+      ['Sponsor Points',     fmtN(mlm.sponsorPointCount)],
+      ['Overflow to HIROMA', fmtN(mlm.totalOverflowCount)],
+    ]
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(networkData), 'Network & MLM')
+
+    const date = new Date().toISOString().split('T')[0]
+    XLSX.writeFile(wb, `hiroma-report-${date}.xlsx`)
+  }
+
+  // ── Export to PDF (print) ──
+  const exportPDF = () => { window.print() }
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-24">
+      <div className="w-8 h-8 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (!report) return <p className="text-center text-gray-400 py-12">No data available.</p>
+
+  const { network, financial, sales, mlm, catalog, overview, productSales, pinSales, charts } = report
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-8 print-area">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
+          .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          button { display: none !important; }
+        }
+      `}</style>
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header + date controls */}
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-[#0D1B3E]">Reports & Analytics</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Full business overview — sales, profit, commissions, network</p>
+          <h1 className="text-xl font-semibold text-[#0D1B3E]">Reports</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {useRange && dateFrom
+              ? `${new Date(dateFrom).toLocaleDateString('en-PH')} → ${dateTo ? new Date(dateTo).toLocaleDateString('en-PH') : 'today'}`
+              : `Last ${days} days`}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">Period:</span>
-          {[7, 14, 30, 60, 90].map((d) => (
-            <button key={d} onClick={() => setDays(d)}
-              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${days === d ? 'bg-[#0D1B3E] text-white' : 'bg-white border border-[#0D1B3E]/15 text-gray-400 hover:text-[#0D1B3E]'}`}>
-              {d}d
-            </button>
-          ))}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Export buttons */}
+          <button onClick={exportExcel}
+            className="flex items-center gap-1.5 text-xs bg-[#1a7a4a] text-white px-3 py-1.5 rounded-lg hover:bg-[#15633c] transition-colors">
+            📊 Export Excel
+          </button>
+          <button onClick={exportPDF}
+            className="flex items-center gap-1.5 text-xs bg-[#e05252] text-white px-3 py-1.5 rounded-lg hover:bg-[#c94444] transition-colors">
+            🖨️ Print / PDF
+          </button>
+          {/* Quick period buttons */}
+          {!useRange && (
+            <div className="flex gap-1">
+              {[7, 14, 30, 60, 90].map((d) => (
+                <button key={d} onClick={() => setDays(d)}
+                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${days === d && !useRange ? 'bg-[#0D1B3E] text-white' : 'bg-white border border-[#0D1B3E]/10 text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Date range toggle */}
+          <button onClick={() => { setUseRange(!useRange); setDateFrom(''); setDateTo('') }}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${useRange ? 'bg-[#C9A84C] text-[#0D1B3E] border-[#C9A84C]' : 'bg-white border-[#0D1B3E]/10 text-gray-400 hover:text-[#0D1B3E]'}`}>
+            📅 Custom Range
+          </button>
+
+          {/* Date inputs */}
+          {useRange && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              <span className="text-xs text-gray-400">to</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              <button onClick={applyRange}
+                className="bg-[#0D1B3E] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#162850]">
+                Apply
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── SALES & PROFIT ── */}
-      <section>
-        <SectionTitle title="💰 Sales & Profit" subtitle={`All-time totals + last ${days} days period`} />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <StatCard label="Total Revenue (All Time)"  value={fmt(sales.adminRevenue)}  accent="#1a7a4a" sub="From stock assignments to distributors" />
-          <StatCard label="Total Cost (All Time)"     value={fmt(sales.adminCost)}     accent="#e05252" sub="Cost of goods sold at production cost" />
-          <StatCard label="Total Profit (All Time)"   value={fmt(sales.adminProfit)}   accent="#2563eb" sub="Revenue minus cost" />
-          <StatCard label="Units Sold (All Time)"     value={fmtN(sales.adminUnitsSold)} accent="#0D1B3E" sub="Total units assigned to distributors" />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <StatCard label={`Revenue (Last ${days}d)`}  value={fmt(sales.periodRevenue)}  accent="#1a7a4a" sub={`${fmtN(sales.periodOrders)} orders`} />
-          <StatCard label="Chain Revenue (All Levels)" value={fmt(sales.chainRevenue)}   accent="#2563eb" sub={`${fmtN(sales.chainOrders)} total delivered orders`} />
-          <StatCard label="Total Assignments"          value={fmtN(sales.adminOrders)}   accent="#0D1B3E" sub="Stock assignments made" />
-        </div>
-      </section>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit flex-wrap">
+        {([
+          { key: 'overview', label: '📊 Overview'      },
+          { key: 'products', label: '📦 Product Sales' },
+          { key: 'pins',     label: '🔑 PIN Sales'     },
+          { key: 'network',  label: '👥 Network'       },
+          { key: 'mlm',      label: '💰 MLM & Commissions' },
+        ] as const).map((t) => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            className={`px-4 py-2 rounded-lg text-xs transition-colors ${activeTab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {/* ── DAILY SALES CHART ── */}
-      <section>
-        <SectionTitle title="📈 Daily Revenue" subtitle={`Last ${days} days — delivered orders`} />
-        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5">
-          <DailyChart data={charts.dailySales} days={days} />
-        </div>
-      </section>
+      {/* ══════════════════════════════════════════════ */}
+      {/* OVERVIEW TAB */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
 
-      {/* ── REVENUE PER LEVEL ── */}
-      <section>
-        <SectionTitle title="🏪 Revenue by Distributor Level" subtitle={`Last ${days} days`} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[
-            { label: 'Regional Distributors', revenue: sales.regionalRevenue,   orders: sales.regionalOrders,   accent: '#2563eb', priceLabel: 'at regional price' },
-            { label: 'Provincial Distributors', revenue: sales.provincialRevenue, orders: sales.provincialOrders, accent: '#9a6f1e', priceLabel: 'at provincial price' },
-            { label: 'City Distributors',      revenue: sales.cityRevenue,       orders: sales.cityOrders,       accent: '#1a7a4a', priceLabel: 'at city price' },
-          ].map((s) => (
-            <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-              style={{ borderTop: `2px solid ${s.accent}` }}>
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-              <p className="text-xl font-semibold" style={{ color: s.accent }}>{fmt(s.revenue)}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">{fmtN(s.orders)} orders · {s.priceLabel}</p>
+          {/* Overall sales summary */}
+          <div>
+            <SectionTitle title="Overall Sales Summary" subtitle="Product sales + PIN sales combined for the period" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard label="Total Revenue"    value={fmt(overview.overallRevenue)}   accent="#0D1B3E" />
+              <StatCard label="Total Profit"     value={fmt(overview.overallProfit)}    accent="#1a7a4a" />
+              <StatCard label="Product Revenue"  value={fmt(overview.totalProductRevenue)} accent="#2563eb" sub={`${fmtN(overview.totalProductUnitsSold)} units sold`} />
+              <StatCard label="PIN Revenue"      value={fmt(overview.totalPinRevenue)}  accent="#C9A84C" sub={`${fmtN(overview.totalPinsSoldPeriod)} PINs sold`} />
             </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── TOP PRODUCTS ── */}
-      <section>
-        <SectionTitle title="🏆 Top Products Sold" subtitle={`Last ${days} days — by units sold`} />
-        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
-          <div className="grid grid-cols-4 px-4 py-2 bg-[#F0F2F8]">
-            {['Product', 'Units Sold', 'Revenue', 'Type'].map((h) => (
-              <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
-            ))}
           </div>
-          {charts.topProducts.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm py-8">No sales data for this period.</p>
-          ) : (
-            charts.topProducts.map((p, i) => (
-              <div key={p.product_id}
-                className="grid grid-cols-4 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center">
-                <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                    style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#e5e7eb' : '#f3f4f6', color: i < 2 ? '#0D1B3E' : '#9ca3af' }}>
-                    {i + 1}
-                  </span>
-                  <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+
+          {/* Admin direct sales */}
+          <div>
+            <SectionTitle title="Admin Direct Sales" subtitle="Orders where admin is the seller (all time)" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard label="Total Revenue"   value={fmt(sales.adminRevenue)}  accent="#0D1B3E" />
+              <StatCard label="Total Cost"      value={fmt(sales.adminCost)}     accent="#e05252" />
+              <StatCard label="Net Profit"      value={fmt(sales.adminProfit)}   accent="#1a7a4a" />
+              <StatCard label="Units Sold"      value={fmtN(sales.adminUnitsSold)} accent="#C9A84C" sub={`${fmtN(sales.adminOrders)} orders`} />
+            </div>
+          </div>
+
+          {/* Chain revenue by distributor level */}
+          <div>
+            <SectionTitle title="Chain Revenue by Level" subtitle="Revenue generated at each distributor level (period)" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard label="Regional Orders"   value={fmt(sales.regionalRevenue)}   accent="#7c3aed" sub={`${fmtN(sales.regionalOrders)} orders`} />
+              <StatCard label="Provincial Orders" value={fmt(sales.provincialRevenue)} accent="#2563eb" sub={`${fmtN(sales.provincialOrders)} orders`} />
+              <StatCard label="City Orders"       value={fmt(sales.cityRevenue)}       accent="#0D1B3E" sub={`${fmtN(sales.cityOrders)} orders`} />
+              <StatCard label="Total Chain"       value={fmt(sales.chainRevenue)}      accent="#1a7a4a" sub={`${fmtN(sales.chainOrders)} total orders`} />
+            </div>
+          </div>
+
+          {/* Daily revenue chart */}
+          <div>
+            <SectionTitle title="Daily Revenue" subtitle="Delivered order revenue per day" />
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5">
+              <BarChart data={charts.dailySales} />
+              {charts.dailySales.every((d) => d.revenue === 0) && (
+                <p className="text-center text-gray-400 text-sm py-6">No delivered orders in this period.</p>
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* PRODUCT SALES TAB */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === 'products' && (
+        <div className="space-y-6">
+
+          {/* Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="Total Revenue"    value={fmt(overview.totalProductRevenue)}    accent="#0D1B3E" />
+            <StatCard label="Total Cost"       value={fmt(overview.totalProductCost)}       accent="#e05252" />
+            <StatCard label="Total Profit"     value={fmt(overview.totalProductProfit)}     accent="#1a7a4a" />
+            <StatCard label="Units Sold"       value={fmtN(overview.totalProductUnitsSold)} accent="#C9A84C" />
+          </div>
+
+          {/* Distributor product orders breakdown */}
+          <div>
+            <SectionTitle title="Product Sales Breakdown" subtitle="All delivered product orders across the chain (period)" />
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+              <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+                {['Product', 'Type', 'Units Sold', 'Revenue', 'Cost', 'Profit'].map((h) => (
+                  <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+                ))}
+              </div>
+              {productSales.breakdown.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-10">No product sales in this period.</p>
+              ) : (
+                productSales.breakdown.map((p, i) => (
+                  <div key={p.product_id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center"
+                    style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 w-5">{i + 1}.</span>
+                      <p className="text-xs font-medium text-[#0D1B3E]">{p.name}</p>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded w-fit ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>{p.type}</span>
+                    <p className="text-xs font-semibold text-[#0D1B3E]">{fmtN(p.units_sold)}</p>
+                    <p className="text-xs text-[#2563eb]">{fmt(p.revenue)}</p>
+                    <p className="text-xs text-[#e05252]">{fmt(p.cost)}</p>
+                    <p className={`text-xs font-semibold ${p.profit >= 0 ? 'text-[#1a7a4a]' : 'text-[#e05252]'}`}>{fmt(p.profit)}</p>
+                  </div>
+                ))
+              )}
+              {productSales.breakdown.length > 0 && (
+                <div className="grid px-4 py-3 bg-[#F0F2F8] font-semibold" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+                  <p className="text-xs text-[#0D1B3E] col-span-2">TOTAL</p>
+                  <p className="text-xs text-[#0D1B3E]">{fmtN(overview.totalProductUnitsSold)}</p>
+                  <p className="text-xs text-[#2563eb]">{fmt(overview.totalProductRevenue)}</p>
+                  <p className="text-xs text-[#e05252]">{fmt(overview.totalProductCost)}</p>
+                  <p className="text-xs text-[#1a7a4a]">{fmt(overview.totalProductProfit)}</p>
                 </div>
-                <p className="text-xs font-semibold text-[#0D1B3E]">{fmtN(p.units_sold)}</p>
-                <p className="text-xs font-semibold text-[#1a7a4a]">{fmt(p.revenue)}</p>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded w-fit ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>
-                  {p.type}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* ── NETWORK ── */}
-      <section>
-        <SectionTitle title="🌐 Network Overview" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Resellers"    value={fmtN(network.totalResellers)}    accent="#0D1B3E" sub={`${fmtN(network.activeResellers)} active`} />
-          <StatCard label="Suspended"          value={fmtN(network.suspendedResellers)} accent="#e05252" />
-          <StatCard label="Total Distributors" value={fmtN(network.totalDistributors)} accent="#2563eb" />
-          <StatCard label="Regional / Provincial / City"
-            value={`${network.regionalCount} / ${network.provincialCount} / ${network.cityCount}`}
-            accent="#9a6f1e" />
-        </div>
-      </section>
-
-      {/* ── MLM COMMISSIONS ── */}
-      <section>
-        <SectionTitle title="💎 MLM Commissions" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <StatCard label="Total Paid Out"      value={fmt(financial.totalCommissionsPaid)} accent="#1a7a4a" />
-          <StatCard label="Total Wallet Balance" value={fmt(financial.totalWalletBalance)} accent="#2563eb" sub="Across all resellers" />
-          <StatCard label="Pending Payouts"     value={fmtN(financial.totalPendingPayouts)} accent="#e05252" sub={fmt(financial.totalPendingAmount)} />
-          <StatCard label="Points Earned"       value={fmtN(mlm.totalPointsEarned)} accent="#C9A84C" />
-        </div>
-        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
-          <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
-            {['Commission Type', 'Count', '', '', ''].map((h, i) => (
-              <p key={i} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
-            ))}
-          </div>
-          {[
-            { label: 'Direct Referral', count: mlm.directReferralCount,  accent: '#2563eb' },
-            { label: 'Binary Pairing',  count: mlm.binaryPairingCount,   accent: '#1a7a4a' },
-            { label: 'Sponsor Points',  count: mlm.sponsorPointCount,    accent: '#C9A84C' },
-            { label: 'Multi-level',     count: mlm.multilevelCount,      accent: '#9a6f1e' },
-            { label: 'Overflow',        count: mlm.totalOverflowCount,   accent: '#e05252' },
-          ].map((c) => (
-            <div key={c.label} className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center">
-              <div className="flex items-center gap-2 col-span-2">
-                <div className="w-2 h-2 rounded-full" style={{ background: c.accent }} />
-                <p className="text-xs font-medium text-[#0D1B3E]">{c.label}</p>
-              </div>
-              <p className="text-xs text-[#0D1B3E] col-span-2">{fmtN(c.count)} transactions</p>
-              {/* Bar */}
-              <div className="h-1.5 bg-[#F0F2F8] rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{
-                  width: `${mlm.totalCommissions > 0 ? (c.count / mlm.totalCommissions) * 100 : 0}%`,
-                  background: c.accent,
-                }} />
-              </div>
+              )}
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
 
-      {/* ── CATALOG & PINS ── */}
-      <section>
-        <SectionTitle title="📦 Catalog & PINs" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Active Products" value={fmtN(catalog.totalProducts)}
-            accent="#0D1B3E" sub={`${fmtN(catalog.physicalProducts)} physical · ${fmtN(catalog.digitalProducts)} digital`} />
-          <StatCard label="Active Packages"    value={fmtN(catalog.totalPackages)}      accent="#2563eb" />
-          <StatCard label="PINs Generated"     value={fmtN(catalog.totalPinsGenerated)} accent="#0D1B3E"
-            sub={`${fmtN(catalog.unusedPins)} unused · ${fmtN(catalog.usedPins)} used`} />
-          <StatCard label="PIN Usage Rate"
-            value={`${catalog.totalPinsGenerated > 0 ? Math.round((catalog.usedPins / catalog.totalPinsGenerated) * 100) : 0}%`}
-            accent="#1a7a4a" />
+          {/* Top 10 products chart */}
+          <div>
+            <SectionTitle title="Top 10 Products by Units Sold" subtitle="Most sold products in the period" />
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 space-y-2">
+              {charts.topProducts.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-6">No data.</p>
+              ) : (() => {
+                const maxUnits = Math.max(...charts.topProducts.map((p) => p.units_sold), 1)
+                return charts.topProducts.map((p, i) => (
+                  <div key={p.product_id} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 w-5 flex-shrink-0">{i + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+                        <p className="text-xs text-gray-400 ml-2 flex-shrink-0">{fmtN(p.units_sold)} units · {fmt(p.revenue)}</p>
+                      </div>
+                      <div className="w-full bg-[#F0F2F8] rounded-full h-1.5">
+                        <div className="bg-[#C9A84C] h-1.5 rounded-full" style={{ width: `${(p.units_sold / maxUnits) * 100}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              })()}
+            </div>
+          </div>
+
         </div>
-      </section>
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* PIN SALES TAB */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === 'pins' && (
+        <div className="space-y-6">
+
+          {/* Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="Total PIN Revenue" value={fmt(pinSales.totalRevenue)}  accent="#0D1B3E" />
+            <StatCard label="PINs Sold (Period)" value={fmtN(pinSales.totalPinsSold)} accent="#C9A84C" />
+            <StatCard label="Total Generated"   value={fmtN(catalog.totalPinsGenerated)} accent="#0D1B3E" />
+            <StatCard label="Unused PINs"       value={fmtN(catalog.unusedPins)}     accent="#9a6f1e" sub={`${fmtN(catalog.usedPins)} used`} />
+          </div>
+
+          {/* PIN sales by package */}
+          <div>
+            <SectionTitle title="PIN Sales by Package" subtitle="Number of PINs used and revenue per package (period)" />
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+              <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
+                {['Package', 'PINs Sold', 'Revenue', 'Share'].map((h) => (
+                  <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+                ))}
+              </div>
+              {pinSales.breakdown.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-10">No PIN sales in this period.</p>
+              ) : (
+                pinSales.breakdown.map((p, i) => {
+                  const share = pinSales.totalRevenue > 0 ? (p.revenue / pinSales.totalRevenue) * 100 : 0
+                  return (
+                    <div key={p.package_id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center"
+                      style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 w-5">{i + 1}.</span>
+                        <div>
+                          <p className="text-xs font-semibold text-[#0D1B3E]">{p.package_name}</p>
+                          <div className="w-24 bg-[#F0F2F8] rounded-full h-1 mt-1">
+                            <div className="bg-[#C9A84C] h-1 rounded-full" style={{ width: `${share}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs font-semibold text-[#0D1B3E]">{fmtN(p.pins_sold)}</p>
+                      <p className="text-xs font-semibold text-[#2563eb]">{fmt(p.revenue)}</p>
+                      <p className="text-xs text-gray-400">{share.toFixed(1)}%</p>
+                    </div>
+                  )
+                })
+              )}
+              {pinSales.breakdown.length > 0 && (
+                <div className="grid px-4 py-3 bg-[#F0F2F8] font-semibold" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
+                  <p className="text-xs text-[#0D1B3E] col-span-1">TOTAL</p>
+                  <p className="text-xs text-[#0D1B3E]">{fmtN(pinSales.totalPinsSold)}</p>
+                  <p className="text-xs text-[#2563eb]">{fmt(pinSales.totalRevenue)}</p>
+                  <p className="text-xs text-gray-400">100%</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Catalog summary */}
+          <div>
+            <SectionTitle title="Package Catalog" subtitle="All packages and PINs in the system" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <StatCard label="Active Packages"   value={fmtN(catalog.totalPackages)}       accent="#0D1B3E" />
+              <StatCard label="Total PINs"        value={fmtN(catalog.totalPinsGenerated)}  accent="#0D1B3E" />
+              <StatCard label="Unused PINs"       value={fmtN(catalog.unusedPins)}          accent="#C9A84C" sub={`${fmtN(catalog.usedPins)} used`} />
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* NETWORK TAB */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === 'network' && (
+        <div className="space-y-6">
+          <div>
+            <SectionTitle title="Reseller Network" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <StatCard label="Total Resellers"  value={fmtN(network.totalResellers)}   accent="#0D1B3E" />
+              <StatCard label="Active Resellers" value={fmtN(network.activeResellers)}  accent="#1a7a4a" />
+              <StatCard label="Inactive"         value={fmtN(network.suspendedResellers)} accent="#e05252" />
+            </div>
+          </div>
+          <div>
+            <SectionTitle title="Distributor Network" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard label="Total Distributors" value={fmtN(network.totalDistributors)} accent="#0D1B3E" />
+              <StatCard label="Regional"           value={fmtN(network.regionalCount)}     accent="#7c3aed" />
+              <StatCard label="Provincial"         value={fmtN(network.provincialCount)}   accent="#2563eb" />
+              <StatCard label="City"               value={fmtN(network.cityCount)}         accent="#C9A84C" />
+            </div>
+          </div>
+          <div>
+            <SectionTitle title="Financial Overview" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <StatCard label="Total Wallet Balance"  value={fmt(financial.totalWalletBalance)}   accent="#0D1B3E" />
+              <StatCard label="Total Earned (All)"    value={fmt(financial.totalEarned)}          accent="#1a7a4a" />
+              <StatCard label="Total Withdrawn"       value={fmt(financial.totalWithdrawn)}       accent="#e05252" />
+              <StatCard label="Pending Payouts"       value={fmtN(financial.totalPendingPayouts)} accent="#9a6f1e" sub={fmt(financial.totalPendingAmount)} />
+              <StatCard label="Total Commissions"     value={fmt(financial.totalCommissionsPaid)} accent="#C9A84C" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* MLM TAB */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === 'mlm' && (
+        <div className="space-y-6">
+          <div>
+            <SectionTitle title="Commission Breakdown" subtitle="All commissions ever paid" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <StatCard label="Total Commissions"   value={fmtN(mlm.totalCommissions)}    accent="#0D1B3E" />
+              <StatCard label="Direct Referrals"    value={fmtN(mlm.directReferralCount)} accent="#1a7a4a" />
+              <StatCard label="Binary Pairings"     value={fmtN(mlm.binaryPairingCount)}  accent="#C9A84C" />
+              <StatCard label="Sponsor Points"      value={fmtN(mlm.sponsorPointCount)}   accent="#2563eb" />
+              <StatCard label="Overflow to HIROMA"  value={fmtN(mlm.totalOverflowCount)}  accent="#e05252" />
+              <StatCard label="Total Points Earned" value={fmtN(mlm.totalPointsEarned)}   accent="#7c3aed" sub="product binary points" />
+            </div>
+          </div>
+
+          {/* Commission type breakdown bar */}
+          <div>
+            <SectionTitle title="Commission Type Distribution" />
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5 space-y-3">
+              {[
+                { label: 'Direct Referral', value: mlm.directReferralCount, color: '#1a7a4a' },
+                { label: 'Binary Pairing',  value: mlm.binaryPairingCount,  color: '#C9A84C' },
+                { label: 'Sponsor Points',  value: mlm.sponsorPointCount,   color: '#2563eb' },
+                { label: 'Overflow',        value: mlm.totalOverflowCount,  color: '#e05252' },
+              ].map((item) => {
+                const pct = mlm.totalCommissions > 0 ? (item.value / mlm.totalCommissions) * 100 : 0
+                return (
+                  <div key={item.label} className="flex items-center gap-3">
+                    <p className="text-xs text-gray-500 w-32 flex-shrink-0">{item.label}</p>
+                    <div className="flex-1 bg-[#F0F2F8] rounded-full h-2">
+                      <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: item.color }} />
+                    </div>
+                    <p className="text-xs font-medium text-[#0D1B3E] w-12 text-right">{fmtN(item.value)}</p>
+                    <p className="text-[10px] text-gray-400 w-10 text-right">{pct.toFixed(1)}%</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
