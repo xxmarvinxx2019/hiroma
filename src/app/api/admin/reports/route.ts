@@ -10,62 +10,67 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const days = Math.min(90, Math.max(7, parseInt(searchParams.get('days') || '30')))
+    const days     = Math.min(90, Math.max(7, parseInt(searchParams.get('days') || '30')))
+    const dateFrom = searchParams.get('dateFrom') || ''
+    const dateTo   = searchParams.get('dateTo')   || ''
 
-    const since = new Date()
-    since.setDate(since.getDate() - days)
-    since.setHours(0, 0, 0, 0)
+    // ── Date range ──
+    let since: Date
+    let until: Date = new Date()
+    until.setHours(23, 59, 59, 999)
+
+    if (dateFrom) {
+      since = new Date(dateFrom)
+      since.setHours(0, 0, 0, 0)
+    } else {
+      since = new Date()
+      since.setDate(since.getDate() - days)
+      since.setHours(0, 0, 0, 0)
+    }
+
+    if (dateTo) {
+      until = new Date(dateTo)
+      until.setHours(23, 59, 59, 999)
+    }
+
+    const periodFilter = { gte: since, lte: until }
 
     const [
       // Network
-      totalResellers,
-      activeResellers,
-      suspendedResellers,
-      regionalCount,
-      provincialCount,
-      cityCount,
+      totalResellers, activeResellers, suspendedResellers,
+      regionalCount, provincialCount, cityCount,
 
-      // Financial — wallets
-      walletStats,
-      pendingPayouts,
-      pendingPayoutsAmount,
-      commissionsPaid,
+      // Financial
+      walletStats, pendingPayouts, pendingPayoutsAmount, commissionsPaid,
 
-      // MLM commissions
-      totalCommissions,
-      directReferralCount,
-      binaryPairingCount,
-      multilevelCount,
-      sponsorPointCount,
-      totalPointsEarned,
-      totalOverflowCount,
+      // MLM
+      totalCommissions, directReferralCount, binaryPairingCount,
+      multilevelCount, sponsorPointCount, totalPointsEarned, totalOverflowCount,
 
       // Catalog
-      totalProducts,
-      physicalProducts,
-      digitalProducts,
-      totalPackages,
-      totalPinsGenerated,
-      unusedPins,
-      usedPins,
+      totalProducts, physicalProducts, digitalProducts,
+      totalPackages, totalPinsGenerated, unusedPins, usedPins,
 
-      // Sales — admin to distributors (stock assignments)
-      adminSalesAll,
-      adminSalesPeriod,
+      // Admin sales
+      adminSalesAll, adminSalesPeriod, allDeliveredOrders,
 
-      // Sales — all chain delivered orders
-      allDeliveredOrders,
-
-      // Daily sold items (last N days)
+      // Daily orders for chart
       dailyOrders,
 
-      // Top products sold
+      // Top products
       topProductItems,
 
-      // Per distributor level revenue
-      regionalSales,
-      provincialSales,
-      citySales,
+      // Per distributor level
+      regionalSales, provincialSales, citySales,
+
+      // PIN sales breakdown
+      pinSalesByPackage,
+
+      // Product sales breakdown (period)
+      productSalesItems,
+
+      // Reseller orders (product sales from resellers to city)
+      resellerOrderItems,
 
     ] = await Promise.all([
       // Network
@@ -77,14 +82,9 @@ export async function GET(req: NextRequest) {
       prisma.user.count({ where: { role: 'city' } }),
 
       // Wallets
-      prisma.wallet.aggregate({
-        _sum: { balance: true, total_earned: true, total_withdrawn: true },
-      }),
+      prisma.wallet.aggregate({ _sum: { balance: true, total_earned: true, total_withdrawn: true } }),
       prisma.payout.count({ where: { status: 'pending' } }),
-      prisma.payout.aggregate({
-        where: { status: 'pending' },
-        _sum:  { amount: true },
-      }),
+      prisma.payout.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
       prisma.commission.aggregate({ _sum: { amount: true } }),
 
       // MLM
@@ -105,200 +105,259 @@ export async function GET(req: NextRequest) {
       prisma.pin.count({ where: { status: 'unused' } }),
       prisma.pin.count({ where: { status: 'used' } }),
 
-      // Admin sales — all time
+      // Admin sales
       prisma.order.aggregate({
         where: { seller_id: user.id, status: 'delivered' },
-        _sum:  { total_amount: true },
-        _count: { id: true },
+        _sum: { total_amount: true }, _count: { id: true },
       }),
-
-      // Admin sales — within period
       prisma.order.aggregate({
-        where: { seller_id: user.id, status: 'delivered', created_at: { gte: since } },
-        _sum:  { total_amount: true },
-        _count: { id: true },
+        where: { seller_id: user.id, status: 'delivered', created_at: periodFilter },
+        _sum: { total_amount: true }, _count: { id: true },
       }),
-
-      // All delivered orders across the whole chain
       prisma.order.aggregate({
         where: { status: 'delivered' },
-        _sum:  { total_amount: true },
-        _count: { id: true },
+        _sum: { total_amount: true }, _count: { id: true },
       }),
 
-      // Daily orders for chart (within period)
+      // Daily chart
       prisma.order.findMany({
-        where:  { status: 'delivered', created_at: { gte: since } },
-        select: { created_at: true, total_amount: true },
+        where:   { status: 'delivered', created_at: periodFilter },
+        select:  { created_at: true, total_amount: true },
         orderBy: { created_at: 'asc' },
       }),
 
       // Top products
       prisma.orderItem.groupBy({
         by:    ['product_id'],
-        where: { order: { status: 'delivered', created_at: { gte: since } } },
+        where: { order: { status: 'delivered', created_at: periodFilter } },
         _sum:  { quantity: true, subtotal: true },
         orderBy: { _sum: { quantity: 'desc' } },
         take: 10,
       }),
 
-      // Revenue per distributor level — regional as buyer
+      // Per level
       prisma.order.aggregate({
-        where: {
-          status:   'delivered',
-          buyer:    { role: 'regional' },
-          created_at: { gte: since },
-        },
-        _sum:   { total_amount: true },
+        where: { status: 'delivered', buyer: { role: 'regional' }, created_at: periodFilter },
+        _sum: { total_amount: true }, _count: { id: true },
+      }),
+      prisma.order.aggregate({
+        where: { status: 'delivered', buyer: { role: 'provincial' }, created_at: periodFilter },
+        _sum: { total_amount: true }, _count: { id: true },
+      }),
+      prisma.order.aggregate({
+        where: { status: 'delivered', buyer: { role: 'city' }, created_at: periodFilter },
+        _sum: { total_amount: true }, _count: { id: true },
+      }),
+
+      // PIN sales breakdown by package (period)
+      prisma.pin.groupBy({
+        by:    ['package_id'],
+        where: { status: 'used', used_at: periodFilter },
         _count: { id: true },
       }),
 
-      // Provincial as buyer
-      prisma.order.aggregate({
-        where: {
-          status:   'delivered',
-          buyer:    { role: 'provincial' },
-          created_at: { gte: since },
-        },
-        _sum:   { total_amount: true },
-        _count: { id: true },
+      // Product sales breakdown (period) — distributor orders
+      prisma.orderItem.groupBy({
+        by:    ['product_id'],
+        where: { order: { status: 'delivered', created_at: periodFilter } },
+        _sum:  { quantity: true, subtotal: true },
+        orderBy: { _sum: { subtotal: 'desc' } },
       }),
 
-      // City as buyer
-      prisma.order.aggregate({
-        where: {
-          status:   'delivered',
-          buyer:    { role: 'city' },
-          created_at: { gte: since },
-        },
-        _sum:   { total_amount: true },
-        _count: { id: true },
+      // Reseller product orders (city as seller)
+      prisma.orderItem.groupBy({
+        by:    ['product_id'],
+        where: { order: { status: 'delivered', buyer: { role: 'reseller' }, created_at: periodFilter } },
+        _sum:  { quantity: true, subtotal: true },
+        orderBy: { _sum: { subtotal: 'desc' } },
       }),
     ])
 
-    // ── Build daily sales chart data ──
-    const dailyMap = new Map<string, { date: string; orders: number; revenue: number; units: number }>()
-
-    // Initialize all days in range
-    for (let i = 0; i < days; i++) {
+    // ── Build daily sales chart ──
+    const dailyMap = new Map<string, { date: string; orders: number; revenue: number }>()
+    const totalDays = Math.ceil((until.getTime() - since.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    for (let i = 0; i < totalDays; i++) {
       const d = new Date(since)
       d.setDate(d.getDate() + i)
       const key = d.toISOString().split('T')[0]
-      dailyMap.set(key, { date: key, orders: 0, revenue: 0, units: 0 })
+      dailyMap.set(key, { date: key, orders: 0, revenue: 0 })
     }
-
     for (const order of dailyOrders) {
       const key = new Date(order.created_at).toISOString().split('T')[0]
       const existing = dailyMap.get(key)
-      if (existing) {
-        existing.orders  += 1
-        existing.revenue += Number(order.total_amount)
-      }
+      if (existing) { existing.orders += 1; existing.revenue += Number(order.total_amount) }
     }
 
     // ── Top products with names ──
-    const topProductIds = topProductItems.map((p) => p.product_id)
-    const topProductNames = await prisma.product.findMany({
-      where:  { id: { in: topProductIds } },
-      select: { id: true, name: true, type: true, cost_price: true },
+    const allProductIds = [
+      ...topProductItems.map((p) => p.product_id),
+      ...productSalesItems.map((p) => p.product_id),
+      ...resellerOrderItems.map((p) => p.product_id),
+    ]
+    const productDetails = await prisma.product.findMany({
+      where:  { id: { in: [...new Set(allProductIds)] } },
+      select: { id: true, name: true, type: true, cost_price: true, reseller_price: true },
     })
-    const productNameMap = new Map(topProductNames.map((p) => [p.id, p]))
+    const productMap = new Map(productDetails.map((p) => [p.id, p]))
 
     const topProducts = topProductItems.map((item) => {
-      const product = productNameMap.get(item.product_id)
+      const product = productMap.get(item.product_id)
       return {
-        product_id:  item.product_id,
-        name:        product?.name || 'Unknown',
-        type:        product?.type || 'physical',
-        units_sold:  Number(item._sum.quantity || 0),
-        revenue:     Number(item._sum.subtotal  || 0),
+        product_id: item.product_id,
+        name:       product?.name || 'Unknown',
+        type:       product?.type || 'physical',
+        units_sold: Number(item._sum.quantity || 0),
+        revenue:    Number(item._sum.subtotal  || 0),
       }
     })
 
-    // ── Cost of goods sold (using cost_price) ──
-    const allSoldItems = await prisma.orderItem.findMany({
-      where: { order: { status: 'delivered', seller_id: user.id } },
-      select: {
-        quantity: true,
-        subtotal: true,
-        product:  { select: { cost_price: true } },
-      },
+    // ── Product sales breakdown ──
+    const productSalesBreakdown = productSalesItems.map((item) => {
+      const product = productMap.get(item.product_id)
+      const units   = Number(item._sum.quantity || 0)
+      const revenue = Number(item._sum.subtotal  || 0)
+      const cost    = Number(product?.cost_price || 0) * units
+      return {
+        product_id: item.product_id,
+        name:       product?.name || 'Unknown',
+        type:       product?.type || 'physical',
+        units_sold: units,
+        revenue,
+        cost,
+        profit: revenue - cost,
+      }
     })
 
+    // Reseller product sales
+    const resellerProductSales = resellerOrderItems.map((item) => {
+      const product = productMap.get(item.product_id)
+      const units   = Number(item._sum.quantity || 0)
+      const revenue = Number(item._sum.subtotal  || 0)
+      return {
+        product_id: item.product_id,
+        name:       product?.name || 'Unknown',
+        type:       product?.type || 'physical',
+        units_sold: units,
+        revenue,
+      }
+    })
+
+    // ── PIN sales breakdown by package ──
+    const pinPackageIds = pinSalesByPackage.map((p) => p.package_id)
+    const packageDetails = await prisma.package.findMany({
+      where:  { id: { in: pinPackageIds } },
+      select: { id: true, name: true, price: true },
+    })
+    const packageMap = new Map(packageDetails.map((p) => [p.id, p]))
+
+    const pinSalesBreakdown = pinSalesByPackage.map((item) => {
+      const pkg     = packageMap.get(item.package_id)
+      const count   = Number(item._count.id || 0)
+      const revenue = count * Number(pkg?.price || 0)
+      return {
+        package_id:   item.package_id,
+        package_name: pkg?.name || 'Unknown',
+        pins_sold:    count,
+        revenue,
+      }
+    }).sort((a, b) => b.revenue - a.revenue)
+
+    const totalPinRevenue     = pinSalesBreakdown.reduce((s, p) => s + p.revenue, 0)
+    const totalPinsSoldPeriod = pinSalesBreakdown.reduce((s, p) => s + p.pins_sold, 0)
+
+    // ── Admin cost of goods ──
+    const allSoldItems = await prisma.orderItem.findMany({
+      where:  { order: { status: 'delivered', seller_id: user.id } },
+      select: { quantity: true, subtotal: true, product: { select: { cost_price: true } } },
+    })
     const totalAdminRevenue = Number(adminSalesAll._sum.total_amount || 0)
-    const totalAdminCost    = allSoldItems.reduce(
-      (s, i) => s + Number(i.product.cost_price) * i.quantity, 0
-    )
+    const totalAdminCost    = allSoldItems.reduce((s, i) => s + Number(i.product.cost_price) * i.quantity, 0)
     const totalAdminProfit  = totalAdminRevenue - totalAdminCost
     const totalUnitsSold    = allSoldItems.reduce((s, i) => s + i.quantity, 0)
 
+    // ── Overall sales summary ──
+    const totalProductRevenue  = productSalesBreakdown.reduce((s, p) => s + p.revenue, 0)
+    const totalProductCost     = productSalesBreakdown.reduce((s, p) => s + p.cost, 0)
+    const totalProductProfit   = totalProductRevenue - totalProductCost
+    const totalProductUnitsSold = productSalesBreakdown.reduce((s, p) => s + p.units_sold, 0)
+    const overallRevenue       = totalProductRevenue + totalPinRevenue
+    const overallProfit        = totalProductProfit + totalPinRevenue // pins are pure revenue
+
     return NextResponse.json({
       report: {
-        period: { days, since: since.toISOString() },
+        period: {
+          days,
+          since:     since.toISOString(),
+          until:     until.toISOString(),
+          dateFrom:  dateFrom || null,
+          dateTo:    dateTo   || null,
+        },
 
         network: {
-          totalResellers,
-          activeResellers,
-          suspendedResellers,
+          totalResellers, activeResellers, suspendedResellers,
           totalDistributors: regionalCount + provincialCount + cityCount,
-          regionalCount,
-          provincialCount,
-          cityCount,
+          regionalCount, provincialCount, cityCount,
         },
 
         financial: {
-          totalWalletBalance:   Number(walletStats._sum.balance       || 0),
-          totalEarned:          Number(walletStats._sum.total_earned   || 0),
+          totalWalletBalance:   Number(walletStats._sum.balance        || 0),
+          totalEarned:          Number(walletStats._sum.total_earned    || 0),
           totalWithdrawn:       Number(walletStats._sum.total_withdrawn || 0),
           totalPendingPayouts:  pendingPayouts,
           totalPendingAmount:   Number(pendingPayoutsAmount._sum.amount || 0),
-          totalCommissionsPaid: Number(commissionsPaid._sum.amount || 0),
+          totalCommissionsPaid: Number(commissionsPaid._sum.amount      || 0),
         },
 
         sales: {
-          // Admin's direct sales (stock assignments)
-          adminRevenue:       totalAdminRevenue,
-          adminCost:          totalAdminCost,
-          adminProfit:        totalAdminProfit,
-          adminOrders:        Number(adminSalesAll._count.id || 0),
-          adminUnitsSold:     totalUnitsSold,
-          // Period
-          periodRevenue:      Number(adminSalesPeriod._sum.total_amount || 0),
-          periodOrders:       Number(adminSalesPeriod._count.id || 0),
-          // Whole chain
-          chainRevenue:       Number(allDeliveredOrders._sum.total_amount || 0),
-          chainOrders:        Number(allDeliveredOrders._count.id || 0),
-          // Per level (period)
-          regionalRevenue:    Number(regionalSales._sum.total_amount   || 0),
-          regionalOrders:     Number(regionalSales._count.id           || 0),
-          provincialRevenue:  Number(provincialSales._sum.total_amount || 0),
-          provincialOrders:   Number(provincialSales._count.id         || 0),
-          cityRevenue:        Number(citySales._sum.total_amount       || 0),
-          cityOrders:         Number(citySales._count.id               || 0),
+          adminRevenue:      totalAdminRevenue,
+          adminCost:         totalAdminCost,
+          adminProfit:       totalAdminProfit,
+          adminOrders:       Number(adminSalesAll._count.id   || 0),
+          adminUnitsSold:    totalUnitsSold,
+          periodRevenue:     Number(adminSalesPeriod._sum.total_amount || 0),
+          periodOrders:      Number(adminSalesPeriod._count.id         || 0),
+          chainRevenue:      Number(allDeliveredOrders._sum.total_amount || 0),
+          chainOrders:       Number(allDeliveredOrders._count.id         || 0),
+          regionalRevenue:   Number(regionalSales._sum.total_amount   || 0),
+          regionalOrders:    Number(regionalSales._count.id           || 0),
+          provincialRevenue: Number(provincialSales._sum.total_amount || 0),
+          provincialOrders:  Number(provincialSales._count.id         || 0),
+          cityRevenue:       Number(citySales._sum.total_amount       || 0),
+          cityOrders:        Number(citySales._count.id               || 0),
         },
 
         mlm: {
-          totalCommissions,
-          directReferralCount,
-          binaryPairingCount,
-          multilevelCount,
-          sponsorPointCount,
+          totalCommissions, directReferralCount, binaryPairingCount,
+          multilevelCount, sponsorPointCount,
           totalPointsEarned: Number(totalPointsEarned._sum.points || 0),
           totalOverflowCount,
         },
 
         catalog: {
-          totalProducts,
-          physicalProducts,
-          digitalProducts,
-          totalPackages,
-          totalPinsGenerated,
-          unusedPins,
-          usedPins,
+          totalProducts, physicalProducts, digitalProducts,
+          totalPackages, totalPinsGenerated, unusedPins, usedPins,
+        },
+
+        // ── NEW ──
+        overview: {
+          totalProductRevenue, totalProductCost, totalProductProfit, totalProductUnitsSold,
+          totalPinRevenue, totalPinsSoldPeriod,
+          overallRevenue, overallProfit,
+        },
+
+        productSales: {
+          breakdown:      productSalesBreakdown,
+          resellerOrders: resellerProductSales,
+        },
+
+        pinSales: {
+          breakdown:      pinSalesBreakdown,
+          totalRevenue:   totalPinRevenue,
+          totalPinsSold:  totalPinsSoldPeriod,
         },
 
         charts: {
-          dailySales: Array.from(dailyMap.values()),
+          dailySales:  Array.from(dailyMap.values()),
           topProducts,
         },
       },
