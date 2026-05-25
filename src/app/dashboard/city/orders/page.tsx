@@ -17,9 +17,11 @@ interface Order {
   total_amount: number
   created_at: string
   notes: string | null
-  payment_method:    string | null
-  payment_reference: string | null
-  payment_status:    string | null
+  payment_method:      string | null
+  payment_reference:   string | null
+  payment_status:      string | null
+  payment_sender_name: string | null
+  payment_datetime:    string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -582,6 +584,15 @@ export default function CityOrdersPage() {
                       {order.payment_reference && (
                         <p className="text-[10px] text-gray-400 truncate">Ref: {order.payment_reference}</p>
                       )}
+                      {order.payment_sender_name && (
+                        <p className="text-[10px] text-gray-400 truncate">Sender: {order.payment_sender_name}</p>
+                      )}
+                      {order.payment_datetime && (
+                        <p className="text-[10px] text-gray-400">
+                          {new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+
                       {order.payment_status === 'paid' ? (
                         <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
                       ) : order.payment_method !== 'cash_on_pickup' ? (

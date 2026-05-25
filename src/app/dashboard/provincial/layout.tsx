@@ -22,6 +22,7 @@ const navItems = [
     items: [
       { label: 'Inventory', href: '/dashboard/provincial/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/provincial/orders', icon: '🛒' },
+      { label: 'Payment Methods', href: '/dashboard/provincial/payment-methods', icon: '💳' },
     ],
   },
   {

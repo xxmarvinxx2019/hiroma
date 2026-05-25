@@ -21,6 +21,11 @@ interface Order {
   total_amount: number
   created_at: string
   notes: string | null
+  payment_method:      string | null
+  payment_reference:   string | null
+  payment_sender_name: string | null
+  payment_datetime:    string | null
+  payment_status:      string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -38,6 +43,14 @@ interface Product {
   name: string
   type: string
   price: number
+}
+
+interface PaymentMethodInfo {
+  id:             string
+  type:           string
+  account_name:   string
+  account_number: string
+  bank_name:      string | null
 }
 
 interface CartItem {
@@ -77,16 +90,27 @@ function CreateOrderModal({
   const [products, setProducts]     = useState<Product[]>([])
   const [cart, setCart]             = useState<CartItem[]>([])
   const [orderType, setOrderType]   = useState<'online' | 'offline'>('online')
-  const [notes, setNotes]           = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState('')
+  const [notes, setNotes]                 = useState('')
+  const [submitting, setSubmitting]       = useState(false)
+  const [error, setError]                 = useState('')
+  const [paymentMethod, setPaymentMethod]         = useState('cash_on_pickup')
+  const [paymentReference, setPaymentReference]   = useState('')
+  const [paymentSenderName, setPaymentSenderName] = useState('')
+  const [paymentDatetime, setPaymentDatetime]     = useState('')
+  const [paymentMethods, setPaymentMethods]       = useState<PaymentMethodInfo[]>([])
   const [search, setSearch]         = useState('')
 
   useEffect(() => {
     fetch('/api/provincial/products')
       .then((r) => r.json())
       .then((data) => setProducts(data.products || []))
-  }, [])
+
+    // Fetch supplier approved payment methods
+    fetch('/api/payment-methods?user_id=' + supplier.id + '&status=approved')
+      .then((r) => r.json())
+      .then((d) => setPaymentMethods(d.methods || []))
+      .catch(() => {})
+  }, [supplier.id])
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -109,14 +133,27 @@ function CreateOrderModal({
 
   const handleSubmit = async () => {
     if (cart.length === 0) { setError('Add at least one item.'); return }
+    if (paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
+      setError('Please enter the payment reference number.'); return
+    }
+    if (paymentMethod !== 'cash_on_pickup' && !paymentSenderName.trim()) {
+      setError('Please enter the sender name.'); return
+    }
+    if (paymentMethod !== 'cash_on_pickup' && !paymentDatetime) {
+      setError('Please enter the payment date and time.'); return
+    }
     setSubmitting(true)
     setError('')
     const res = await fetch('/api/provincial/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        order_type: orderType,
+        order_type:          orderType,
         notes,
+        payment_method:      paymentMethod,
+        payment_reference:   paymentReference.trim()  || null,
+        payment_sender_name: paymentSenderName.trim() || null,
+        payment_datetime:    paymentDatetime           || null,
         items: cart.map((c) => ({
           product_id: c.product.id,
           quantity:   c.quantity,
@@ -236,6 +273,43 @@ function CreateOrderModal({
                       orderType === t ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400'
                     }`}>{t}</button>
                 ))}
+              </div>
+
+              {/* Payment method */}
+              <div>
+                <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
+                <div className="space-y-1.5">
+                  <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference(''); setPaymentSenderName(''); setPaymentDatetime('') }}
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${paymentMethod === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
+                    <span className="text-sm">💵</span>
+                    <p className="text-[10px] font-medium text-[#0D1B3E] flex-1">Cash on Pickup</p>
+                    {paymentMethod === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
+                  </div>
+                  {paymentMethods.map((pm) => (
+                    <div key={pm.id} onClick={() => setPaymentMethod(pm.type)}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${paymentMethod === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
+                      <span className="text-sm">{pm.type === 'gcash' ? '📱' : '🏦'}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-medium text-[#0D1B3E]">{pm.type === 'gcash' ? 'GCash' : 'Bank Transfer'}</p>
+                        {pm.bank_name && <p className="text-[9px] text-gray-400 truncate">{pm.bank_name}</p>}
+                        <p className="text-[9px] text-gray-400 truncate">{pm.account_name} · {pm.account_number}</p>
+                      </div>
+                      {paymentMethod === pm.type && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
+                    </div>
+                  ))}
+                </div>
+                {paymentMethod !== 'cash_on_pickup' && (
+                  <div className="mt-2 space-y-1.5">
+                    <input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)}
+                      placeholder="Reference number *"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
+                    <input value={paymentSenderName} onChange={(e) => setPaymentSenderName(e.target.value)}
+                      placeholder="Sender name *"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
+                    <input type="datetime-local" value={paymentDatetime} onChange={(e) => setPaymentDatetime(e.target.value)}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] text-gray-500" />
+                  </div>
+                )}
               </div>
 
               {/* Notes */}
@@ -457,6 +531,18 @@ export default function ProvincialOrdersPage() {
                   <div>
                     <p className="text-xs font-medium text-[#0D1B3E]">{counterparty.full_name}</p>
                     <p className="text-xs text-gray-400 capitalize">@{counterparty.username} · {counterparty.role}</p>
+                  {/* Payment info */}
+                  {order.payment_method && order.payment_method !== 'cash_on_pickup' && (
+                    <div className="mt-0.5 space-y-0.5">
+                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : '🏦 Bank'}</p>
+                      {order.payment_reference    && <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>}
+                      {order.payment_sender_name  && <p className="text-[10px] text-gray-400">Sender: {order.payment_sender_name}</p>}
+                      {order.payment_datetime     && <p className="text-[10px] text-gray-400">{new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
+                      {order.payment_status === 'paid'
+                        ? <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
+                        : <span className="text-[10px] text-[#9a6f1e]">⏳ Unpaid</span>}
+                    </div>
+                  )}
                   </div>
 
                   {/* Type */}
@@ -476,7 +562,23 @@ export default function ProvincialOrdersPage() {
                   </span>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    {/* Confirm payment for non-cash orders in seller tab */}
+                    {tab !== 'my_orders' && order.payment_method && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                      <button
+                        onClick={async () => {
+                          await fetch('/api/provincial/orders', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ order_id: order.id, payment_status: 'paid' }),
+                          })
+                          fetchOrders()
+                        }}
+                        className="text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] font-medium"
+                      >
+                        ✓ Paid
+                      </button>
+                    )}
                     {nextStatuses.map((next) => (
                       <button
                         key={next}
