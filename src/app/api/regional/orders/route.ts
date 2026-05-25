@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const where: Record<string, unknown> = {
       ...(isBuyer
         ? { buyer_id: user.id }
-        : { seller_id: user.id, buyer: { role: 'provincial' } } // only provincial can order from regional
+        : { seller_id: user.id, buyer: { role: 'provincial' } }
       ),
       ...(status !== 'all' && { status }),
       ...(type   !== 'all' && { order_type: type }),
@@ -56,6 +56,11 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, order_type: true, status: true, total_amount: true,
           created_at: true, notes: true,
+          payment_method:      true,
+          payment_reference:   true,
+          payment_sender_name: true,
+          payment_datetime:    true,
+          payment_status:      true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -103,7 +108,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items } = await req.json()
+    const {
+      order_type, notes, items,
+      payment_method, payment_reference, payment_sender_name, payment_datetime,
+    } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -134,7 +142,6 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
 
-    // ── Validate seller has sufficient inventory for all items ──
     const stockErrors: string[] = []
     for (const item of items) {
       const inventoryItem = await prisma.inventory.findFirst({
@@ -157,10 +164,19 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.order.create({
       data: {
-        buyer_id: user.id, seller_id: supplier.id,
-        order_type, status: 'pending', total_amount,
-        is_cross_purchase: false, notes: notes?.trim() || null,
-        items: { create: orderItems },
+        buyer_id:            user.id,
+        seller_id:           supplier.id,
+        order_type,
+        status:              'pending',
+        total_amount,
+        is_cross_purchase:   false,
+        notes:               notes?.trim() || null,
+        payment_method:      payment_method || 'cash_on_pickup',
+        payment_reference:   payment_reference?.trim()   || null,
+        payment_sender_name: payment_sender_name?.trim() || null,
+        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
+        payment_status:      'unpaid',
+        items:               { create: orderItems },
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
     })
@@ -183,10 +199,14 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status } = await req.json()
+    const { order_id, status, payment_status } = await req.json()
     const allowed = ['pending', 'processing', 'delivered', 'cancelled']
-    if (!order_id || !allowed.includes(status))
+
+    if (!order_id || (!status && !payment_status))
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
+
+    if (status && !allowed.includes(status))
+      return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
 
     const order = await prisma.order.findFirst({
       where: {
@@ -202,11 +222,17 @@ export async function PATCH(req: NextRequest) {
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     if (order.status === 'delivered' || order.status === 'cancelled')
       return NextResponse.json({ error: 'Order already finalized.' }, { status: 400 })
-    if (order.buyer_id === user.id && order.seller_id !== user.id && status !== 'cancelled')
+    if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled')
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
 
     const updated = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({ where: { id: order_id }, data: { status } })
+      const updatedOrder = await tx.order.update({
+        where: { id: order_id },
+        data: {
+          ...(status         && { status }),
+          ...(payment_status && { payment_status }),
+        },
+      })
 
       if (status === 'delivered') {
         for (const item of order.items) {

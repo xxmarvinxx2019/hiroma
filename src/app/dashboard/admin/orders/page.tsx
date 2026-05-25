@@ -21,6 +21,11 @@ interface Order {
   total_amount: number
   created_at: string
   notes: string | null
+  payment_method:      string | null
+  payment_reference:   string | null
+  payment_sender_name: string | null
+  payment_datetime:    string | null
+  payment_status:      string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -227,6 +232,17 @@ export default function AdminOrdersPage() {
                     </span>
                     <span className="text-[10px] text-gray-400">@{order.buyer.username}</span>
                   </div>
+                  {order.payment_method && order.payment_method !== 'cash_on_pickup' && (
+                    <div className="mt-1 space-y-0.5">
+                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : '🏦 Bank'}</p>
+                      {order.payment_reference    && <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>}
+                      {order.payment_sender_name  && <p className="text-[10px] text-gray-400">Sender: {order.payment_sender_name}</p>}
+                      {order.payment_datetime     && <p className="text-[10px] text-gray-400">{new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
+                      {order.payment_status === 'paid'
+                        ? <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
+                        : <span className="text-[10px] text-[#9a6f1e]">⏳ Unpaid</span>}
+                    </div>
+                  )}
                 </div>
 
                 {/* Seller */}
@@ -261,7 +277,22 @@ export default function AdminOrdersPage() {
                 </span>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    {order.payment_method && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && order.status !== 'delivered' && (
+                      <button
+                        onClick={async () => {
+                          await fetch('/api/admin/orders', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ order_id: order.id, payment_status: 'paid' }),
+                          })
+                          fetchOrders()
+                        }}
+                        className="text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] font-medium"
+                      >
+                        ✓ Paid
+                      </button>
+                    )}
                   {STATUS_NEXT[order.status]?.map((next) => (
                     <button
                       key={next}

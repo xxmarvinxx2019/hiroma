@@ -44,12 +44,17 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id:           true,
-          order_type:   true,
-          status:       true,
-          total_amount: true,
-          created_at:   true,
-          notes:        true,
+          id:                  true,
+          order_type:          true,
+          status:              true,
+          total_amount:        true,
+          created_at:          true,
+          notes:               true,
+          payment_method:      true,
+          payment_reference:   true,
+          payment_sender_name: true,
+          payment_datetime:    true,
+          payment_status:      true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -81,8 +86,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      orders,
-      summary,
+      orders, summary,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -91,7 +95,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── PATCH update order status + credit buyer + deduct admin inventory ──
+// ── PATCH update order status + payment_status + credit buyer + deduct admin inventory ──
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -99,11 +103,15 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status } = await req.json()
+    const { order_id, status, payment_status } = await req.json()
     const allowed = ['pending', 'processing', 'delivered', 'cancelled']
 
-    if (!order_id || !allowed.includes(status)) {
+    if (!order_id || (!status && !payment_status)) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
+    }
+
+    if (status && !allowed.includes(status)) {
+      return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
     }
 
     const order = await prisma.order.findFirst({
@@ -133,7 +141,7 @@ export async function PATCH(req: NextRequest) {
         }),
       ])
 
-      const adminInvMap   = new Map(adminInventory.map((i) => [i.product_id, i.quantity]))
+      const adminInvMap    = new Map(adminInventory.map((i) => [i.product_id, i.quantity]))
       const productNameMap = new Map(products.map((p) => [p.id, p.name]))
 
       const stockErrors = order.items
@@ -149,11 +157,14 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // ── Transaction: update status + credit buyer + deduct admin ──
+    // ── Transaction: update status + payment_status + credit buyer + deduct admin ──
     const updated = await prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.order.update({
         where: { id: order_id },
-        data:  { status },
+        data: {
+          ...(status         && { status }),
+          ...(payment_status && { payment_status }),
+        },
       })
 
       if (status === 'delivered') {
@@ -187,7 +198,6 @@ export async function PATCH(req: NextRequest) {
               data:  { quantity: { decrement: item.quantity } },
             })
           } else {
-            // No stock record yet — create negative entry so admin sees the deficit
             await tx.inventory.create({
               data: {
                 owner_id:            order.seller_id,

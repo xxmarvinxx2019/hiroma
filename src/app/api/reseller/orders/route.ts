@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, payment_method, payment_reference } = await req.json()
+    const { order_type, notes, items, payment_method, payment_reference, payment_sender_name, payment_datetime } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -156,9 +156,11 @@ export async function POST(req: NextRequest) {
         total_amount,
         is_cross_purchase: false,
         notes:             notes?.trim() || null,
-        payment_method:    payment_method || 'cash_on_pickup',
-        payment_reference: payment_reference?.trim() || null,
-        payment_status:    'unpaid',
+        payment_method:      payment_method || 'cash_on_pickup',
+        payment_reference:   payment_reference?.trim()   || null,
+        payment_sender_name: payment_sender_name?.trim() || null,
+        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
+        payment_status:      'unpaid',
         items:             { create: orderItems },
       },
       select: {

@@ -3,10 +3,6 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 // ── Resolve provincial's supplier ──
-// Priority:
-// 1. Direct parent (regional via parent_dist_id)
-// 2. Regional covering same region (by region_code)
-// 3. Admin fallback
 async function resolveSupplier(provincialUserId: string) {
   const profile = await prisma.distributorProfile.findUnique({
     where: { user_id: provincialUserId },
@@ -21,7 +17,6 @@ async function resolveSupplier(provincialUserId: string) {
     },
   })
 
-  // 1. Direct parent set — regional
   if (profile?.parent?.dist_level === 'regional' && profile.parent.is_active) {
     return {
       id:        profile.parent.user.id,
@@ -31,7 +26,6 @@ async function resolveSupplier(provincialUserId: string) {
     }
   }
 
-  // 2. No direct parent — find regional covering same region
   if (profile?.region_code) {
     const regional = await prisma.distributorProfile.findFirst({
       where: { dist_level: 'regional', region_code: profile.region_code, is_active: true },
@@ -47,7 +41,6 @@ async function resolveSupplier(provincialUserId: string) {
     }
   }
 
-  // 3. Fallback to admin
   const admin = await prisma.user.findFirst({
     where: { role: 'admin' },
     select: { id: true, full_name: true, username: true },
@@ -77,7 +70,7 @@ export async function GET(req: NextRequest) {
     const where: Record<string, unknown> = {
       ...(isBuyer
         ? { buyer_id: user.id }
-        : { seller_id: user.id, buyer: { role: 'city' } } // only city dist can order from provincial
+        : { seller_id: user.id, buyer: { role: 'city' } }
       ),
       ...(status !== 'all' && { status }),
       ...(type   !== 'all' && { order_type: type }),
@@ -101,6 +94,11 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, order_type: true, status: true, total_amount: true,
           created_at: true, notes: true,
+          payment_method:      true,
+          payment_reference:   true,
+          payment_sender_name: true,
+          payment_datetime:    true,
+          payment_status:      true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -148,7 +146,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items } = await req.json()
+    const {
+      order_type, notes, items,
+      payment_method, payment_reference, payment_sender_name, payment_datetime,
+    } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -180,7 +181,6 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
 
-    // ── Validate seller has sufficient inventory for all items ──
     const stockErrors: string[] = []
     for (const item of items) {
       const inventoryItem = await prisma.inventory.findFirst({
@@ -203,10 +203,19 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.order.create({
       data: {
-        buyer_id: user.id, seller_id: supplier.id,
-        order_type, status: 'pending', total_amount,
-        is_cross_purchase: false, notes: notes?.trim() || null,
-        items: { create: orderItems },
+        buyer_id:            user.id,
+        seller_id:           supplier.id,
+        order_type,
+        status:              'pending',
+        total_amount,
+        is_cross_purchase:   false,
+        notes:               notes?.trim() || null,
+        payment_method:      payment_method || 'cash_on_pickup',
+        payment_reference:   payment_reference?.trim()   || null,
+        payment_sender_name: payment_sender_name?.trim() || null,
+        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
+        payment_status:      'unpaid',
+        items:               { create: orderItems },
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
     })
@@ -229,17 +238,21 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status } = await req.json()
+    const { order_id, status, payment_status } = await req.json()
     const allowed = ['pending', 'processing', 'delivered', 'cancelled']
-    if (!order_id || !allowed.includes(status))
+
+    if (!order_id || (!status && !payment_status))
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
+
+    if (status && !allowed.includes(status))
+      return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
 
     const order = await prisma.order.findFirst({
       where: {
         id: order_id,
         OR: [
-          { seller_id: user.id, buyer: { role: 'city' } }, // city dist orders to provincial
-          { buyer_id: user.id, status: 'pending' },         // provincial's own purchase orders
+          { seller_id: user.id, buyer: { role: 'city' } },
+          { buyer_id: user.id, status: 'pending' },
         ],
       },
       include: { items: true },
@@ -248,21 +261,25 @@ export async function PATCH(req: NextRequest) {
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     if (order.status === 'delivered' || order.status === 'cancelled')
       return NextResponse.json({ error: 'Order already finalized.' }, { status: 400 })
-    if (order.buyer_id === user.id && order.seller_id !== user.id && status !== 'cancelled')
+    if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled')
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
 
     const updated = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({ where: { id: order_id }, data: { status } })
+      const updatedOrder = await tx.order.update({
+        where: { id: order_id },
+        data: {
+          ...(status         && { status }),
+          ...(payment_status && { payment_status }),
+        },
+      })
 
       if (status === 'delivered') {
         for (const item of order.items) {
-          // Credit buyer inventory
           await tx.inventory.upsert({
             where: { owner_id_product_id: { owner_id: order.buyer_id, product_id: item.product_id } },
             update: { quantity: { increment: item.quantity } },
             create: { owner_id: order.buyer_id, product_id: item.product_id, quantity: item.quantity, low_stock_threshold: 10 },
           })
-          // Deduct seller inventory
           await tx.inventory.updateMany({
             where: { owner_id: order.seller_id, product_id: item.product_id },
             data:  { quantity: { decrement: item.quantity } },

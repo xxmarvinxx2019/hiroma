@@ -191,6 +191,112 @@ function TreeNodeCard({
   )
 }
 
+
+// ============================================================
+// UPGRADE MODAL
+// ============================================================
+
+function UpgradeModal({
+  reseller,
+  onClose,
+  onSuccess,
+}: {
+  reseller: Reseller
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [pinInput, setPinInput]     = useState('')
+  const [pinData, setPinData]       = useState<VerifiedPin | null>(null)
+  const [pinError, setPinError]     = useState('')
+  const [pinLoading, setPinLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]           = useState('')
+  const [success, setSuccess]       = useState('')
+
+  const verifyUpgradePin = async () => {
+    if (!pinInput.trim()) { setPinError('Please enter a PIN code.'); return }
+    setPinLoading(true); setPinError('')
+    const res = await fetch('/api/city/pins/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin_code: pinInput.trim().toUpperCase() }),
+    })
+    const data = await res.json()
+    setPinLoading(false)
+    if (!res.ok) { setPinError(data.error || 'Invalid PIN.') }
+    else { setPinData(data.pin) }
+  }
+
+  const handleUpgrade = async () => {
+    if (!pinData) return
+    setSubmitting(true); setError('')
+    const res = await fetch('/api/city/resellers/upgrade', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reseller_id: reseller.id, new_pin_id: pinData.id }),
+    })
+    const data = await res.json()
+    setSubmitting(false)
+    if (res.ok) {
+      setSuccess(data.message || 'Upgrade successful!')
+      setTimeout(() => { onSuccess(); onClose() }, 2000)
+    } else {
+      setError(data.error || 'Something went wrong.')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+        <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-white font-semibold text-sm">Upgrade Package</h2>
+            <p className="text-white/40 text-xs mt-0.5">{reseller.full_name} · @{reseller.username}</p>
+          </div>
+          <button onClick={onClose} className="text-white/50 hover:text-white text-lg">✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="bg-[#F0F2F8] rounded-xl px-4 py-3">
+            <p className="text-xs text-gray-400 mb-1">Current package</p>
+            <p className="text-sm font-semibold text-[#0D1B3E]">{reseller.reseller_profile?.package?.name || '—'}</p>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5">New Package PIN <span className="text-[#C9A84C]">*</span></label>
+            <div className="flex gap-2">
+              <input value={pinInput}
+                onChange={(e) => { setPinInput(e.target.value.toUpperCase()); setPinError(''); setPinData(null) }}
+                onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()}
+                placeholder="Enter new PIN code"
+                className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C] uppercase tracking-wider" />
+              <button onClick={verifyUpgradePin} disabled={pinLoading || !pinInput.trim()}
+                className="bg-[#0D1B3E] text-white text-xs rounded-lg px-4 hover:bg-[#162850] disabled:opacity-50">
+                {pinLoading ? '...' : 'Verify'}
+              </button>
+            </div>
+            {pinError && <p className="text-xs text-[#a03030] mt-1">{pinError}</p>}
+          </div>
+          {pinData && (
+            <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-xl px-4 py-3">
+              <p className="text-xs text-[#1a7a4a] font-semibold">✓ PIN verified</p>
+              <p className="text-xs text-gray-500 mt-1">New package: <strong>{pinData.package?.name}</strong> · ₱{Number(pinData.package?.price || 0).toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Only the <strong>difference in points</strong> will be added to the upline</p>
+            </div>
+          )}
+          {error   && <p className="text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{error}</p>}
+          {success && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-3 py-2 rounded-lg">✓ {success}</p>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0]">Cancel</button>
+            <button onClick={handleUpgrade} disabled={!pinData || submitting}
+              className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] disabled:opacity-50">
+              {submitting ? 'Upgrading...' : 'Confirm Upgrade'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ============================================================
 // MAIN PAGE
 // ============================================================
@@ -209,6 +315,9 @@ export default function CityResellersPage() {
   // Modal state
   const [showForm, setShowForm] = useState(false)
   const [step, setStep] = useState<1 | 2 | 3>(1)
+
+  // Upgrade modal
+  const [upgradingReseller, setUpgradingReseller] = useState<Reseller | null>(null)
 
   // Step 1 — PIN
   const [pinInput, setPinInput] = useState('')
@@ -241,8 +350,19 @@ export default function CityResellersPage() {
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
   const [usernameEdited, setUsernameEdited] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
-  const [formError, setFormError] = useState('')
+  const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
+  const [successData, setSuccessData] = useState<{
+    full_name: string
+    username:  string
+    package: {
+      name:           string
+      pin_price:      number
+      products_total: number
+      total_price:    number
+      products:       { name: string; type: string; quantity: number; reseller_price: number }[]
+    } | null
+  } | null>(null)
 
   // Auto-generate username from full_name (only if user hasn't manually edited it)
   useEffect(() => {
@@ -451,9 +571,13 @@ export default function CityResellersPage() {
     if (!res.ok) {
       setFormError(data.error || 'Registration failed.')
     } else {
-      setFormSuccess(`✓ ${form.full_name} registered successfully!`)
+      setSuccessData({
+        full_name: form.full_name,
+        username:  form.username.toLowerCase(),
+        package:   data.package || null,
+      })
       fetchResellers()
-      setTimeout(() => resetForm(), 2500)
+      resetForm()
     }
     setFormLoading(false)
   }
@@ -504,8 +628,8 @@ export default function CityResellersPage() {
           />
         </div>
 
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Reseller', 'Mobile', 'Package', 'Points', 'Wallet', 'Status'].map((h) => (
+        <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr 80px' }}>
+          {['Reseller', 'Mobile', 'Package', 'Points', 'Wallet', 'Status', ''].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -522,7 +646,7 @@ export default function CityResellersPage() {
           </div>
         ) : (
           resellers.map((r) => (
-            <div key={r.id} className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
+            <div key={r.id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr 80px' }}>
               <div>
                 <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
                 <p className="text-xs text-gray-400">@{r.username}</p>
@@ -536,12 +660,118 @@ export default function CityResellersPage() {
                   {r.status}
                 </span>
               </span>
+              <button onClick={() => setUpgradingReseller(r)}
+                className="text-xs bg-[#eef0f8] text-[#0D1B3E] px-2.5 py-1.5 rounded-lg hover:bg-[#C9A84C] hover:text-white transition-colors font-medium">
+                Upgrade
+              </button>
             </div>
           ))
         )}
 
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
+
+      {/* ════════════ SUCCESS BANNER ════════════ */}
+      {successData && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+
+            {/* Green header */}
+            <div className="bg-[#0D1B3E] px-6 py-6 text-center relative">
+              <div className="w-16 h-16 bg-[#C9A84C]/20 border-2 border-[#C9A84C]/40 rounded-full flex items-center justify-center mx-auto mb-3">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                  <path d="M6 16L13 23L26 9" stroke="#C9A84C" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h2 className="text-white font-bold text-lg">Registration Complete</h2>
+              <p className="text-white/60 text-sm mt-1">
+                <span className="text-[#C9A84C] font-semibold">{successData.full_name}</span> has been successfully registered
+              </p>
+              <p className="text-white/40 text-xs mt-0.5">@{successData.username}</p>
+            </div>
+
+            {successData.package && (
+              <div className="p-5 space-y-4">
+
+                {/* Package name + total */}
+                <div className="flex items-center justify-between bg-[#fef9ee] border border-[#C9A84C]/20 rounded-xl px-4 py-3">
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Package Availed</p>
+                    <p className="text-sm font-bold text-[#0D1B3E]">{successData.package.name}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Total Value</p>
+                    <p className="text-sm font-bold text-[#C9A84C]">₱{Number(successData.package.total_price).toLocaleString()}</p>
+                  </div>
+                </div>
+
+                {/* Price breakdown */}
+                <div className="bg-[#F0F2F8] rounded-xl px-4 py-3 space-y-2">
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-2">Price Breakdown</p>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">PIN Price</span>
+                    <span className="font-medium text-[#0D1B3E]">₱{Number(successData.package.pin_price).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Products Value</span>
+                    <span className="font-medium text-[#0D1B3E]">₱{Number(successData.package.products_total).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs pt-2 border-t border-[#0D1B3E]/8 font-semibold">
+                    <span className="text-[#0D1B3E]">Total Package Value</span>
+                    <span className="text-[#C9A84C]">₱{Number(successData.package.total_price).toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Products list */}
+                {successData.package.products.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-2">Included Products</p>
+                    <div className="space-y-1.5">
+                      {successData.package.products.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between bg-[#F0F2F8] rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>
+                              {p.type}
+                            </span>
+                            <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <span className="text-[10px] text-gray-400">×{p.quantity}</span>
+                            <span className="text-xs font-medium text-[#0D1B3E]">₱{(p.reseller_price * p.quantity).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => setSuccessData(null)}
+                  className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">
+                  Done
+                </button>
+              </div>
+            )}
+
+            {!successData.package && (
+              <div className="p-5">
+                <button onClick={() => setSuccessData(null)}
+                  className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">
+                  Done
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════ UPGRADE MODAL ════════════ */}
+      {upgradingReseller && (
+        <UpgradeModal
+          reseller={upgradingReseller}
+          onClose={() => setUpgradingReseller(null)}
+          onSuccess={fetchResellers}
+        />
+      )}
 
       {/* ════════════ REGISTRATION MODAL ════════════ */}
       {showForm && (

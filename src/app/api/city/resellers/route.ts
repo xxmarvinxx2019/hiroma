@@ -225,19 +225,23 @@ async function firePointsPairingBonus(
   today.setHours(0, 0, 0, 0)
 
   // Step 4: Walk up ancestors — add points and check pairs
-  // Track which leg we came from as we walk up
-  let currentLeg = newPosition
+  // FIX: leg is determined per-ancestor correctly:
+  //   i=0 → newPosition (side new reseller is on under parent)
+  //   i>0 → ancestors[i-1].position (side previous node is on under current)
 
   for (let i = 0; i < ancestors.length; i++) {
     const ancestor = ancestors[i]
-    const profile  = profileMap.get(ancestor.user_id)
+
+    // Correct leg determination
+    const leg: 'left' | 'right' = i === 0
+      ? newPosition
+      : ((ancestors[i - 1].position as 'left' | 'right') || 'left')
+
+    const profile = profileMap.get(ancestor.user_id)
 
     if (!profile) {
-      // No reseller profile (e.g. HIROMA root) — skip pairing but continue walk
-      // Update leg for next ancestor
-      if (ancestors[i + 1]) {
-        currentLeg = ancestor.position as 'left' | 'right' || currentLeg
-      }
+      // No reseller profile (e.g. HIROMA root) — skip
+      console.log(`[BINARY] Skip ${ancestor.user_id} — no reseller profile`)
       continue
     }
 
@@ -245,14 +249,14 @@ async function firePointsPairingBonus(
     let leftPts  = Number(profile.left_points  || 0)
     let rightPts = Number(profile.right_points || 0)
 
-    if (currentLeg === 'left')  leftPts  += newUserPts
-    if (currentLeg === 'right') rightPts += newUserPts
+    if (leg === 'left')  leftPts  += newUserPts
+    else                 rightPts += newUserPts
 
-    // Calculate pairs
+    // Guide formula: pairs = MIN(left, right) / 100
     const pairPoints    = Math.min(leftPts, rightPts)
     const possiblePairs = Math.floor(pairPoints / POINTS_PER_PAIR)
 
-    console.log(`[BINARY] Ancestor ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | possible pairs:${possiblePairs}`)
+    console.log(`[BINARY] ${ancestor.user_id} | leg:${leg} | L:${leftPts} R:${rightPts} | pairs:${possiblePairs}`)
 
     if (possiblePairs > 0) {
       // Check daily cap
@@ -313,6 +317,17 @@ async function firePointsPairingBonus(
         })
       }
 
+      // Log pairing event
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO pairing_logs (id, member_id, left_points_used, right_points_used, pairs_created, commission, date_created)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
+        ancestor.user_id,
+        leg === 'left'  ? deduct : 0,
+        leg === 'right' ? deduct : 0,
+        paidPairs,
+        paidEarnings
+      )
+
       // Update reseller's left/right points + daily count
       await prisma.resellerProfile.update({
         where: { user_id: ancestor.user_id },
@@ -331,8 +346,6 @@ async function firePointsPairingBonus(
       })
     }
 
-    // Move up — next ancestor's leg is this node's position
-    currentLeg = ancestor.position as 'left' | 'right' || currentLeg
   }
 
   console.log('[BINARY] Tree walk complete')
@@ -415,12 +428,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Parent node not found.' }, { status: 400 })
     if (!referrer)
       return NextResponse.json({ error: 'Referrer not found.' }, { status: 400 })
-
-    if (email?.trim()) {
-      const existingEmail = await prisma.user.findFirst({ where: { email: email.trim().toLowerCase() } })
-      if (existingEmail)
-        return NextResponse.json({ error: 'Email already in use.' }, { status: 400 })
-    }
 
     const normalizedName = full_name.trim().toLowerCase()
     const nameCap = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
@@ -609,7 +616,7 @@ export async function POST(req: NextRequest) {
         products: {
           select: {
             quantity: true,
-            product: { select: { name: true, type: true } },
+            product: { select: { name: true, type: true, price: true, reseller_price: true } },
           },
         },
       },
@@ -619,15 +626,24 @@ export async function POST(req: NextRequest) {
       success:  true,
       message:  `${full_name} has been registered successfully.`,
       reseller: { full_name, username: username.trim().toLowerCase() },
-      package:  packageWithProducts ? {
-        name:     packageWithProducts.name,
-        price:    Number(packageWithProducts.price),
-        products: packageWithProducts.products.map((p) => ({
-          name:     p.product.name,
-          type:     p.product.type,
-          quantity: p.quantity,
-        })),
-      } : null,
+      package:  packageWithProducts ? (() => {
+        const pinPrice      = Number(packageWithProducts.price)
+        const productsTotal = packageWithProducts.products.reduce((sum, p) => {
+          return sum + (Number(p.product.reseller_price || p.product.price || 0) * p.quantity)
+        }, 0)
+        return {
+          name:           packageWithProducts.name,
+          pin_price:      pinPrice,
+          products_total: productsTotal,
+          total_price:    pinPrice + productsTotal,
+          products:       packageWithProducts.products.map((p) => ({
+            name:          p.product.name,
+            type:          p.product.type,
+            quantity:      p.quantity,
+            reseller_price: Number(p.product.reseller_price || p.product.price || 0),
+          })),
+        }
+      })() : null,
     })
   } catch (error: any) {
     console.error('[REGISTER RESELLER ERROR]', error?.message || error)

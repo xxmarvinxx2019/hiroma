@@ -10,10 +10,13 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url)
-    const status = searchParams.get('status') || 'all'
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
-    const search = searchParams.get('search') || ''
+    const status    = searchParams.get('status')   || 'all'
+    const page      = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize  = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
+    const search    = searchParams.get('search')   || ''
+    const packageId = searchParams.get('package')  || ''
+    const dateFrom  = searchParams.get('dateFrom') || ''
+    const dateTo    = searchParams.get('dateTo')   || ''
 
     // ── Build where clause ──
     const where: any = {
@@ -32,43 +35,67 @@ export async function GET(req: NextRequest) {
             username: { contains: search.toLowerCase(), mode: 'insensitive' },
           },
         },
+        {
+          used_by_user: {
+            full_name: { contains: search, mode: 'insensitive' },
+          },
+        },
       ]
+    }
+
+    if (packageId) {
+      where.package_id = packageId
+    }
+
+    if (dateFrom || dateTo) {
+      where.created_at = {
+        ...(dateFrom && { gte: new Date(dateFrom) }),
+        ...(dateTo   && { lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)) }),
+      }
     }
 
     // ── Count total ──
     const total = await prisma.pin.count({ where })
 
-    // ── Fetch paginated PINs ──
-    const pins = await prisma.pin.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-      select: {
-        id: true,
-        pin_code: true,
-        status: true,
-        created_at: true,
-        used_at: true,
-        package: {
-          select: { name: true, price: true },
+    // ── Fetch paginated PINs + packages for filter dropdown ──
+    const [pins, packages] = await Promise.all([
+      prisma.pin.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          pin_code: true,
+          status: true,
+          created_at: true,
+          used_at: true,
+          package: {
+            select: { name: true, price: true },
+          },
+          used_by_user: {
+            select: { full_name: true, username: true },
+          },
         },
-        used_by_user: {
-          select: { full_name: true, username: true },
-        },
-      },
-    })
+      }),
+
+      prisma.package.findMany({
+        select:  { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+    ])
 
     // ── Summary counts (all statuses, no filter) ──
     const [totalAll, unused, used, expired] = await Promise.all([
       prisma.pin.count({ where: { city_dist_id: user.id } }),
-      prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused' } }),
-      prisma.pin.count({ where: { city_dist_id: user.id, status: 'used' } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused'  } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'used'    } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'expired' } }),
     ])
 
     return NextResponse.json({
       pins,
+      packages,
       meta: {
         total,
         page,
