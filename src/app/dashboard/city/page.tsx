@@ -20,6 +20,11 @@ interface CityStats {
   totalProfit:     number
   totalUnitsSold:  number
   totalInventoryItems: number
+  orderRevenue:    number
+  orderCost:       number
+  packageRevenue:  number
+  packageCost:     number
+  packageUnitsSold: number
 }
 
 interface RecentReseller {
@@ -276,12 +281,14 @@ export default function CityDashboardPage() {
           {/* Sales Summary */}
           <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5 mt-2">
             <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Sales Summary</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+            {/* Overall */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               {[
-                { label: 'Units Sold',    value: (stats?.totalUnitsSold || 0).toLocaleString(),                                                          accent: '#0D1B3E' },
-                { label: 'Total Revenue', value: `₱${(stats?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#2563eb' },
-                { label: 'Total Cost',    value: `₱${(stats?.totalCost    || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#e05252' },
-                { label: 'Net Profit',    value: `₱${(stats?.totalProfit  || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,             accent: '#1a7a4a' },
+                { label: 'Units Sold',    value: (stats?.totalUnitsSold || 0).toLocaleString(),                                                         accent: '#0D1B3E' },
+                { label: 'Total Revenue', value: `₱${(stats?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,            accent: '#2563eb' },
+                { label: 'Total Cost',    value: `₱${(stats?.totalCost    || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,            accent: '#e05252' },
+                { label: 'Net Profit',    value: `₱${(stats?.totalProfit  || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,            accent: '#1a7a4a' },
               ].map((s) => (
                 <div key={s.label} className="bg-[#F0F2F8] rounded-xl p-3"
                   style={{ borderTop: `2px solid ${s.accent}` }}>
@@ -289,6 +296,48 @@ export default function CityDashboardPage() {
                   <p className="text-lg font-semibold" style={{ color: s.accent }}>{s.value}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Breakdown */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-[#fef9ee] border border-[#C9A84C]/20 rounded-xl p-3">
+                <p className="text-xs font-medium text-[#9a6f1e] mb-2">📦 Package Sales (PIN)</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Units</span>
+                    <span className="font-medium text-[#0D1B3E]">{(stats?.packageUnitsSold || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Revenue (SRP)</span>
+                    <span className="font-medium text-[#2563eb]">₱{(stats?.packageRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Cost</span>
+                    <span className="font-medium text-[#e05252]">₱{(stats?.packageCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-xs border-t border-[#C9A84C]/20 pt-1 font-semibold">
+                    <span className="text-[#0D1B3E]">Profit</span>
+                    <span className="text-[#1a7a4a]">₱{((stats?.packageRevenue || 0) - (stats?.packageCost || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-[#eef0f8] border border-[#0D1B3E]/10 rounded-xl p-3">
+                <p className="text-xs font-medium text-[#0D1B3E] mb-2">🛒 Order Sales (Walk-in)</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Revenue</span>
+                    <span className="font-medium text-[#2563eb]">₱{(stats?.orderRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Cost</span>
+                    <span className="font-medium text-[#e05252]">₱{(stats?.orderCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-xs border-t border-[#0D1B3E]/10 pt-1 font-semibold">
+                    <span className="text-[#0D1B3E]">Profit</span>
+                    <span className="text-[#1a7a4a]">₱{((stats?.orderRevenue || 0) - (stats?.orderCost || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
