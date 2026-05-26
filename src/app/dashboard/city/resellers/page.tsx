@@ -360,7 +360,7 @@ export default function CityResellersPage() {
       pin_price:      number
       products_total: number
       total_price:    number
-      products:       { name: string; type: string; quantity: number; reseller_price: number }[]
+      products:       { name: string; type: string; quantity: number; srp: number; subtotal: number }[]
     } | null
   } | null>(null)
 
@@ -733,12 +733,12 @@ export default function CityResellersPage() {
                             <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>
                               {p.type}
                             </span>
-                            <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
+                              <p className="text-[10px] text-gray-400">SRP: ₱{Number(p.srp).toLocaleString()} × {p.quantity}</p>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                            <span className="text-[10px] text-gray-400">×{p.quantity}</span>
-                            <span className="text-xs font-medium text-[#0D1B3E]">₱{(p.reseller_price * p.quantity).toLocaleString()}</span>
-                          </div>
+                          <span className="text-xs font-medium text-[#0D1B3E] ml-2">₱{Number(p.subtotal).toLocaleString()}</span>
                         </div>
                       ))}
                     </div>
