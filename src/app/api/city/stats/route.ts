@@ -10,22 +10,19 @@ export async function GET() {
     }
 
     const [
-      totalResellers,
-      activeResellers,
-      unusedPins,
-      usedPins,
-      totalOrders,
-      pendingOrders,
+      totalResellers, activeResellers,
+      unusedPins, usedPins,
+      totalOrders, pendingOrders,
       inventory,
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'reseller', created_by: user.id } }),
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, status: 'active' } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused' } }),
-      prisma.pin.count({ where: { city_dist_id: user.id, status: 'used' } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'used'   } }),
       prisma.order.count({ where: { buyer_id: user.id } }),
       prisma.order.count({ where: { buyer_id: user.id, status: 'pending' } }),
       prisma.inventory.findMany({
-        where: { owner_id: user.id },
+        where:  { owner_id: user.id },
         select: { quantity: true, low_stock_threshold: true },
       }),
     ])
@@ -34,23 +31,63 @@ export async function GET() {
       (i) => i.quantity <= i.low_stock_threshold
     ).length
 
-    // ── Sales summary ──
-    const deliveredSales = await prisma.order.findMany({
-      where: { seller_id: user.id, status: 'delivered' },
+    // ── Product order sales (city sells to resellers via walk-in orders) ──
+    const deliveredOrders = await prisma.order.findMany({
+      where:  { seller_id: user.id, status: 'delivered' },
       select: {
         items: {
           select: {
-            quantity: true, subtotal: true,
+            quantity:   true,
+            subtotal:   true,
             product: { select: { city_price: true } },
           },
         },
       },
     })
 
-    const totalRevenue   = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
-    const totalCost      = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price) * i.quantity, 0), 0)
-    const totalProfit    = totalRevenue - totalCost
-    const totalUnitsSold = deliveredSales.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
+    const orderRevenue   = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
+    const orderCost      = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price || 0) * i.quantity, 0), 0)
+    const orderUnitsSold = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
+
+    // ── Package (PIN) sales from reseller registrations ──
+    // Revenue = SRP value of products in each used PIN package
+    const usedPinPackages = await prisma.pin.findMany({
+      where:  { city_dist_id: user.id, status: 'used' },
+      select: {
+        package: {
+          select: {
+            price: true,  // PIN price
+            products: {
+              select: {
+                quantity: true,
+                product:  { select: { price: true, city_price: true } }, // price = SRP
+              },
+            },
+          },
+        },
+      },
+    })
+
+    let packageRevenue   = 0
+    let packageCost      = 0
+    let packageUnitsSold = 0
+
+    for (const pin of usedPinPackages) {
+      if (!pin.package) continue
+      for (const pp of pin.package.products) {
+        const srp       = Number(pp.product.price      || 0)
+        const cityPrice = Number(pp.product.city_price || 0)
+        packageRevenue   += srp       * pp.quantity
+        packageCost      += cityPrice * pp.quantity
+        packageUnitsSold += pp.quantity
+      }
+    }
+
+    // ── Combined totals ──
+    const totalRevenue   = orderRevenue   + packageRevenue
+    const totalCost      = orderCost      + packageCost
+    const totalProfit    = totalRevenue   - totalCost
+    const totalUnitsSold = orderUnitsSold + packageUnitsSold
 
     return NextResponse.json({
       stats: {
@@ -62,10 +99,17 @@ export async function GET() {
         pendingOrders,
         lowStockItems,
         totalInventoryItems: inventory.length,
+        // Combined sales
         totalRevenue,
         totalCost,
         totalProfit,
         totalUnitsSold,
+        // Breakdown
+        orderRevenue,
+        orderCost,
+        packageRevenue,
+        packageCost,
+        packageUnitsSold,
       },
     })
   } catch (error) {
