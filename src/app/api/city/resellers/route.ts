@@ -245,8 +245,18 @@ async function firePointsPairingBonus(
 
     if (pointsPerPair <= 0) continue
 
-    let leftPts  = Number(profile.left_points  || 0)
-    let rightPts = Number(profile.right_points || 0)
+    // ── Daily reset (Option 2) ──
+    // If last pair date is NOT today → new day → reset left/right points to 0
+    const lastPairDate = profile.daily_pairing_date
+      ? new Date(profile.daily_pairing_date) : null
+    const isToday = lastPairDate ? lastPairDate >= today : false
+
+    let leftPts  = isToday ? Number(profile.left_points  || 0) : 0
+    let rightPts = isToday ? Number(profile.right_points || 0) : 0
+
+    if (!isToday && (Number(profile.left_points || 0) > 0 || Number(profile.right_points || 0) > 0)) {
+      console.log(`[BINARY] 🔄 New day reset for ${ancestor.user_id} — points cleared`)
+    }
 
     if (leg === 'left')  leftPts  += newUserPts
     else                 rightPts += newUserPts
@@ -258,9 +268,6 @@ async function firePointsPairingBonus(
     console.log(`[BINARY] ${ancestor.user_id} | leg:${leg} | L:${leftPts} R:${rightPts} | ppp:${pointsPerPair} | pairs:${possiblePairs}`)
 
     if (possiblePairs > 0) {
-      const lastPairDate = profile.daily_pairing_date
-        ? new Date(profile.daily_pairing_date) : null
-      const isToday   = lastPairDate ? lastPairDate >= today : false
       const usedToday = isToday ? Number(profile.daily_pairing_count || 0) : 0
       const remaining = Math.max(0, DAILY_PAIRING_CAP - usedToday)
 
@@ -275,8 +282,32 @@ async function firePointsPairingBonus(
       leftPts  -= deduct
       rightPts -= deduct
 
-      // Cap exceeded → FLUSH carry over (no binary points carry forward)
+      // Cap exceeded → FLUSH carry over to HIROMA (nothing is lost)
       if (overflowPairs > 0) {
+        // Remaining points after deduction → convert to peso → credit HIROMA
+        const remainingPts   = Math.min(leftPts, rightPts)  // remaining after deduct
+        const flushEarnings  = remainingPts * BINARY_POINT_TO_PESO
+
+        if (flushEarnings > 0 && hiromaUser) {
+          await prisma.commission.create({
+            data: {
+              user_id:          hiromaUser.id,
+              type:             'binary_pairing',
+              amount:           flushEarnings,
+              points:           remainingPts,
+              source_user_id:   newUserId,
+              overflow_to:      hiromaUser.id,
+              is_pair_overflow: true,
+            },
+          })
+          await prisma.wallet.upsert({
+            where:  { user_id: hiromaUser.id },
+            update: { balance: { increment: flushEarnings }, total_earned: { increment: flushEarnings } },
+            create: { user_id: hiromaUser.id, balance: flushEarnings, total_earned: flushEarnings, total_withdrawn: 0 },
+          })
+          console.log(`[BINARY] 🔄 FLUSH → HIROMA: ${remainingPts}pts = ₱${flushEarnings}`)
+        }
+
         leftPts  = 0
         rightPts = 0
       }
