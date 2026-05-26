@@ -29,6 +29,12 @@ interface DashboardStats {
   totalPinSalesRevenue: number
   overallNetProfit:    number
   chainRevenue:        number
+  pinRevenue:          number
+  pinCost:             number
+  pinProfit:           number
+  orderRevenue:        number
+  orderCost:           number
+  orderProfit:         number
   topProducts: {
     product_id: string
     name: string
@@ -209,19 +215,19 @@ export default function AdminDashboardPage() {
           {/* Stats Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <StatCard
-              label="Total resellers"
+              label="Total Resellers"
               value={stats?.totalResellers?.toLocaleString() || '0'}
-              sub={`+${stats?.newResellersToday || 0} today`}
+              sub={`${stats?.totalDistributors || 0} active distributors`}
               accent="navy"
             />
             <StatCard
-              label="PIN revenue today"
-              value={`₱${(stats?.totalPinRevenue || 0).toLocaleString()}`}
-              sub={`${stats?.pinsSoldToday || 0} PINs sold`}
+              label="Total PIN Revenue"
+              value={`₱${(stats?.pinRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              sub={`${stats?.totalPinsSold || 0} PINs sold all time`}
               accent="gold"
             />
             <StatCard
-              label="Pending payouts"
+              label="Pending Payouts"
               value={`₱${(stats?.pendingPayoutsAmount || 0).toLocaleString()}`}
               sub={`${stats?.pendingPayouts || 0} requests`}
               accent="navy"
@@ -235,12 +241,12 @@ export default function AdminDashboardPage() {
           </div>
 
           {/* Overall Profit Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             {[
-              { label: 'Overall Net Profit',   value: `₱${(stats?.overallNetProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,    accent: '#1a7a4a', sub: 'Total sales minus production cost' },
-              { label: 'Total Sales Revenue',  value: `₱${(stats?.adminSalesRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,  accent: '#2563eb', sub: 'PINs + products sold to distributors' },
-              { label: 'Total Cost',           value: `₱${(stats?.adminSalesCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,      accent: '#e05252', sub: 'Production cost of goods sold' },
-              { label: 'Chain Revenue',        value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,        accent: '#9a6f1e', sub: 'All delivered orders across levels' },
+              { label: 'Overall Net Profit',  value: `₱${(stats?.overallNetProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#1a7a4a', sub: 'PIN profit + order profit' },
+              { label: 'Total Sales Revenue', value: `₱${(stats?.adminSalesRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#2563eb', sub: 'PINs + direct orders' },
+              { label: 'Total Cost',          value: `₱${(stats?.adminSalesCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#e05252', sub: 'Production cost of goods' },
+              { label: 'Chain Revenue',       value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#9a6f1e', sub: 'All orders across all levels' },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
                 style={{ borderTop: `2px solid ${s.accent}` }}>
@@ -249,6 +255,46 @@ export default function AdminDashboardPage() {
                 <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>
               </div>
             ))}
+          </div>
+
+          {/* Sales breakdown */}
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            {/* PIN Sales */}
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4">
+              <p className="text-xs font-semibold text-[#0D1B3E] mb-3">🔑 PIN Sales</p>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Revenue</span>
+                  <span className="font-medium text-[#2563eb]">₱{(stats?.pinRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Cost</span>
+                  <span className="font-medium text-gray-300">₱0.00 — no production cost</span>
+                </div>
+                <div className="flex justify-between text-xs border-t border-[#0D1B3E]/8 pt-2 font-semibold">
+                  <span className="text-[#0D1B3E]">Profit (100%)</span>
+                  <span className="text-[#1a7a4a]">₱{(stats?.pinRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </div>
+            {/* Direct Order Sales */}
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4">
+              <p className="text-xs font-semibold text-[#0D1B3E] mb-3">🛒 Direct Order Sales</p>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Revenue</span>
+                  <span className="font-medium text-[#2563eb]">₱{(stats?.orderRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Cost</span>
+                  <span className="font-medium text-[#e05252]">₱{(stats?.orderCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-xs border-t border-[#0D1B3E]/8 pt-2 font-semibold">
+                  <span className="text-[#0D1B3E]">Profit</span>
+                  <span className="text-[#1a7a4a]">₱{(stats?.orderProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Main Grid */}
@@ -491,38 +537,36 @@ export default function AdminDashboardPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total Units Sold', value: (stats?.totalUnitsSold || 0).toLocaleString(),      accent: '#0D1B3E' },
-              { label: 'Overall Net Profit',  value: `₱${(stats?.overallNetProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#1a7a4a' },
-              { label: 'Admin Sales Revenue',  value: `₱${(stats?.adminSalesRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#2563eb' },
-              { label: 'Admin Sales Cost',     value: `₱${(stats?.adminSalesCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,    accent: '#e05252' },
-              { label: 'Chain Revenue',        value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,       accent: '#9a6f1e' },
-              { label: 'Total Revenue',    value: `₱${(stats?.totalRevenue || 0).toLocaleString()}`,  accent: '#2563eb' },
-              { label: 'Total Cost',       value: `₱${(stats?.totalCost    || 0).toLocaleString()}`,  accent: '#e05252' },
-              { label: 'Gross Profit',     value: `₱${(stats?.grossProfit  || 0).toLocaleString()}`,  accent: '#1a7a4a' },
+              { label: 'Units Sold',        value: (stats?.totalUnitsSold || 0).toLocaleString(),                                                                     accent: '#0D1B3E', sub: 'From direct orders'           },
+              { label: 'Order Revenue',     value: `₱${(stats?.orderRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,                          accent: '#2563eb', sub: 'Admin direct order sales'      },
+              { label: 'Order Cost',        value: `₱${(stats?.orderCost    || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,                          accent: '#e05252', sub: 'Production cost'               },
+              { label: 'Order Profit',      value: `₱${(stats?.orderProfit  || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,                          accent: '#1a7a4a', sub: 'Revenue minus cost'            },
+              { label: 'Chain Revenue',     value: `₱${(stats?.chainRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,                          accent: '#9a6f1e', sub: 'All orders across all levels'  },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
                 style={{ borderTop: `2px solid ${s.accent}` }}>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
                 <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+                {s.sub && <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>}
               </div>
             ))}
           </div>
 
-          {(stats?.totalRevenue || 0) > 0 && (
+          {(stats?.orderRevenue || 0) > 0 && (
             <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5 mb-4">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-[#0D1B3E]">Gross Profit Margin</p>
+                <p className="text-sm font-semibold text-[#0D1B3E]">Order Profit Margin</p>
                 <p className="text-sm font-semibold text-[#1a7a4a]">
-                  {(((stats?.grossProfit || 0) / (stats?.totalRevenue || 1)) * 100).toFixed(1)}%
+                  {(((stats?.orderProfit || 0) / (stats?.orderRevenue || 1)) * 100).toFixed(1)}%
                 </p>
               </div>
               <div className="w-full bg-[#F0F2F8] rounded-full h-3">
                 <div className="h-3 rounded-full bg-[#1a7a4a]"
-                  style={{ width: `${Math.min(100, ((stats?.grossProfit || 0) / (stats?.totalRevenue || 1)) * 100)}%` }} />
+                  style={{ width: `${Math.min(100, ((stats?.orderProfit || 0) / (stats?.orderRevenue || 1)) * 100)}%` }} />
               </div>
               <div className="flex justify-between text-xs text-gray-400 mt-1.5">
-                <span>Cost: ₱{(stats?.totalCost || 0).toLocaleString()}</span>
-                <span>Revenue: ₱{(stats?.totalRevenue || 0).toLocaleString()}</span>
+                <span>Cost: ₱{(stats?.orderCost || 0).toLocaleString()}</span>
+                <span>Revenue: ₱{(stats?.orderRevenue || 0).toLocaleString()}</span>
               </div>
             </div>
           )}
