@@ -134,11 +134,9 @@ export async function GET(req: NextRequest) {
           total_amount:      true,
           created_at:        true,
           notes:             true,
-          payment_method:      true,
-          payment_reference:   true,
-          payment_status:      true,
-          payment_sender_name: true,
-          payment_datetime:    true,
+          payment_method:    true,
+          payment_reference: true,
+          payment_status:    true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -283,58 +281,6 @@ export async function POST(req: NextRequest) {
 // PRODUCT BINARY POINTS LOGIC
 // ============================================================
 
-async function getTotalQtyUnderNode(nodeId: string, resetAt: Date): Promise<number> {
-  let totalQty = 0
-  const queue  = [nodeId]
-
-  while (queue.length > 0) {
-    const batch    = queue.splice(0, 20)
-    const children = await prisma.binaryTreeNode.findMany({
-      where:  { parent_id: { in: batch } },
-      select: { id: true, user_id: true },
-    })
-
-    if (children.length === 0) break
-
-    const userIds = children.map((c) => c.user_id)
-    const orders  = await prisma.order.findMany({
-      where: {
-        buyer_id:   { in: userIds },
-        status:     'delivered',
-        created_at: { gte: resetAt },
-      },
-      select: { items: { select: { quantity: true } } },
-    })
-
-    totalQty += orders.reduce(
-      (s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0
-    )
-
-    for (const child of children) queue.push(child.id)
-  }
-
-  const nodeData = await prisma.binaryTreeNode.findUnique({
-    where:  { id: nodeId },
-    select: { user_id: true },
-  })
-
-  if (nodeData) {
-    const nodeOrders = await prisma.order.findMany({
-      where: {
-        buyer_id:   nodeData.user_id,
-        status:     'delivered',
-        created_at: { gte: resetAt },
-      },
-      select: { items: { select: { quantity: true } } },
-    })
-    totalQty += nodeOrders.reduce(
-      (s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0
-    )
-  }
-
-  return totalQty
-}
-
 async function checkSponsorPairingPoints(
   tx: any,
   buyerUserId: string,
@@ -347,102 +293,121 @@ async function checkSponsorPairingPoints(
 
   if (!buyerNode?.parent_id) return
 
-  let currentNodeId: string | null = buyerNode.parent_id
+  // Fetch all ancestors in one CTE query
+  const ancestors = await prisma.$queryRaw<{
+    id: string; user_id: string; parent_id: string | null
+  }[]>`
+    WITH RECURSIVE ancestor_chain AS (
+      SELECT id, user_id, parent_id
+      FROM binary_tree_nodes WHERE id = ${buyerNode.parent_id}
+      UNION ALL
+      SELECT n.id, n.user_id, n.parent_id
+      FROM binary_tree_nodes n
+      INNER JOIN ancestor_chain a ON n.id = a.parent_id
+    )
+    SELECT id, user_id, parent_id FROM ancestor_chain
+  `
 
-  while (currentNodeId) {
-    const ancestorNode = await prisma.binaryTreeNode.findUnique({
-      where:  { id: currentNodeId },
-      select: {
-        id:        true,
-        user_id:   true,
-        parent_id: true,
-        user: {
-          select: {
-            reseller_profile: {
-              select: {
-                points_reset_at: true,
-                package: {
-                  select: {
-                    point_php_value:  true,
-                    point_reset_days: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    })
+  if (!ancestors || ancestors.length === 0) return
 
-    if (!ancestorNode) break
-    if (!ancestorNode.user.reseller_profile) break
+  // Fetch all profiles in one batch
+  const ancestorUserIds = ancestors.map((a) => a.user_id)
+  const profiles = await prisma.resellerProfile.findMany({
+    where:  { user_id: { in: ancestorUserIds } },
+    select: {
+      user_id:         true,
+      points_reset_at: true,
+      package: { select: { point_php_value: true, point_reset_days: true } },
+    },
+  })
+  const profileMap = new Map(profiles.map((p) => [p.user_id, p]))
 
-    const profile  = ancestorNode.user.reseller_profile
-    const phpValue = Number(profile.package?.point_php_value || 0)
+  for (const ancestor of ancestors) {
+    const profile = profileMap.get(ancestor.user_id)
+    if (!profile) continue
+
+    const phpValue  = Number(profile.package?.point_php_value || 0) * 0.50
     const resetDays = profile.package?.point_reset_days || 30
     const resetAt   = profile.points_reset_at
-      || new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
+      ? new Date(profile.points_reset_at)
+      : new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
 
-    const [leftChild, rightChild] = await Promise.all([
-      prisma.binaryTreeNode.findFirst({
-        where:  { parent_id: currentNodeId, position: 'left' },
-        select: { id: true },
-      }),
-      prisma.binaryTreeNode.findFirst({
-        where:  { parent_id: currentNodeId, position: 'right' },
-        select: { id: true },
-      }),
+    const children = await prisma.binaryTreeNode.findMany({
+      where:  { parent_id: ancestor.id },
+      select: { id: true, position: true },
+    })
+
+    const leftChild  = children.find((c) => c.position === 'left')
+    const rightChild = children.find((c) => c.position === 'right')
+
+    if (!leftChild || !rightChild) continue
+
+    const [leftResult, rightResult] = await Promise.all([
+      prisma.$queryRaw<{ total: number }[]>`
+        WITH RECURSIVE subtree AS (
+          SELECT id, user_id FROM binary_tree_nodes WHERE id = ${leftChild.id}
+          UNION ALL
+          SELECT n.id, n.user_id FROM binary_tree_nodes n
+          INNER JOIN subtree s ON n.parent_id = s.id
+        )
+        SELECT COALESCE(SUM(oi.quantity), 0)::int as total
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.buyer_id IN (SELECT user_id FROM subtree)
+          AND o.status = 'delivered'
+          AND o.created_at >= ${resetAt}
+      `,
+      prisma.$queryRaw<{ total: number }[]>`
+        WITH RECURSIVE subtree AS (
+          SELECT id, user_id FROM binary_tree_nodes WHERE id = ${rightChild.id}
+          UNION ALL
+          SELECT n.id, n.user_id FROM binary_tree_nodes n
+          INNER JOIN subtree s ON n.parent_id = s.id
+        )
+        SELECT COALESCE(SUM(oi.quantity), 0)::int as total
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.buyer_id IN (SELECT user_id FROM subtree)
+          AND o.status = 'delivered'
+          AND o.created_at >= ${resetAt}
+      `,
     ])
 
-    if (!leftChild || !rightChild) {
-      currentNodeId = ancestorNode.parent_id
-      continue
+    let leftQty  = Number(leftResult[0]?.total  || 0)
+    let rightQty = Number(rightResult[0]?.total || 0)
+
+    if (buyerNode.parent_id === ancestor.id) {
+      if (buyerNode.position === 'left') leftQty  += currentOrderQty
+      else                               rightQty += currentOrderQty
     }
 
-    const [leftQty, rightQty] = await Promise.all([
-      getTotalQtyUnderNode(leftChild.id, resetAt),
-      getTotalQtyUnderNode(rightChild.id, resetAt),
-    ])
-
-    let adjustedLeftQty  = leftQty
-    let adjustedRightQty = rightQty
-
-    if (buyerNode.parent_id === currentNodeId) {
-      if (buyerNode.position === 'left') adjustedLeftQty  = leftQty + currentOrderQty
-      else                               adjustedRightQty = rightQty + currentOrderQty
+    if (leftQty >= 2 && rightQty >= 2) {
+      await Promise.all([
+        tx.resellerProfile.update({
+          where: { user_id: ancestor.user_id },
+          data:  { total_points: { increment: 1 }, points_reset_at: new Date() },
+        }),
+        ...(phpValue > 0 ? [
+          tx.commission.create({
+            data: {
+              user_id:          ancestor.user_id,
+              type:             'sponsor_point',
+              amount:           phpValue,
+              points:           1,
+              source_user_id:   buyerUserId,
+              is_pair_overflow: false,
+            },
+          }),
+          tx.wallet.update({
+            where: { user_id: ancestor.user_id },
+            data:  { balance: { increment: phpValue }, total_earned: { increment: phpValue } },
+          }),
+        ] : []),
+      ])
     }
-
-    if (adjustedLeftQty >= 2 && adjustedRightQty >= 2) {
-      await tx.resellerProfile.update({
-        where: { user_id: ancestorNode.user_id },
-        data:  { total_points: { increment: 1 } },
-      })
-
-      if (phpValue > 0) {
-        await tx.commission.create({
-          data: {
-            user_id:          ancestorNode.user_id,
-            type:             'sponsor_point',
-            amount:           phpValue,
-            points:           1,
-            source_user_id:   buyerUserId,
-            is_pair_overflow: false,
-          },
-        })
-
-        await tx.wallet.update({
-          where: { user_id: ancestorNode.user_id },
-          data: {
-            balance:      { increment: phpValue },
-            total_earned: { increment: phpValue },
-          },
-        })
-      }
-    }
-
-    currentNodeId = ancestorNode.parent_id
   }
 }
+
 
 // ============================================================
 // PATCH — update order status + payment status

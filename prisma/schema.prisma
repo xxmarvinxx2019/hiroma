@@ -39,6 +39,7 @@ model User {
   created_users         User[]              @relation("UserCreatedBy")
   wallet                Wallet?
   pairing_logs    PairingLog[]
+  city_dist_pin_requests PinRequest[] @relation("CityDistPinRequests")
 
   @@map("users")
 }
@@ -105,7 +106,8 @@ model Package {
   products              PackageProduct[]
   pins                  Pin[]
   reseller_profiles     ResellerProfile[]
-
+  pin_requests PinRequest[]
+  
   @@map("packages")
 }
 
@@ -203,6 +205,27 @@ model BinaryTreeNode {
   user        User             @relation("TreeNodeOwner", fields: [user_id], references: [id])
 
   @@map("binary_tree_nodes")
+}
+
+model PinRequest {
+  id                  String    @id @default(uuid())
+  city_dist_id        String
+  package_id          String
+  quantity            Int       @default(1)
+  total_amount        Decimal   @db.Decimal(10, 2)
+  payment_method      String    @default("cash_on_pickup") @db.VarChar
+  payment_reference   String?   @db.VarChar
+  payment_sender_name String?   @db.VarChar
+  payment_datetime    DateTime? @db.Timestamptz(6)
+  payment_status      String    @default("unpaid") @db.VarChar
+  status              String    @default("pending") @db.VarChar
+  notes               String?
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @updatedAt @db.Timestamptz(6)
+  city_dist           User      @relation("CityDistPinRequests", fields: [city_dist_id], references: [id])
+  package             Package   @relation(fields: [package_id], references: [id])
+
+  @@map("pin_requests")
 }
 
 model NameCapRegistry {

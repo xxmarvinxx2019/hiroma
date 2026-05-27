@@ -25,6 +25,7 @@ const navItems = [
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
       { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
+      { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑', badge: 'pinRequests' },
     ],
   },
   {
@@ -44,11 +45,13 @@ function Sidebar({
   pathname,
   onClose,
   onLogout,
+  approvedPinRequests,
 }: {
   user: { full_name: string; username: string; distributor_profile?: { coverage_area: string } } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
+  approvedPinRequests: number
 }) {
   const isActive = (href: string) => {
     if (href === '/dashboard/city') return pathname === href
@@ -89,6 +92,11 @@ function Sidebar({
               >
                 <span className="text-base">{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
+                {item.badge === 'pinRequests' && approvedPinRequests > 0 && (
+                  <span className="bg-[#1a7a4a] text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                    {approvedPinRequests}
+                  </span>
+                )}
               </Link>
             ))}
           </div>
@@ -134,8 +142,9 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
     onWarning: () => setShowWarning(true),
     onLogout:  () => setShowWarning(false),
   })
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [user, setUser] = useState<any>(null)
+  const [sidebarOpen, setSidebarOpen]               = useState(false)
+  const [user, setUser]                               = useState<any>(null)
+  const [approvedPinRequests, setApprovedPinRequests] = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -146,6 +155,17 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
       })
       .catch(() => router.push('/login'))
   }, [router])
+
+  useEffect(() => {
+    fetch('/api/pin-requests?status=approved&pageSize=1')
+      .then((res) => res.json())
+      .then((data) => {
+        const total   = data.summary?.approved || 0
+        const lastSeen = parseInt(localStorage.getItem('pin_requests_last_seen') || '0')
+        setApprovedPinRequests(Math.max(0, total - lastSeen))
+      })
+      .catch(() => {})
+  }, [])
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -176,7 +196,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} />
+        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} approvedPinRequests={approvedPinRequests} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -184,7 +204,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
         <>
           <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} />
+            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} approvedPinRequests={approvedPinRequests} />
           </div>
         </>
       )}

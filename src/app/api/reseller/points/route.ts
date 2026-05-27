@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       ? new Date(new Date(pointsResetAt).getTime() + resetDays * 24 * 60 * 60 * 1000)
       : null
 
-    const phpValue      = Number(profile?.package?.point_php_value || 0)
+    const phpValue      = Number(profile?.package?.point_php_value || 0) * 0.50  // × ₱0.50
     const totalPoints   = profile?.total_points || 0
     const pointsInPHP   = totalPoints * phpValue
 
