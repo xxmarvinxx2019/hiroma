@@ -30,6 +30,7 @@ const navItems = [
       { label: 'Orders', href: '/dashboard/admin/orders', icon: '🛒' },
       { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
       { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
+      { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑', badge: 'pinRequests' },
       { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
       { label: 'Reports', href: '/dashboard/admin/reports', icon: '📈' },
     ],
@@ -46,12 +47,14 @@ const navItems = [
 function Sidebar({
   user,
   pendingPayouts,
+  pendingPinRequests,
   pathname,
   onClose,
   onLogout,
 }: {
   user: { full_name: string; username: string } | null
   pendingPayouts: number
+  pendingPinRequests: number
   pathname: string
   onClose: () => void
   onLogout: () => void
@@ -112,9 +115,14 @@ function Sidebar({
               >
                 <span className="text-base">{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
-                {item.badge && pendingPayouts > 0 && (
+                {item.badge === true && pendingPayouts > 0 && (
                   <span className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                     {pendingPayouts}
+                  </span>
+                )}
+                {item.badge === 'pinRequests' && pendingPinRequests > 0 && (
+                  <span className="bg-[#e05252] text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                    {pendingPinRequests}
                   </span>
                 )}
               </Link>
@@ -168,7 +176,8 @@ export default function AdminLayout({
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
-  const [pendingPayouts, setPendingPayouts] = useState(0)
+  const [pendingPayouts, setPendingPayouts]         = useState(0)
+  const [pendingPinRequests, setPendingPinRequests] = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -181,6 +190,11 @@ export default function AdminLayout({
     fetch('/api/admin/payouts/pending-count')
       .then((res) => res.json())
       .then((data) => setPendingPayouts(data.count || 0))
+      .catch(() => {})
+
+    fetch('/api/pin-requests?status=pending&pageSize=1')
+      .then((res) => res.json())
+      .then((data) => setPendingPinRequests(data.summary?.pending || 0))
       .catch(() => {})
   }, [])
 
@@ -224,6 +238,7 @@ export default function AdminLayout({
         <Sidebar
           user={user}
           pendingPayouts={pendingPayouts}
+          pendingPinRequests={pendingPinRequests}
           pathname={pathname}
           onClose={() => {}}
           onLogout={handleLogout}
@@ -241,6 +256,7 @@ export default function AdminLayout({
             <Sidebar
               user={user}
               pendingPayouts={pendingPayouts}
+          pendingPinRequests={pendingPinRequests}
               pathname={pathname}
               onClose={() => setSidebarOpen(false)}
               onLogout={handleLogout}
