@@ -79,6 +79,16 @@ interface TreeNode {
   depth: number
 }
 
+interface AvailableSlot {
+  node_id:    string
+  user_id:    string
+  full_name:  string
+  username:   string
+  package:    string
+  left_open:  boolean
+  right_open: boolean
+}
+
 interface SelectedSlot {
   parent_node_id: string
   position: 'left' | 'right'
@@ -191,7 +201,6 @@ function TreeNodeCard({
   )
 }
 
-
 // ============================================================
 // UPGRADE MODAL
 // ============================================================
@@ -201,7 +210,7 @@ function UpgradeModal({
   onClose,
   onSuccess,
 }: {
-  reseller: Reseller
+  reseller: any
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -217,8 +226,7 @@ function UpgradeModal({
     if (!pinInput.trim()) { setPinError('Please enter a PIN code.'); return }
     setPinLoading(true); setPinError('')
     const res = await fetch('/api/city/pins/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin_code: pinInput.trim().toUpperCase() }),
     })
     const data = await res.json()
@@ -231,18 +239,13 @@ function UpgradeModal({
     if (!pinData) return
     setSubmitting(true); setError('')
     const res = await fetch('/api/city/resellers/upgrade', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reseller_id: reseller.id, new_pin_id: pinData.id }),
     })
     const data = await res.json()
     setSubmitting(false)
-    if (res.ok) {
-      setSuccess(data.message || 'Upgrade successful!')
-      setTimeout(() => { onSuccess(); onClose() }, 2000)
-    } else {
-      setError(data.error || 'Something went wrong.')
-    }
+    if (res.ok) { setSuccess(data.message || 'Upgrade successful!'); setTimeout(() => { onSuccess(); onClose() }, 2000) }
+    else { setError(data.error || 'Something went wrong.') }
   }
 
   return (
@@ -263,10 +266,8 @@ function UpgradeModal({
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">New Package PIN <span className="text-[#C9A84C]">*</span></label>
             <div className="flex gap-2">
-              <input value={pinInput}
-                onChange={(e) => { setPinInput(e.target.value.toUpperCase()); setPinError(''); setPinData(null) }}
-                onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()}
-                placeholder="Enter new PIN code"
+              <input value={pinInput} onChange={(e) => { setPinInput(e.target.value.toUpperCase()); setPinError(''); setPinData(null) }}
+                onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()} placeholder="Enter new PIN code"
                 className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C] uppercase tracking-wider" />
               <button onClick={verifyUpgradePin} disabled={pinLoading || !pinInput.trim()}
                 className="bg-[#0D1B3E] text-white text-xs rounded-lg px-4 hover:bg-[#162850] disabled:opacity-50">
@@ -316,8 +317,7 @@ export default function CityResellersPage() {
   const [showForm, setShowForm] = useState(false)
   const [step, setStep] = useState<1 | 2 | 3>(1)
 
-  // Upgrade modal
-  const [upgradingReseller, setUpgradingReseller] = useState<Reseller | null>(null)
+  const [upgradingReseller, setUpgradingReseller] = useState<any>(null)
 
   // Step 1 — PIN
   const [pinInput, setPinInput] = useState('')
@@ -336,6 +336,12 @@ export default function CityResellersPage() {
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null)
   const [directAvailable, setDirectAvailable] = useState(false)
 
+  // Available slots — searchable dropdown
+  const [availableSlots, setAvailableSlots]     = useState<AvailableSlot[]>([])
+  const [slotSearch, setSlotSearch]             = useState('')
+  const [slotDropdownOpen, setSlotDropdownOpen] = useState(false)
+  const [slotsLoading, setSlotsLoading]         = useState(false)
+
   // Step 3 — Details
   const [form, setForm] = useState({
     full_name: '',
@@ -350,7 +356,7 @@ export default function CityResellersPage() {
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
   const [usernameEdited, setUsernameEdited] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
-  const [formError, setFormError]     = useState('')
+  const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [successData, setSuccessData] = useState<{
     full_name: string
@@ -372,6 +378,14 @@ export default function CityResellersPage() {
     setForm((f) => ({ ...f, username: generated }))
     setUsernameAvailable(null)
   }, [form.full_name, usernameEdited])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.slot-dropdown-container')) setSlotDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   // Debounce search
   useEffect(() => {
@@ -414,6 +428,7 @@ export default function CityResellersPage() {
     setTreeData(null)
     setSelectedSlot(null)
     setDirectAvailable(false)
+    setAvailableSlots([]); setSlotSearch(''); setSlotDropdownOpen(false)
     setForm({ full_name: '', username: '', email: '', mobile: '', address: '', password: '', confirmPassword: '' })
     setNameCapInfo(null)
     setUsernameAvailable(null)
@@ -453,8 +468,14 @@ export default function CityResellersPage() {
       body: JSON.stringify({ username: referralInput.trim().toLowerCase() }),
     })
     const data = await res.json()
-    if (!res.ok) { setReferralError(data.error || 'Referral not found.') }
-    else { setReferralData(data.reseller) }
+    if (!res.ok) { setReferralError(data.error || 'Referral not found.'); setReferralLoading(false); return }
+    setReferralData(data.reseller)
+
+    setSlotsLoading(true)
+    const slotsRes = await fetch(`/api/city/resellers/available-slots?referrer=${referralInput.trim().toLowerCase()}`)
+    const slotsData = await slotsRes.json()
+    setAvailableSlots(slotsData.slots || [])
+    setSlotsLoading(false)
     setReferralLoading(false)
   }
 
@@ -628,7 +649,7 @@ export default function CityResellersPage() {
           />
         </div>
 
-        <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr 80px' }}>
+        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
           {['Reseller', 'Mobile', 'Package', 'Points', 'Wallet', 'Status', ''].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
@@ -646,7 +667,7 @@ export default function CityResellersPage() {
           </div>
         ) : (
           resellers.map((r) => (
-            <div key={r.id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr 80px' }}>
+            <div key={r.id} className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
               <div>
                 <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
                 <p className="text-xs text-gray-400">@{r.username}</p>
@@ -675,9 +696,7 @@ export default function CityResellersPage() {
       {successData && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-
-            {/* Green header */}
-            <div className="bg-[#0D1B3E] px-6 py-6 text-center relative">
+            <div className="bg-[#0D1B3E] px-6 py-6 text-center">
               <div className="w-16 h-16 bg-[#C9A84C]/20 border-2 border-[#C9A84C]/40 rounded-full flex items-center justify-center mx-auto mb-3">
                 <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
                   <path d="M6 16L13 23L26 9" stroke="#C9A84C" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
@@ -689,11 +708,8 @@ export default function CityResellersPage() {
               </p>
               <p className="text-white/40 text-xs mt-0.5">@{successData.username}</p>
             </div>
-
             {successData.package && (
               <div className="p-5 space-y-4">
-
-                {/* Package name + total */}
                 <div className="flex items-center justify-between bg-[#fef9ee] border border-[#C9A84C]/20 rounded-xl px-4 py-3">
                   <div>
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide">Package Availed</p>
@@ -704,8 +720,6 @@ export default function CityResellersPage() {
                     <p className="text-sm font-bold text-[#C9A84C]">₱{Number(successData.package.total_price).toLocaleString()}</p>
                   </div>
                 </div>
-
-                {/* Price breakdown */}
                 <div className="bg-[#F0F2F8] rounded-xl px-4 py-3 space-y-2">
                   <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-2">Price Breakdown</p>
                   <div className="flex justify-between text-xs">
@@ -721,8 +735,6 @@ export default function CityResellersPage() {
                     <span className="text-[#C9A84C]">₱{Number(successData.package.total_price).toLocaleString()}</span>
                   </div>
                 </div>
-
-                {/* Products list */}
                 {successData.package.products.length > 0 && (
                   <div>
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-2">Included Products</p>
@@ -730,9 +742,7 @@ export default function CityResellersPage() {
                       {successData.package.products.map((p, i) => (
                         <div key={i} className="flex items-center justify-between bg-[#F0F2F8] rounded-lg px-3 py-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>
-                              {p.type}
-                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>{p.type}</span>
                             <div className="min-w-0">
                               <p className="text-xs font-medium text-[#0D1B3E] truncate">{p.name}</p>
                               <p className="text-[10px] text-gray-400">SRP: ₱{Number(p.srp).toLocaleString()} × {p.quantity}</p>
@@ -744,20 +754,12 @@ export default function CityResellersPage() {
                     </div>
                   </div>
                 )}
-
-                <button onClick={() => setSuccessData(null)}
-                  className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">
-                  Done
-                </button>
+                <button onClick={() => setSuccessData(null)} className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">Done</button>
               </div>
             )}
-
             {!successData.package && (
               <div className="p-5">
-                <button onClick={() => setSuccessData(null)}
-                  className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">
-                  Done
-                </button>
+                <button onClick={() => setSuccessData(null)} className="w-full bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors">Done</button>
               </div>
             )}
           </div>
@@ -766,11 +768,7 @@ export default function CityResellersPage() {
 
       {/* ════════════ UPGRADE MODAL ════════════ */}
       {upgradingReseller && (
-        <UpgradeModal
-          reseller={upgradingReseller}
-          onClose={() => setUpgradingReseller(null)}
-          onSuccess={fetchResellers}
-        />
+        <UpgradeModal reseller={upgradingReseller} onClose={() => setUpgradingReseller(null)} onSuccess={fetchResellers} />
       )}
 
       {/* ════════════ REGISTRATION MODAL ════════════ */}
@@ -845,6 +843,7 @@ export default function CityResellersPage() {
                           setDirection(null)
                           setTreeData(null)
                           setSelectedSlot(null)
+                          setAvailableSlots([]); setSlotSearch('')
                         }}
                         onKeyDown={(e) => e.key === 'Enter' && verifyReferral()}
                         placeholder="Enter referrer's username"
@@ -885,10 +884,55 @@ export default function CityResellersPage() {
                         </div>
                       </div>
 
+                      {/* Searchable slot dropdown */}
+                      <div>
+                        <p className="text-xs font-medium text-[#0D1B3E] mb-1.5">
+                          Search available slots
+                          {slotsLoading && <span className="text-gray-400 font-normal ml-1">— loading...</span>}
+                          {!slotsLoading && availableSlots.length > 0 && <span className="text-gray-400 font-normal ml-1">— {availableSlots.length} found</span>}
+                        </p>
+                        <div className="relative slot-dropdown-container">
+                          <input value={slotSearch}
+                            onChange={(e) => { setSlotSearch(e.target.value); setSlotDropdownOpen(true) }}
+                            onFocus={() => setSlotDropdownOpen(true)}
+                            placeholder="Type name or username..."
+                            className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
+                          {slotDropdownOpen && !slotsLoading && availableSlots.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 z-50 bg-white border border-[#0D1B3E]/15 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+                              {availableSlots.filter((s) => !slotSearch.trim() || s.full_name.toLowerCase().includes(slotSearch.toLowerCase()) || s.username.toLowerCase().includes(slotSearch.toLowerCase()))
+                                .map((slot) => (
+                                  <div key={slot.node_id} className="px-3 py-2 border-b border-[#0D1B3E]/5 last:border-0 hover:bg-[#F0F2F8]">
+                                    <p className="text-xs font-medium text-[#0D1B3E]">{slot.full_name}</p>
+                                    <p className="text-[10px] text-gray-400 mb-1">@{slot.username} · {slot.package}</p>
+                                    <div className="flex gap-1.5">
+                                      {slot.left_open && (
+                                        <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'left', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Left`); setSlotDropdownOpen(false) }}
+                                          className="text-[10px] bg-[#0D1B3E] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]">← Left</button>
+                                      )}
+                                      {slot.right_open && (
+                                        <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'right', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Right`); setSlotDropdownOpen(false) }}
+                                          className="text-[10px] bg-[#C9A84C] text-[#0D1B3E] px-2.5 py-1 rounded-full hover:bg-[#E8C96A]">Right →</button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              {availableSlots.filter((s) => !slotSearch.trim() || s.full_name.toLowerCase().includes(slotSearch.toLowerCase()) || s.username.toLowerCase().includes(slotSearch.toLowerCase())).length === 0 && (
+                                <p className="text-xs text-gray-400 px-3 py-2">No matching slots found.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {selectedSlot && slotSearch && (
+                          <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-3 py-2 mt-2">
+                            <p className="text-xs text-[#1a7a4a] font-semibold">✓ Placement: {selectedSlot.position} leg under @{selectedSlot.parent_username}</p>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Direction buttons */}
                       <div>
                         <p className="text-xs font-medium text-[#0D1B3E] mb-2">
-                          Choose direction in referrer's tree
+                          Or choose direction manually
                         </p>
                         <div className="grid grid-cols-2 gap-2">
                           {(['left', 'right'] as const).map((dir) => {
