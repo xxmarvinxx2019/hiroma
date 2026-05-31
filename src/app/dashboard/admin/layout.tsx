@@ -169,10 +169,12 @@ export default function AdminLayout({
   const pathname = usePathname()
   const router = useRouter()
   const [showWarning, setShowWarning] = useState(false)
+  const [countdown, setCountdown]     = useState(30)
 
-  useAutoLogout({
-    onWarning: () => setShowWarning(true),
-    onLogout:  () => setShowWarning(false),
+  const { stayLoggedIn } = useAutoLogout({
+    onWarning: (secs) => { setShowWarning(true); setCountdown(secs) },
+    onActive:  ()     => { setShowWarning(false); setCountdown(30) },
+    onLogout:  ()     => { setShowWarning(false) },
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
@@ -224,7 +226,7 @@ export default function AdminLayout({
       {/* Inactivity warning */}
       {showWarning && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
-          <span>⚠️ You will be logged out in 30 seconds due to inactivity.</span>
+          <span>⚠️ You will be logged out in <strong>{countdown}s</strong> due to inactivity. Move your mouse or press any key to stay logged in.</span>
           <button
             onClick={() => setShowWarning(false)}
             className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0"

@@ -9,10 +9,30 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = req.nextUrl
-    const user_id = searchParams.get('user_id') || ''
-    const status  = searchParams.get('status')  || 'all'
+    const user_id   = searchParams.get('user_id') || ''
+    const status    = searchParams.get('status')  || 'all'
+    const roleParam = searchParams.get('role')    || ''
 
     let methods: any[]
+
+    // Special case: role=admin — return admin's approved payment methods
+    // Used by city dist on PIN request page to know where to send payment
+    if (roleParam === 'admin') {
+      const adminUser = await prisma.user.findFirst({
+        where:  { role: 'admin' },
+        select: { id: true },
+      })
+      if (!adminUser) return NextResponse.json({ methods: [] })
+      methods = await prisma.$queryRawUnsafe(`
+        SELECT pm.*, u.full_name, u.username, u.role
+        FROM payment_methods pm
+        JOIN users u ON u.id = pm.user_id
+        WHERE pm.user_id = '${adminUser.id}'
+        AND pm.status = 'approved'
+        ORDER BY pm.created_at DESC
+      `)
+      return NextResponse.json({ methods })
+    }
 
     if (user.role === 'city') {
       // If user_id param — return that user's approved methods (supplier's methods)
