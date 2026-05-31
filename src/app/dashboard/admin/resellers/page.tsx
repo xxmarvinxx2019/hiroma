@@ -17,10 +17,15 @@ interface Reseller {
   status: string
   created_at: string
   reseller_profile: {
-    total_points: number
+    total_points:         number
     daily_referral_count: number
-    daily_pairs_count: number
-    package: { name: string; price: number } | null
+    daily_pairs_count:    number
+    package:   { name: string; price: number } | null
+    city_dist: {
+      full_name: string
+      username:  string
+      distributor_profile: { coverage_area: string } | null
+    } | null
   } | null
   wallet: { balance: number } | null
 }
@@ -188,8 +193,8 @@ export default function ResellersPage() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Reseller', 'Package', 'Points', 'Wallet', 'Status', 'Action'].map((h) => (
+        <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.5fr 1fr 80px' }}>
+          {['Reseller', 'Package', 'Points', 'Wallet', 'Registered By', 'Status', 'Action'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">
               {h}
             </p>
@@ -210,7 +215,7 @@ export default function ResellersPage() {
           filtered.map((r) => (
             <div
               key={r.id}
-              className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
+              className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.5fr 1fr 80px' }}
             >
               {/* Reseller */}
               <div>
@@ -235,6 +240,13 @@ export default function ResellersPage() {
               <p className="text-xs font-medium text-[#0D1B3E]">
                 ₱{Number(r.wallet?.balance || 0).toLocaleString()}
               </p>
+
+              {/* Registered By */}
+              <div>
+                <p className="text-xs font-medium text-[#0D1B3E]">{r.reseller_profile?.city_dist?.full_name || '—'}</p>
+                <p className="text-[10px] text-gray-400">{r.reseller_profile?.city_dist?.distributor_profile?.coverage_area || '—'}</p>
+                <p className="text-[10px] text-gray-300">{new Date(r.created_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+              </div>
 
               {/* Status */}
               <span>
