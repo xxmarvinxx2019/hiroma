@@ -44,7 +44,13 @@ export async function GET(req: NextRequest) {
               daily_referral_count: true,
               daily_pairs_count: true,
               package: { select: { name: true, price: true } },
-              city_dist: { select: { full_name: true, username: true } },
+              city_dist: {
+                select: {
+                  full_name: true,
+                  username:  true,
+                  distributor_profile: { select: { coverage_area: true } },
+                },
+              },
             },
           },
           wallet: { select: { balance: true } },
