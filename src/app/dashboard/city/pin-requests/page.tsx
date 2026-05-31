@@ -109,10 +109,9 @@ export default function CityPinRequestsPage() {
       fetch('/api/city/packages').then((r) => r.json()),
       fetch('/api/payment-methods?role=admin&status=approved').then((r) => r.json()),
     ]).then(([pkgData, pmData]) => {
-      setPackages(pkgData.packages || [])  // already filtered active on server
-      // Get admin's approved payment methods for city dist to pay to
-      const adminUser = pmData.methods?.find((m: any) => m.user?.role === 'admin')
-      setPaymentMethods(pmData.methods?.filter((m: any) => m.user?.role === 'admin') || [])
+      setPackages(pkgData.packages || [])
+      setPaymentMethods(pmData.methods || [])
+      console.log('[PIN REQUEST] payment methods loaded:', pmData.methods?.length, pmData.methods)
     })
   }, [])
 
@@ -239,7 +238,9 @@ export default function CityPinRequestsPage() {
                 {r.payment_datetime     && <p className="text-[10px] text-gray-400">{new Date(r.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
                 {r.payment_status === 'paid'
                   ? <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
-                  : <span className="text-[10px] text-[#9a6f1e]">⏳ Awaiting confirmation</span>}
+                  : r.payment_method === 'cash_on_pickup'
+                  ? <span className="text-[10px] text-gray-400">Pay on pickup</span>
+                  : <span className="text-[10px] text-[#9a6f1e]">⏳ Awaiting payment confirmation</span>}
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${STATUS_COLOR[r.status]}`}>
                 {r.status}
