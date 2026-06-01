@@ -102,8 +102,8 @@ export async function GET(req: NextRequest) {
       prisma.product.count({ where: { is_active: true, type: 'digital' } }),
       prisma.package.count({ where: { is_active: true } }),
       prisma.pin.count(),
-      prisma.pin.count({ where: { status: 'unused' } }),
-      prisma.pin.count({ where: { status: 'used' } }),
+      prisma.pin.count({ where: { status: 'unused' } }),  // available
+      prisma.pin.count({ where: { status: { in: ['unused', 'used', 'expired'] } } }),
 
       // Admin sales
       prisma.order.aggregate({
@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
       // PIN sales breakdown by package (period)
       prisma.pin.groupBy({
         by:    ['package_id'],
-        where: { status: 'used', used_at: periodFilter },
+        where: { status: { in: ['unused', 'used', 'expired'] }, created_at: periodFilter },
         _count: { id: true },
       }),
 
@@ -216,7 +216,7 @@ export async function GET(req: NextRequest) {
       const product = productMap.get(item.product_id)
       const units   = Number(item._sum.quantity || 0)
       const revenue = Number(item._sum.subtotal  || 0)
-      const cost    = Number(product?.cost_price || 0) * units
+      const cost    = Number(product?.cost_price ?? 0) * units
       return {
         product_id: item.product_id,
         name:       product?.name || 'Unknown',
@@ -243,21 +243,38 @@ export async function GET(req: NextRequest) {
     })
 
     // ── PIN sales breakdown by package ──
+    // Package total value = PIN price + (SRP × qty per product)
     const pinPackageIds = pinSalesByPackage.map((p) => p.package_id)
     const packageDetails = await prisma.package.findMany({
       where:  { id: { in: pinPackageIds } },
-      select: { id: true, name: true, price: true },
+      select: {
+        id: true, name: true, price: true,
+        products: {
+          select: {
+            quantity: true,
+            product:  { select: { price: true } },  // price = SRP
+          },
+        },
+      },
     })
     const packageMap = new Map(packageDetails.map((p) => [p.id, p]))
 
     const pinSalesBreakdown = pinSalesByPackage.map((item) => {
-      const pkg     = packageMap.get(item.package_id)
-      const count   = Number(item._count.id || 0)
-      const revenue = count * Number(pkg?.price || 0)
+      const pkg        = packageMap.get(item.package_id)
+      const count      = Number(item._count.id || 0)
+      const pinPrice   = Number(pkg?.price || 0)
+      const productsValue = (pkg?.products || []).reduce((s: number, pp: any) => {
+        return s + Number(pp.product?.price || 0) * pp.quantity
+      }, 0)
+      const packageValue = pinPrice + productsValue  // total value per package sold
+      const revenue      = count * pinPrice              // PIN sales revenue = PIN price only
       return {
-        package_id:   item.package_id,
-        package_name: pkg?.name || 'Unknown',
-        pins_sold:    count,
+        package_id:      item.package_id,
+        package_name:    pkg?.name || 'Unknown',
+        pins_sold:       count,
+        pin_price:       pinPrice,
+        products_value:  productsValue,
+        package_value:   packageValue,
         revenue,
       }
     }).sort((a, b) => b.revenue - a.revenue)
@@ -271,7 +288,7 @@ export async function GET(req: NextRequest) {
       select: { quantity: true, subtotal: true, product: { select: { cost_price: true } } },
     })
     const totalAdminRevenue = Number(adminSalesAll._sum.total_amount || 0)
-    const totalAdminCost    = allSoldItems.reduce((s, i) => s + Number(i.product.cost_price) * i.quantity, 0)
+    const totalAdminCost    = allSoldItems.reduce((s, i) => s + Number(i.product.cost_price || 0) * Number(i.quantity), 0)
     const totalAdminProfit  = totalAdminRevenue - totalAdminCost
     const totalUnitsSold    = allSoldItems.reduce((s, i) => s + i.quantity, 0)
 

@@ -29,7 +29,7 @@ const JWT_SECRET = new TextEncoder().encode(
 )
 
 const COOKIE_NAME = 'hiroma_token'
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
+// No COOKIE_MAX_AGE — session cookie expires when browser closes
 
 // ============================================================
 // PASSWORD
@@ -94,7 +94,7 @@ export async function setAuthCookie(token: string): Promise<void> {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: COOKIE_MAX_AGE,
+    // No maxAge = session cookie
     path: '/',
   })
 }
