@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx'
 interface DailySale   { date: string; orders: number; revenue: number }
 interface TopProduct  { product_id: string; name: string; type: string; units_sold: number; revenue: number }
 interface ProductSale { product_id: string; name: string; type: string; units_sold: number; revenue: number; cost: number; profit: number }
-interface PinSale     { package_id: string; package_name: string; pins_sold: number; revenue: number }
+interface PinSale     { package_id: string; package_name: string; pins_sold: number; pin_price: number; products_value: number; package_value: number; revenue: number }
 
 interface ReportData {
   period: { days: number; since: string; until: string; dateFrom: string | null; dateTo: string | null }
@@ -111,7 +111,7 @@ function BarChart({ data }: { data: DailySale[] }) {
 export default function AdminReportsPage() {
   const [report, setReport]   = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'pins' | 'network' | 'mlm'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'pins' | 'packages' | 'network' | 'mlm'>('overview')
 
   // Filters
   const [days,     setDays]     = useState(30)
@@ -318,6 +318,7 @@ export default function AdminReportsPage() {
           { key: 'overview', label: '📊 Overview'      },
           { key: 'products', label: '📦 Product Sales' },
           { key: 'pins',     label: '🔑 PIN Sales'     },
+          { key: 'packages', label: '📦 Package Sales'  },
           { key: 'network',  label: '👥 Network'       },
           { key: 'mlm',      label: '💰 MLM & Commissions' },
         ] as const).map((t) => (
@@ -490,6 +491,7 @@ export default function AdminReportsPage() {
                 <p className="text-center text-gray-400 text-sm py-10">No PIN sales in this period.</p>
               ) : (
                 pinSales.breakdown.map((p, i) => {
+                  const pct = pinSales.totalRevenue > 0 ? ((p.revenue / pinSales.totalRevenue) * 100).toFixed(1) : '0'
                   const share = pinSales.totalRevenue > 0 ? (p.revenue / pinSales.totalRevenue) * 100 : 0
                   return (
                     <div key={p.package_id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center"
@@ -535,6 +537,54 @@ export default function AdminReportsPage() {
       )}
 
       {/* ══════════════════════════════════════════════ */}
+      {/* PACKAGE SALES TAB */}
+      {activeTab === 'packages' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="Packages Sold"      value={fmtN(pinSales.totalPinsSold)} accent="#0D1B3E" />
+            <StatCard label="PIN Revenue"         value={fmt(pinSales.totalRevenue)}   accent="#C9A84C" />
+            <StatCard label="Products Revenue"    value={fmt(pinSales.breakdown.reduce((s, p) => s + (p.products_value || 0) * p.pins_sold, 0))} accent="#2563eb" />
+            <StatCard label="Total Package Value" value={fmt(pinSales.breakdown.reduce((s, p) => s + (p.package_value || 0) * p.pins_sold, 0))} accent="#1a7a4a" />
+          </div>
+
+          <SectionTitle title="Package Sales Breakdown" subtitle="PIN price + included product values per package sold" />
+          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+            <div className="grid px-4 py-2 bg-[#F0F2F8] text-xs text-gray-400 uppercase tracking-wide font-medium" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+              <span>Package</span>
+              <span>Sold</span>
+              <span>PIN Price</span>
+              <span>Products Value</span>
+              <span>Total / Package</span>
+              <span>Total Revenue</span>
+            </div>
+            {pinSales.breakdown.length === 0 ? (
+              <p className="text-xs text-gray-400 px-4 py-6 text-center">No package sales in this period.</p>
+            ) : (
+              <>
+                {pinSales.breakdown.map((p) => (
+                  <div key={p.package_id} className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 items-center" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+                    <span className="text-xs font-medium text-[#0D1B3E]">{p.package_name}</span>
+                    <span className="text-xs text-gray-500">{fmtN(p.pins_sold)}</span>
+                    <span className="text-xs text-gray-400">{fmt(p.pin_price || 0)}</span>
+                    <span className="text-xs text-gray-400">{fmt(p.products_value || 0)}</span>
+                    <span className="text-xs font-medium text-[#C9A84C]">{fmt(p.package_value || 0)}</span>
+                    <span className="text-xs font-bold text-[#0D1B3E]">{fmt((p.package_value || 0) * p.pins_sold)}</span>
+                  </div>
+                ))}
+                <div className="grid px-4 py-3 bg-[#F0F2F8] font-semibold" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}>
+                  <span className="text-xs text-[#0D1B3E]">TOTAL</span>
+                  <span className="text-xs text-[#0D1B3E]">{fmtN(pinSales.totalPinsSold)}</span>
+                  <span />
+                  <span />
+                  <span />
+                  <span className="text-xs text-[#1a7a4a]">{fmt(pinSales.breakdown.reduce((s, p) => s + (p.package_value || 0) * p.pins_sold, 0))}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* NETWORK TAB */}
       {/* ══════════════════════════════════════════════ */}
       {activeTab === 'network' && (
