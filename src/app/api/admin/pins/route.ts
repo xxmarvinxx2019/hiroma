@@ -20,21 +20,15 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const status    = searchParams.get('status')   || 'all'
-    const search    = searchParams.get('search')   || ''
-    const page      = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize  = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
-    const packageId = searchParams.get('package')  || ''
-    const dateFrom  = searchParams.get('dateFrom') || ''
-    const dateTo    = searchParams.get('dateTo')   || ''
+    const status        = searchParams.get('status')        || 'all'
+    const search        = searchParams.get('search')        || ''
+    const page          = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize      = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const cityDistId    = searchParams.get('city_dist_id')  || ''
 
     const where: any = {
       ...(status !== 'all' && { status }),
-      ...(packageId && { package_id: packageId }),
-      ...(dateFrom || dateTo ? { created_at: {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo   && { lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)) }),
-      }} : {}),
+      ...(cityDistId && { city_dist_id: cityDistId }),
       ...(search && {
         OR: [
           { pin_code:         { contains: search, mode: 'insensitive' } },
@@ -68,12 +62,13 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const summary = { total: 0, unused: 0, used: 0, cancelled: 0 }
+    const summary = { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       summary.total += row._count.status
       const s = row.status as string
       if (s === 'unused')    summary.unused    = row._count.status
       if (s === 'used')      summary.used      = row._count.status
+      if (s === 'expired')   summary.expired   = row._count.status
       if (s === 'cancelled') summary.cancelled = row._count.status
     }
 

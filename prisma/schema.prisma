@@ -286,23 +286,25 @@ model Payout {
 
 model Order {
   id                String      @id @default(uuid())
+  order_number      String?     @unique
   buyer_id          String
   seller_id         String
   order_type        OrderType
   status            OrderStatus @default(pending)
   total_amount      Decimal     @db.Decimal(10, 2)
   is_cross_purchase Boolean     @default(false)
-  notes             String?
-  created_at        DateTime    @default(now())
-  payment_method    String?     @default("cash_on_pickup") @db.VarChar
+  payment_method    String?     @db.VarChar
   payment_reference String?     @db.VarChar
   payment_status    String?     @default("unpaid") @db.VarChar
-  items             OrderItem[]
-  buyer             User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
-  seller            User        @relation("OrderSeller", fields: [seller_id], references: [id])
-  payment_sender_name String?   @db.VarChar
-  payment_datetime    DateTime? @db.Timestamptz(6)
-  
+  notes             String?
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @default(now()) @updatedAt
+
+  // Relations
+  buyer  User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
+  seller User        @relation("OrderSeller", fields: [seller_id], references: [id])
+  items  OrderItem[]
+
   @@map("orders")
 }
 
