@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 
 // ============================================================
@@ -142,6 +143,10 @@ export default function ResellersPage() {
             Manage all MLM resellers in the network
           </p>
         </div>
+        <Link href="/dashboard/admin/resellers/register"
+          className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors">
+          + Register Reseller
+        </Link>
       </div>
 
       {/* Summary Cards */}

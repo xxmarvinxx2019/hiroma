@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -16,15 +17,14 @@ interface OrderItem {
 
 interface Order {
   id: string
+  order_number: string | null
   order_type: string
   status: string
   total_amount: number
   created_at: string
   notes: string | null
-  payment_method:      string | null
-  payment_reference:   string | null
-  payment_sender_name: string | null
-  payment_datetime:    string | null
+  payment_method:    string | null
+  payment_reference: string | null
   payment_status:    string | null
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -103,11 +103,9 @@ function CreateOrderModal({
   const [error, setError]                 = useState('')
   const [search, setSearch]               = useState('')
   const [loadingProducts, setLoadingProducts] = useState(false)
-  const [paymentMethod, setPaymentMethod]         = useState('cash_on_pickup')
-  const [paymentReference, setPaymentReference]   = useState('')
-  const [paymentSenderName, setPaymentSenderName] = useState('')
-  const [paymentDatetime, setPaymentDatetime]     = useState('')
-  const [paymentMethods, setPaymentMethods]       = useState<PaymentMethodInfo[]>([])
+  const [paymentMethod, setPaymentMethod]     = useState('cash_on_pickup')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentMethods, setPaymentMethods]   = useState<PaymentMethodInfo[]>([])
 
   useEffect(() => {
     fetch('/api/reseller/city-distributors')
@@ -133,8 +131,6 @@ function CreateOrderModal({
     setCart([])
     setPaymentMethod('cash_on_pickup')
     setPaymentReference('')
-    setPaymentSenderName('')
-    setPaymentDatetime('')
   }, [selectedDistId])
 
   const filtered = products.filter((p) =>
@@ -173,14 +169,6 @@ function CreateOrderModal({
       setError('Please enter the payment reference number.')
       return
     }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentSenderName.trim()) {
-      setError('Please enter the sender name.')
-      return
-    }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentDatetime) {
-      setError('Please enter the payment date and time.')
-      return
-    }
     setSubmitting(true)
     setError('')
     const res = await fetch('/api/reseller/orders', {
@@ -190,10 +178,8 @@ function CreateOrderModal({
         order_type:        orderType,
         city_dist_id:      selectedDistId,
         notes,
-        payment_method:      paymentMethod,
-        payment_reference:   paymentReference.trim()   || null,
-        payment_sender_name: paymentSenderName.trim()  || null,
-        payment_datetime:    paymentDatetime            || null,
+        payment_method:    paymentMethod,
+        payment_reference: paymentReference.trim() || null,
         items: cart.map((c) => ({
           product_id: c.product.id,
           quantity:   c.quantity,
@@ -386,7 +372,7 @@ function CreateOrderModal({
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
                   {/* Cash on pickup — always available */}
-                  <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference(''); setPaymentSenderName(''); setPaymentDatetime('') }}
+                  <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference('') }}
                     className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${
                       paymentMethod === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
                     }`}>
@@ -412,26 +398,14 @@ function CreateOrderModal({
                     </div>
                   ))}
                 </div>
-                {/* Reference number, sender name, datetime */}
+                {/* Reference number */}
                 {paymentMethod !== 'cash_on_pickup' && (
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-2">
                     <input
                       value={paymentReference}
                       onChange={(e) => setPaymentReference(e.target.value)}
                       placeholder="Reference number *"
                       className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
-                    />
-                    <input
-                      value={paymentSenderName}
-                      onChange={(e) => setPaymentSenderName(e.target.value)}
-                      placeholder="Sender name *"
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
-                    />
-                    <input
-                      type="datetime-local"
-                      value={paymentDatetime}
-                      onChange={(e) => setPaymentDatetime(e.target.value)}
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] text-gray-500"
                     />
                   </div>
                 )}
@@ -600,14 +574,6 @@ export default function ResellerOrdersPage() {
                   {order.payment_reference && (
                     <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>
                   )}
-                  {order.payment_sender_name && (
-                    <p className="text-[10px] text-gray-400">Sender: {order.payment_sender_name}</p>
-                  )}
-                  {order.payment_datetime && (
-                    <p className="text-[10px] text-gray-400">
-                      {new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  )}
                   {order.payment_status === 'paid' ? (
                     <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
                   ) : order.payment_method !== 'cash_on_pickup' ? (
@@ -629,14 +595,29 @@ export default function ResellerOrdersPage() {
                 </span>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+
+                  {/* View details */}
+                  <Link href={"/dashboard/reseller/orders/" + (order.order_number || order.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
+                    title="View details">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </Link>
+
+                  {/* Cancel */}
                   {order.status === 'pending' && (
                     <button disabled={cancelling === order.id} onClick={() => handleCancel(order.id)}
-                      className="text-xs px-2 py-1 rounded-lg bg-[#fdecea] text-[#a03030] hover:bg-[#fcd9d9] transition-colors disabled:opacity-50">
-                      Cancel
+                      className="w-7 h-7 rounded-lg bg-[#fdecea] hover:bg-[#a03030] flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50"
+                      title="Cancel order">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                      </svg>
                     </button>
                   )}
-                  <span className="text-gray-300 text-xs ml-1">{expandedId === order.id ? '▲' : '▼'}</span>
                 </div>
               </div>
 

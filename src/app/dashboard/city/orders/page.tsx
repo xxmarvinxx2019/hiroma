@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -12,6 +13,7 @@ interface OrderItem {
 
 interface Order {
   id: string
+  order_number: string | null
   order_type: string
   status: string
   total_amount: number
@@ -20,8 +22,6 @@ interface Order {
   payment_method:      string | null
   payment_reference:   string | null
   payment_status:      string | null
-  payment_sender_name: string | null
-  payment_datetime:    string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -85,7 +85,19 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
   const [notes, setNotes]           = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
-  const [search, setSearch]         = useState('')
+  const [search, setSearch]           = useState('')
+  const [paymentMethod, setPaymentMethod]     = useState('cash')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentMethods, setPaymentMethods]   = useState<{ id: string; type: string; account_name: string; account_number: string; bank_name: string | null }[]>([])
+
+  // Fetch supplier's payment methods so city dist knows how to pay them
+  useEffect(() => {
+    if (!supplier?.id) return
+    fetch(`/api/payment-methods?user_id=${supplier.id}&status=approved`)
+      .then((r) => r.json())
+      .then((d) => setPaymentMethods(d.methods || []))
+      .catch(() => {})
+  }, [supplier?.id])
 
   useEffect(() => {
     fetch('/api/city/products?for_ordering=true').then((r) => r.json()).then((d) => setProducts(d.products || []))
@@ -113,7 +125,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
     setSubmitting(true); setError('')
     const res = await fetch('/api/city/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_type: orderType, notes, items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity, unit_price: c.product.price })) }),
+      body: JSON.stringify({ order_type: orderType, notes, payment_method: paymentMethod, payment_reference: paymentReference.trim() || null, items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity, unit_price: c.product.price })) }),
     })
     const data = await res.json()
     setSubmitting(false)
@@ -192,6 +204,34 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
               </div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" rows={2}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 resize-none" />
+              {/* Payment Method */}
+              <div>
+                <p className="text-xs font-medium text-[#0D1B3E] mb-1.5">Payment Method</p>
+                <div className="space-y-1">
+                  <div onClick={() => setPaymentMethod('cash')}
+                    className={"flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors " + (paymentMethod === 'cash' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#C9A84C]/40')}>
+                    <span className="text-sm">💵</span>
+                    <span className="text-xs text-[#0D1B3E]">Cash on Pickup</span>
+                    {paymentMethod === 'cash' && <span className="ml-auto text-[#C9A84C] text-xs">✓</span>}
+                  </div>
+                  {paymentMethods.map((pm) => (
+                    <div key={pm.id} onClick={() => setPaymentMethod(pm.type)}
+                      className={"flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors " + (paymentMethod === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#C9A84C]/40')}>
+                      <span className="text-sm">{pm.type === 'gcash' ? '📱' : '🏦'}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-[#0D1B3E] capitalize">{pm.type === 'bank_transfer' ? 'Bank Transfer' : pm.type}</p>
+                        <p className="text-[10px] text-gray-400">{pm.account_name} · {pm.account_number}</p>
+                      </div>
+                      {paymentMethod === pm.type && <span className="ml-auto text-[#C9A84C] text-xs">✓</span>}
+                    </div>
+                  ))}
+                </div>
+                {paymentMethod !== 'cash' && (
+                  <input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="Reference / transaction number" className="mt-1.5 w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
+                )}
+              </div>
+
               {error && <p className="text-xs text-[#a03030]">{error}</p>}
               <button onClick={handleSubmit} disabled={submitting || cart.length === 0}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
@@ -448,6 +488,14 @@ export default function CityOrdersPage() {
 
   useEffect(() => { fetchOrders() }, [fetchOrders])
 
+  // Fetch supplier on mount regardless of tab
+  useEffect(() => {
+    fetch('/api/city/orders?tab=my_orders&page=1&pageSize=1')
+      .then((r) => r.json())
+      .then((data) => { if (data.supplier) setSupplier(data.supplier) })
+      .catch(() => {})
+  }, [])
+
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
     setUpdatingId(orderId)
     const res = await fetch('/api/city/orders', {
@@ -480,7 +528,10 @@ export default function CityOrdersPage() {
           </p>
         </div>
         {tab === 'my_orders' && (
-          <button onClick={() => setShowCreate(true)}
+          <button onClick={() => {
+            if (!supplier) { alert('No supplier found. Please contact admin to set up your distribution chain.'); return }
+            setShowCreate(true)
+          }}
             className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium">
             + New Order
           </button>
@@ -584,14 +635,6 @@ export default function CityOrdersPage() {
                       {order.payment_reference && (
                         <p className="text-[10px] text-gray-400 truncate">Ref: {order.payment_reference}</p>
                       )}
-                      {order.payment_sender_name && (
-                        <p className="text-[10px] text-gray-400 truncate">Sender: {order.payment_sender_name}</p>
-                      )}
-                      {order.payment_datetime && (
-                        <p className="text-[10px] text-gray-400">
-                          {new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
 
                       {order.payment_status === 'paid' ? (
                         <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
@@ -615,27 +658,44 @@ export default function CityOrdersPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    <Link href={"/dashboard/city/orders/" + (order.order_number || order.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
+                    title="View details">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </Link>
                     {/* Confirm payment button */}
-                    {tab === 'reseller_orders' && order.payment_method && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                    {tab === 'reseller_orders' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
                         onClick={() => handleConfirmPayment(order.id)}
                         disabled={updatingId === order.id}
-                        className="text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] font-medium disabled:opacity-50"
-                      >
-                        ✓ Paid
+                        className="w-7 h-7 rounded-lg bg-[#e8f7ef] hover:bg-[#1a7a4a] flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50"
+                        title="Mark as paid">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white">
+                          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
                       </button>
                     )}
                     {nextStatuses.map((next) => (
                       <button key={next} disabled={updatingId === order.id} onClick={() => handleStatusUpdate(order.id, next)}
-                        className={`text-xs px-2 py-1 rounded-lg capitalize transition-colors disabled:opacity-50 ${next === 'cancelled' ? 'bg-[#fdecea] text-[#a03030] hover:bg-[#fcd9d9]' : 'bg-[#0D1B3E] text-white hover:bg-[#162850]'}`}>
-                        {next === 'processing' ? 'Process' : next === 'delivered' ? 'Deliver' : 'Cancel'}
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        title={next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
+                        {next === 'cancelled' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        ) : next === 'delivered' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white"><path d="M5 13l4 4L19 7"/></svg>
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        )}
                       </button>
                     ))}
-                    <span className="text-gray-300 text-xs ml-1">{expandedId === order.id ? '▲' : '▼'}</span>
-                  </div>
+                    </div>
                 </div>
 
-                {expandedId === order.id && (
+              {expandedId === order.id && (
                   <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>
                     {order.items.length === 0 ? <p className="text-xs text-gray-400">{order.notes || 'No items'}</p> : (

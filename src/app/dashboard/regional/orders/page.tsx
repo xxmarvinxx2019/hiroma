@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -16,6 +17,7 @@ interface OrderItem {
 
 interface Order {
   id: string
+  order_number: string | null
   order_type: string
   status: string
   total_amount: number
@@ -23,8 +25,6 @@ interface Order {
   notes: string | null
   payment_method:      string | null
   payment_reference:   string | null
-  payment_sender_name: string | null
-  payment_datetime:    string | null
   payment_status:      string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
@@ -152,8 +152,6 @@ function CreateOrderModal({
         notes,
         payment_method:      paymentMethod,
         payment_reference:   paymentReference.trim()  || null,
-        payment_sender_name: paymentSenderName.trim() || null,
-        payment_datetime:    paymentDatetime           || null,
         items: cart.map((c) => ({
           product_id: c.product.id,
           quantity:   c.quantity,
@@ -536,8 +534,6 @@ export default function RegionalOrdersPage() {
                     <div className="mt-0.5 space-y-0.5">
                       <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : '🏦 Bank'}</p>
                       {order.payment_reference    && <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>}
-                      {order.payment_sender_name  && <p className="text-[10px] text-gray-400">Sender: {order.payment_sender_name}</p>}
-                      {order.payment_datetime     && <p className="text-[10px] text-gray-400">{new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
                       {order.payment_status === 'paid'
                         ? <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
                         : <span className="text-[10px] text-[#9a6f1e]">⏳ Unpaid</span>}
@@ -563,8 +559,17 @@ export default function RegionalOrdersPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    <Link href={"/dashboard/regional/orders/" + (order.order_number || order.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
+                    title="View details">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </Link>
                     {/* Confirm payment for non-cash orders in seller tab */}
-                    {tab !== 'my_orders' && order.payment_method && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                    {tab !== 'my_orders' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
                         onClick={async () => {
                           await fetch('/api/regional/orders', {
@@ -574,31 +579,31 @@ export default function RegionalOrdersPage() {
                           })
                           fetchOrders()
                         }}
-                        className="text-xs bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] font-medium"
-                      >
-                        ✓ Paid
-                      </button>
+                        className="w-7 h-7 rounded-lg bg-[#e8f7ef] hover:bg-[#1a7a4a] flex items-center justify-center transition-colors group flex-shrink-0"
+                      title="Mark as paid">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                      </svg>
+                    </button>
                     )}
                     {nextStatuses.map((next) => (
-                      <button
-                        key={next}
-                        disabled={updatingId === order.id}
+                      <button key={next} disabled={updatingId === order.id}
                         onClick={() => handleStatusUpdate(order.id, next)}
-                        className={`text-xs px-2 py-1 rounded-lg capitalize transition-colors disabled:opacity-50 ${
-                          next === 'cancelled'
-                            ? 'bg-[#fdecea] text-[#a03030] hover:bg-[#fcd9d9]'
-                            : 'bg-[#0D1B3E] text-white hover:bg-[#162850]'
-                        }`}
-                      >
-                        {next === 'processing' ? 'Process' : next === 'delivered' ? 'Deliver' : 'Cancel'}
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        title={next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
+                        {next === 'cancelled' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        ) : next === 'delivered' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white"><path d="M5 13l4 4L19 7"/></svg>
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        )}
                       </button>
                     ))}
-                    <span className="text-gray-300 text-xs ml-1">{expandedId === order.id ? '▲' : '▼'}</span>
-                  </div>
+                    </div>
                 </div>
 
-                {/* Expanded items */}
-                {expandedId === order.id && (
+              {expandedId === order.id && (
                   <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>
                     {order.items.length === 0 ? (

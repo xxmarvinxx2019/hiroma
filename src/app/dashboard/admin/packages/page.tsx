@@ -370,7 +370,7 @@ export default function PackagesPage() {
                       className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
                   },
                   {
-                    label: 'Product Point (₱/pt)',
+                    label: 'Product Points Value',
                     hint:  '0.50 means 100pts = ₱50',
                     required: true,
                     input: <input type="number" step="0.01" value={form.point_php_value}

@@ -12,7 +12,7 @@ const navItems = [
     items: [
       { label: 'Dashboard', href: '/dashboard/admin', icon: '📊' },
       { label: 'Distributors', href: '/dashboard/admin/distributors', icon: '🗺️' },
-      { label: 'Resellers', href: '/dashboard/admin/resellers', icon: '👥' },
+      { label: 'Resellers',        href: '/dashboard/admin/resellers',          icon: '👥' },
     ],
   },
   {
@@ -61,6 +61,8 @@ function Sidebar({
 }) {
   const isActive = (href: string) => {
     if (href === '/dashboard/admin') return pathname === href
+    // Exact match for these to avoid parent highlighting child routes
+    if (href === '/dashboard/admin/resellers') return pathname === href
     return pathname.startsWith(href)
   }
 

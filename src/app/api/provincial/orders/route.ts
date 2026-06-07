@@ -65,10 +65,27 @@ export async function GET(req: NextRequest) {
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
-    const isBuyer = tab === 'my_orders'
+    const isBuyer       = tab === 'my_orders'
+    const isCityOrders  = tab === 'city_orders'
+
+    // Get city distributors under this provincial for city_dist_orders tab
+    let cityDistIds: string[] = []
+    if (isCityOrders) {
+      const profile = await prisma.distributorProfile.findUnique({
+        where:  { user_id: user.id },
+        select: { province_code: true },
+      })
+      const cityDists = await prisma.distributorProfile.findMany({
+        where:  { dist_level: 'city', province_code: profile?.province_code || 'NONE' },
+        select: { user_id: true },
+      })
+      cityDistIds = cityDists.map((c) => c.user_id)
+    }
 
     const where: Record<string, unknown> = {
-      ...(isBuyer
+      ...(isCityOrders
+        ? { buyer_id: { in: cityDistIds } }
+        : isBuyer
         ? { buyer_id: user.id }
         : { seller_id: user.id, buyer: { role: 'city' } }
       ),
@@ -96,8 +113,6 @@ export async function GET(req: NextRequest) {
           created_at: true, notes: true,
           payment_method:      true,
           payment_reference:   true,
-          payment_sender_name: true,
-          payment_datetime:    true,
           payment_status:      true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
@@ -111,7 +126,9 @@ export async function GET(req: NextRequest) {
       }),
       prisma.order.groupBy({
         by: ['status'],
-        where: isBuyer
+        where: isCityOrders
+          ? { buyer_id: { in: cityDistIds } }
+          : isBuyer
           ? { buyer_id: user.id }
           : { seller_id: user.id, buyer: { role: 'city' } },
         _count: { status: true },
@@ -148,7 +165,7 @@ export async function POST(req: NextRequest) {
 
     const {
       order_type, notes, items,
-      payment_method, payment_reference, payment_sender_name, payment_datetime,
+      payment_method, payment_reference,
     } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
@@ -210,10 +227,8 @@ export async function POST(req: NextRequest) {
         total_amount,
         is_cross_purchase:   false,
         notes:               notes?.trim() || null,
-        payment_method:      payment_method || 'cash_on_pickup',
-        payment_reference:   payment_reference?.trim()   || null,
-        payment_sender_name: payment_sender_name?.trim() || null,
-        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
+        payment_method:      payment_method || 'cash',
+        payment_reference:   payment_reference?.trim() || null,
         payment_status:      'unpaid',
         items:               { create: orderItems },
       },
@@ -259,7 +274,8 @@ export async function PATCH(req: NextRequest) {
     })
 
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
-    if (order.status === 'delivered' || order.status === 'cancelled')
+    // Allow payment_status updates on finalized orders
+    if ((order.status === 'delivered' || order.status === 'cancelled') && status)
       return NextResponse.json({ error: 'Order already finalized.' }, { status: 400 })
     if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled')
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })

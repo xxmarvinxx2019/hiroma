@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms'
 
 // ============================================================
 // GET — paginated resellers
@@ -150,60 +151,43 @@ async function firePointsPairingBonus(
 
   // Fetch reseller profiles + their package pairing_bonus_value
   const ancestorUserIds = ancestors.map((a) => a.user_id)
-  const profiles = await prisma.resellerProfile.findMany({
-    where:  { user_id: { in: ancestorUserIds } },
-    select: {
-      user_id:             true,
-      left_points:         true,
-      right_points:        true,
-      daily_pairing_count: true,
-      daily_pairing_date:  true,
-      package: { select: { pairing_bonus_value: true } },
-    },
-  })
-  const profileMap = new Map(profiles.map((p) => [p.user_id, p]))
-
-  console.log(`[BINARY] ancestors: ${ancestors.length}, profiles: ${profiles.length}`)
+  console.log(`[BINARY] ancestors: ${ancestors.length}`)
   console.log(`[BINARY] newUserPts: ${newUserPts}, newPosition: ${newPosition}`)
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Track leg as we walk up the tree
-  // i=0 → leg is newPosition (side the new reseller is on under their direct parent)
-  // i>0 → leg is ancestors[i-1].position (which side the previous node is on)
   let currentLeg = newPosition
 
   for (let i = 0; i < ancestors.length; i++) {
     const ancestor = ancestors[i]
 
-    const profile = profileMap.get(ancestor.user_id)
+    // ── Fresh read per ancestor to avoid stale data ──
+    const profile = await prisma.resellerProfile.findUnique({
+      where:  { user_id: ancestor.user_id },
+      select: {
+        user_id:             true,
+        left_points:         true,
+        right_points:        true,
+        daily_pairing_count: true,
+        daily_pairing_date:  true,
+        package: { select: { pairing_bonus_value: true } },
+      },
+    })
+
     if (!profile) {
       console.log(`[BINARY] Skip ${ancestor.user_id} — no reseller profile`)
-      // Still need to update leg for next ancestor
-      if (i < ancestors.length - 1) {
-        currentLeg = (ancestor.position as 'left' | 'right') || currentLeg
-      }
+      currentLeg = (ancestor.position as 'left' | 'right') || currentLeg
       continue
     }
 
-    // pointsPerPair = MIN(ancestor's pkg pts, new reseller's pkg pts)
-    // Use ancestor's pairing_bonus_value if available, otherwise fall back to newUserPts
     const ancestorPkgPts = Number(profile.package?.pairing_bonus_value || 0)
-    const pointsPerPair  = ancestorPkgPts > 0
-      ? Math.min(ancestorPkgPts, newUserPts)
-      : newUserPts  // fallback: use new reseller's pts if ancestor has no pkg value
-
-    if (pointsPerPair <= 0) {
-      console.log(`[BINARY] Skip ${ancestor.user_id} — pointsPerPair is 0`)
-      if (i < ancestors.length - 1) {
-        currentLeg = (ancestor.position as 'left' | 'right') || currentLeg
-      }
+    if (ancestorPkgPts <= 0) {
+      console.log(`[BINARY] Skip ${ancestor.user_id} — no package pts`)
+      currentLeg = (ancestor.position as 'left' | 'right') || currentLeg
       continue
     }
 
-    // Daily reset — only reset daily_pairing_count, NOT left/right points
-    // Points carry over across days until cap is hit (then flush)
     const lastPairDate = profile.daily_pairing_date ? new Date(profile.daily_pairing_date) : null
     const isToday      = lastPairDate ? lastPairDate >= today : false
 
@@ -214,10 +198,18 @@ async function firePointsPairingBonus(
     if (currentLeg === 'left')  leftPts  += newUserPts
     else                        rightPts += newUserPts
 
-    // 1 pair fires if both sides have enough points
-    const possiblePairs = Math.min(leftPts, rightPts) >= pointsPerPair ? 1 : 0
+    // A pair fires when BOTH sides have any points
+    // pointsPerPair = MIN(ancestor pkg, new reseller pkg) — used for earnings calculation
+    const pointsPerPair = Math.min(ancestorPkgPts, newUserPts)
 
-    console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ppp:${pointsPerPair} | pairs:${possiblePairs}`)
+    // Pair fires as long as both sides > 0
+    // Use smaller side as the matchable amount
+    const matchable     = Math.min(leftPts, rightPts)
+    const possiblePairs = matchable > 0 ? 1 : 0
+
+    console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ppp:${pointsPerPair} | matchable:${matchable} | pairs:${possiblePairs}`)
+
+    console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ppp:${pointsPerPair} | matchable:${matchable} | pairs:${possiblePairs}`)
 
     if (possiblePairs > 0) {
       const usedToday = isToday ? Number(profile.daily_pairing_count || 0) : 0  // resets count on new day
@@ -226,10 +218,12 @@ async function firePointsPairingBonus(
       const paidPairs     = Math.min(possiblePairs, remaining)
       const overflowPairs = possiblePairs - paidPairs
 
-      const paidEarnings     = paidPairs     * pointsPerPair * BINARY_POINT_TO_PESO
-      const overflowEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
+      // earnings based on matchable points (smaller side)
+      const paidEarnings     = paidPairs     * matchable * BINARY_POINT_TO_PESO
+      const overflowEarnings = overflowPairs * matchable * BINARY_POINT_TO_PESO
 
-      const deduct = possiblePairs * pointsPerPair
+      // deduct matchable from both sides
+      const deduct = matchable
       leftPts  -= deduct
       rightPts -= deduct
 
@@ -585,6 +579,19 @@ export async function POST(req: NextRequest) {
         },
       },
     })
+
+    // ── Send welcome SMS ──
+    /*try {
+      const smsMessage = smsWelcomeReseller({
+        full_name,
+        username:     username.trim().toLowerCase(),
+        password,
+        package_name: packageWithProducts?.name || 'Starter',
+      })
+      await sendSMS(mobile, smsMessage)
+    } catch (e) {
+      console.error('[REGISTER] SMS error:', e)
+    }*/
 
     return NextResponse.json({
       success:  true,

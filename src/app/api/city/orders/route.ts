@@ -129,6 +129,7 @@ export async function GET(req: NextRequest) {
         take: pageSize,
         select: {
           id:                true,
+          order_number:      true,
           order_type:        true,
           status:            true,
           total_amount:      true,
@@ -192,7 +193,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items } = await req.json()
+    const { order_type, notes, items, payment_method, payment_reference } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -257,6 +258,9 @@ export async function POST(req: NextRequest) {
         total_amount,
         is_cross_purchase: false,
         notes:             notes?.trim() || null,
+        payment_method:    payment_method  || 'cash',
+        payment_reference: payment_reference?.trim() || null,
+        payment_status:    'unpaid',
         items:             { create: orderItems },
       },
       select: {
@@ -446,7 +450,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order not found or action not allowed.' }, { status: 404 })
     }
 
-    if (order.status === 'delivered' || order.status === 'cancelled') {
+    // Allow payment_status updates even on finalized orders
+    if ((order.status === 'delivered' || order.status === 'cancelled') && status) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 

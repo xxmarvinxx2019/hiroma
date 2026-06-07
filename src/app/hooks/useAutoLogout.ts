@@ -14,21 +14,24 @@ interface UseAutoLogoutOptions {
 }
 
 export function useAutoLogout(options: UseAutoLogoutOptions = {}) {
-  const router          = useRouter()
+  const router = useRouter()
   const { onWarning, onActive, onLogout, timeout = INACTIVITY_TIMEOUT } = options
 
-  const logoutAtRef     = useRef(Date.now() + timeout)
-  const isWarningRef    = useRef(false)
-  const intervalRef     = useRef<NodeJS.Timeout | null>(null)
+  const logoutAtRef    = useRef(Date.now() + timeout)
+  const isWarningRef   = useRef(false)
+  const isLoggedOutRef = useRef(false)
+  const intervalRef    = useRef<NodeJS.Timeout | null>(null)
 
   const doLogout = useCallback(async () => {
+    if (isLoggedOutRef.current) return
+    isLoggedOutRef.current = true
     if (intervalRef.current) clearInterval(intervalRef.current)
-    isWarningRef.current = false
     try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
     if (onLogout) onLogout()
     router.push('/login')
   }, [router, onLogout])
 
+  // Called when user clicks "Stay logged in"
   const stayLoggedIn = useCallback(() => {
     logoutAtRef.current  = Date.now() + timeout
     isWarningRef.current = false
@@ -36,34 +39,31 @@ export function useAutoLogout(options: UseAutoLogoutOptions = {}) {
   }, [timeout, onActive])
 
   useEffect(() => {
-    // Reset logout time on user activity — but only if NOT in warning state
+    // Reset logout time on ANY user activity — including during warning
     const handleActivity = () => {
-      if (isWarningRef.current) return
-      logoutAtRef.current = Date.now() + timeout
+      logoutAtRef.current  = Date.now() + timeout
+      isWarningRef.current = false  // dismiss warning on any activity
     }
 
     const events = ['mousedown', 'keydown', 'touchstart', 'click']
     events.forEach((e) => window.addEventListener(e, handleActivity, { passive: true }))
 
-    // Single interval that checks everything
+    // Single interval checks everything every second
     intervalRef.current = setInterval(() => {
+      if (isLoggedOutRef.current) return
+
       const remaining = logoutAtRef.current - Date.now()
 
       if (remaining <= 0) {
-        // Time's up — logout
         doLogout()
         return
       }
 
       if (remaining <= WARNING_BEFORE) {
-        // In warning zone
-        const secs = Math.ceil(remaining / 1000)
-        if (!isWarningRef.current) {
-          isWarningRef.current = true
-        }
-        if (onWarning) onWarning(secs)
+        isWarningRef.current = true
+        if (onWarning) onWarning(Math.ceil(remaining / 1000))
       } else {
-        // Outside warning zone — reset if was warning
+        // Back to safe zone (stayLoggedIn was clicked)
         if (isWarningRef.current) {
           isWarningRef.current = false
           if (onActive) onActive()

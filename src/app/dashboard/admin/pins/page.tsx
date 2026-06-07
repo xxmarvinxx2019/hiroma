@@ -44,14 +44,10 @@ export default function PinsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'cancelled'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('all')
   const [page, setPage] = useState(1)
   const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, cancelled: 0 })
-  const [packageFilter, setPackageFilter] = useState('')
-  const [dateFrom, setDateFrom]           = useState('')
-  const [dateTo, setDateTo]               = useState('')
-  const [showFilters, setShowFilters]     = useState(false)
+  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
     package_id: '',
@@ -75,7 +71,9 @@ export default function PinsPage() {
       fetch('/api/admin/distributors?pageSize=200&level=city').then((r) => r.json()),
     ]).then(([packagesData, distsData]) => {
       setPackages(packagesData.packages || [])
-      setCityDists((distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city'))
+      const cityDistList = (distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city')
+      // Add admin (self) at top so admin can generate PINs for themselves
+      setCityDists([{ id: distsData.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin', coverage_area: 'All areas' }, ...cityDistList])
     })
   }, [])
 
@@ -118,9 +116,6 @@ export default function PinsPage() {
     const params = new URLSearchParams({
       page: String(page), pageSize: '15',
       ...(statusFilter !== 'all' && { status: statusFilter }),
-      ...(packageFilter && { package: packageFilter }),
-      ...(dateFrom && { dateFrom }),
-      ...(dateTo   && { dateTo }),
       ...(search && { search }),
     })
     fetch(`/api/admin/pins?${params}`)
@@ -131,10 +126,7 @@ export default function PinsPage() {
         if (data.summary) setSummary(data.summary)
         setLoading(false)
       })
-  }, [page, statusFilter, search, packageFilter, dateFrom, dateTo])
-
-  // Reset page to 1 whenever any filter changes
-  useEffect(() => { setPage(1) }, [statusFilter, search, packageFilter, dateFrom, dateTo])
+  }, [page, statusFilter, search])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -218,7 +210,7 @@ export default function PinsPage() {
           { label: 'Total PINs', value: summary.total,   accent: '#0D1B3E' },
           { label: 'Unused',     value: summary.unused,  accent: '#C9A84C' },
           { label: 'Used',       value: summary.used,    accent: '#1a7a4a' },
-          { label: 'Cancelled',  value: summary.cancelled, accent: '#e05252' },
+          { label: 'Expired',    value: summary.expired, accent: '#e05252' },
         ].map((s) => (
           <div
             key={s.label}
@@ -234,7 +226,7 @@ export default function PinsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8">
+      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
 
         {/* Search & Filter */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
@@ -245,7 +237,7 @@ export default function PinsPage() {
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">
-            {(['all', 'unused', 'used', 'cancelled'] as const).map((f) => (
+            {(['all', 'unused', 'used', 'expired', 'cancelled'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setStatusFilter(f)}

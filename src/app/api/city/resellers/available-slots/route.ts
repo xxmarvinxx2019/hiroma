@@ -5,7 +5,7 @@ import prisma from '@/app/lib/prisma'
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'city') {
+    if (!user || !['city', 'admin'].includes(user.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 

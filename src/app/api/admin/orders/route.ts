@@ -44,25 +44,24 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id:                  true,
-          order_type:          true,
-          status:              true,
-          total_amount:        true,
-          created_at:          true,
-          notes:               true,
-          payment_method:      true,
-          payment_reference:   true,
-          payment_sender_name: true,
-          payment_datetime:    true,
-          payment_status:      true,
+          id:                true,
+          order_number:      true,
+          order_type:        true,
+          status:            true,
+          total_amount:      true,
+          created_at:        true,
+          notes:             true,
+          payment_method:    true,
+          payment_reference: true,
+          payment_status:    true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
             select: {
-              quantity:   true,
+              quantity:  true,
               unit_price: true,
-              subtotal:   true,
-              product:    { select: { name: true, type: true } },
+              subtotal:  true,
+              product:   { select: { name: true, type: true } },
             },
           },
         },
@@ -122,7 +121,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     }
 
-    if (order.status === 'delivered' || order.status === 'cancelled') {
+    // Allow payment_status updates on finalized orders
+    if ((order.status === 'delivered' || order.status === 'cancelled') && status) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 

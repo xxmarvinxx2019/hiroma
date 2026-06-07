@@ -5,7 +5,7 @@ import prisma from '@/app/lib/prisma'
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'city') {
+    if (!user || !['city', 'admin'].includes(user.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Find binary tree node — THIS is what was missing ──
+    // ── Find binary tree node ──
     const node = await prisma.binaryTreeNode.findUnique({
       where: { user_id: referrer.id },
       select: { id: true },
@@ -90,13 +90,10 @@ export async function POST(req: NextRequest) {
     const leftIsDirect = !leftChild
     const rightIsDirect = !rightChild
 
-    // ── Check if any space exists deeper ──
-    // For left: if occupied, check if the left subtree has any open slot
     let leftAvailable = leftIsDirect
     let rightAvailable = rightIsDirect
 
     if (!leftIsDirect && leftChild) {
-      // Check if there's any open slot in the left subtree (BFS check)
       leftAvailable = await hasOpenSlot(leftChild.id)
     }
 
@@ -137,7 +134,6 @@ export async function POST(req: NextRequest) {
         right_available: rightAvailable,
         left_is_direct: leftIsDirect,
         right_is_direct: rightIsDirect,
-        // ✅ node_id is now returned — needed for tree-nodes API
         node_id: node.id,
       },
     })
@@ -167,7 +163,7 @@ async function hasOpenSlot(nodeId: string): Promise<boolean> {
       select: { id: true },
     })
 
-    if (!left || !right) return true // open slot found
+    if (!left || !right) return true
 
     queue.push(left.id)
     queue.push(right.id)

@@ -24,6 +24,7 @@ function isValidUsername(username: string): boolean {
 }
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 // ============================================================
@@ -353,6 +354,12 @@ export default function CityResellersPage() {
     confirmPassword: '',
   })
   const [nameCapInfo, setNameCapInfo] = useState<{ count: number; max: number; remaining: number } | null>(null)
+  const [regions, setRegions]         = useState<{ code: string; name: string }[]>([])
+  const [provinces, setProvinces]     = useState<{ code: string; name: string }[]>([])
+  const [cityMunis, setCityMunis]     = useState<{ code: string; name: string }[]>([])
+  const [loadingProv, setLoadingProv] = useState(false)
+  const [loadingCity, setLoadingCity] = useState(false)
+  const [location, setLocation]       = useState({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '' })
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
   const [usernameEdited, setUsernameEdited] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
@@ -378,6 +385,36 @@ export default function CityResellersPage() {
     setForm((f) => ({ ...f, username: generated }))
     setUsernameAvailable(null)
   }, [form.full_name, usernameEdited])
+
+  useEffect(() => {
+    fetch('https://psgc.gitlab.io/api/regions/')
+      .then((r) => r.json())
+      .then((data) => setRegions(data.map((r: any) => ({ code: r.code, name: r.name })).sort((a: any, b: any) => a.name.localeCompare(b.name))))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!location.region_code) { setProvinces([]); setCityMunis([]); return }
+    setLoadingProv(true)
+    fetch(`https://psgc.gitlab.io/api/regions/${location.region_code}/provinces/`)
+      .then((r) => r.json())
+      .then((data) => setProvinces(data.map((p: any) => ({ code: p.code, name: p.name })).sort((a: any, b: any) => a.name.localeCompare(b.name))))
+      .catch(() => setProvinces([]))
+      .finally(() => setLoadingProv(false))
+    setLocation((l) => ({ ...l, province_code: '', province_name: '', city_muni_code: '', city_muni_name: '' }))
+    setCityMunis([])
+  }, [location.region_code])
+
+  useEffect(() => {
+    if (!location.province_code) { setCityMunis([]); return }
+    setLoadingCity(true)
+    fetch(`https://psgc.gitlab.io/api/provinces/${location.province_code}/cities-municipalities/`)
+      .then((r) => r.json())
+      .then((data) => setCityMunis(data.map((c: any) => ({ code: c.code, name: c.name })).sort((a: any, b: any) => a.name.localeCompare(b.name))))
+      .catch(() => setCityMunis([]))
+      .finally(() => setLoadingCity(false))
+    setLocation((l) => ({ ...l, city_muni_code: '', city_muni_name: '' }))
+  }, [location.province_code])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -430,6 +467,10 @@ export default function CityResellersPage() {
     setDirectAvailable(false)
     setAvailableSlots([]); setSlotSearch(''); setSlotDropdownOpen(false)
     setForm({ full_name: '', username: '', email: '', mobile: '', address: '', password: '', confirmPassword: '' })
+    setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '' })
+    setProvinces([]); setCityMunis([])
+    setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '' })
+    setProvinces([]); setCityMunis([])
     setNameCapInfo(null)
     setUsernameAvailable(null)
     setFormError('')
@@ -508,6 +549,10 @@ export default function CityResellersPage() {
     setTreeLoading(false)
   }
 
+  // Build full address from PSGC selections
+  const fullAddress = [location.street, location.city_muni_name, location.province_name, location.region_name]
+    .filter(Boolean).join(', ')
+
   const proceedToStep3 = () => {
     if (!selectedSlot) { setReferralError('Please select a placement slot.'); return }
     setReferralError('')
@@ -579,7 +624,7 @@ export default function CityResellersPage() {
         username: form.username.toLowerCase(),
         email: form.email,
         mobile: form.mobile,
-        address: form.address,
+        address: fullAddress || form.address,
         password: form.password,
         pin_id: pinData?.id,
         referrer_username: referralData?.username,
@@ -616,12 +661,10 @@ export default function CityResellersPage() {
           <h1 className="text-xl font-semibold text-[#0D1B3E]">My resellers</h1>
           <p className="text-sm text-gray-400 mt-0.5">Register and manage resellers in your city</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors"
-        >
+        <Link href="/dashboard/city/resellers/register"
+          className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors">
           + Register reseller
-        </button>
+        </Link>
       </div>
 
       {/* Summary */}
@@ -1091,15 +1134,56 @@ export default function CityResellersPage() {
                     />
                   </div>
 
-                  {/* Address */}
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Address</label>
-                    <input
-                      value={form.address}
-                      onChange={(e) => setForm({ ...form, address: e.target.value })}
-                      placeholder="City / Municipality"
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                    />
+                  {/* Address — PSGC */}
+                  <div className="space-y-3">
+                    <label className="block text-xs text-gray-400">Address <span className="text-[#C9A84C]">*</span></label>
+
+                    {/* Region */}
+                    <select value={location.region_code}
+                      onChange={(e) => {
+                        const opt = regions.find((r) => r.code === e.target.value)
+                        setLocation((l) => ({ ...l, region_code: e.target.value, region_name: opt?.name || '' }))
+                      }}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
+                      <option value="">Select region...</option>
+                      {regions.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+                    </select>
+
+                    {/* Province */}
+                    <select value={location.province_code} disabled={!location.region_code || loadingProv}
+                      onChange={(e) => {
+                        const opt = provinces.find((p) => p.code === e.target.value)
+                        setLocation((l) => ({ ...l, province_code: e.target.value, province_name: opt?.name || '' }))
+                      }}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50">
+                      <option value="">{loadingProv ? 'Loading...' : 'Select province...'}</option>
+                      {provinces.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+                    </select>
+
+                    {/* City/Municipality */}
+                    <select value={location.city_muni_code} disabled={!location.province_code || loadingCity}
+                      onChange={(e) => {
+                        const opt = cityMunis.find((c) => c.code === e.target.value)
+                        setLocation((l) => ({ ...l, city_muni_code: e.target.value, city_muni_name: opt?.name || '' }))
+                      }}
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50">
+                      <option value="">{loadingCity ? 'Loading...' : 'Select city/municipality...'}</option>
+                      {cityMunis.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+                    </select>
+
+                    {/* Street/Barangay */}
+                    <input value={location.street}
+                      onChange={(e) => setLocation((l) => ({ ...l, street: e.target.value }))}
+                      placeholder="Street / Barangay (optional)"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+
+                    {/* Preview */}
+                    {location.city_muni_name && (
+                      <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-3 py-2">
+                        <p className="text-[10px] text-gray-400 mb-0.5">Address preview</p>
+                        <p className="text-xs text-[#1a7a4a] font-medium">{fullAddress}</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Email */}

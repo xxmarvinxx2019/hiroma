@@ -54,12 +54,10 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id: true, order_type: true, status: true, total_amount: true,
+          id: true, order_number: true, order_type: true, status: true, total_amount: true,
           created_at: true, notes: true,
           payment_method:      true,
           payment_reference:   true,
-          payment_sender_name: true,
-          payment_datetime:    true,
           payment_status:      true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
@@ -110,7 +108,7 @@ export async function POST(req: NextRequest) {
 
     const {
       order_type, notes, items,
-      payment_method, payment_reference, payment_sender_name, payment_datetime,
+      payment_method, payment_reference,
     } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
@@ -173,8 +171,6 @@ export async function POST(req: NextRequest) {
         notes:               notes?.trim() || null,
         payment_method:      payment_method || 'cash_on_pickup',
         payment_reference:   payment_reference?.trim()   || null,
-        payment_sender_name: payment_sender_name?.trim() || null,
-        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
         payment_status:      'unpaid',
         items:               { create: orderItems },
       },
@@ -220,7 +216,8 @@ export async function PATCH(req: NextRequest) {
     })
 
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
-    if (order.status === 'delivered' || order.status === 'cancelled')
+    // Allow payment_status updates on finalized orders
+    if ((order.status === 'delivered' || order.status === 'cancelled') && status)
       return NextResponse.json({ error: 'Order already finalized.' }, { status: 400 })
     if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled')
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
