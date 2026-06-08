@@ -119,7 +119,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const maxDepth = Math.min(parseInt(searchParams.get('depth') || '4'), 6)
+    const maxDepth    = Math.min(parseInt(searchParams.get('depth') || '4'), 20)
+    const rootUserId  = searchParams.get('root_user_id') || null
 
     const myNode = await prisma.binaryTreeNode.findUnique({
       where:  { user_id: user.id },
@@ -164,7 +165,17 @@ export async function GET(req: NextRequest) {
       selfCommissions.total += amount
     }
 
-    const allNodes = await fetchSubtree(myNode.id, maxDepth)
+    // If navigating to another node, find that node's tree root
+    let rootNodeId = myNode.id
+    if (rootUserId && rootUserId !== user.id) {
+      const rootNode = await prisma.binaryTreeNode.findUnique({
+        where:  { user_id: rootUserId },
+        select: { id: true },
+      })
+      if (rootNode) rootNodeId = rootNode.id
+    }
+
+    const allNodes = await fetchSubtree(rootNodeId, maxDepth)
     const userIds  = allNodes.map((n) => n.user_id)
     const nodeIds  = allNodes.map((n) => n.id)
 
