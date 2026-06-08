@@ -285,8 +285,9 @@ export async function POST(req: NextRequest) {
 // PRODUCT BINARY POINTS LOGIC
 // ============================================================
 
+const PRODUCT_DAILY_PAIRING_CAP = 10
+
 async function checkSponsorPairingPoints(
-  tx: any,
   buyerUserId: string,
   currentOrderQty: number
 ) {
@@ -297,37 +298,44 @@ async function checkSponsorPairingPoints(
 
   if (!buyerNode?.parent_id) return
 
-  // Fetch all ancestors in one CTE query
+  const hiromaUser = await prisma.user.findFirst({
+    where:  { username: 'hiroma' },
+    select: { id: true },
+  })
+
+  // Fetch all ancestors with position for correct leg tracking
   const ancestors = await prisma.$queryRaw<{
-    id: string; user_id: string; parent_id: string | null
+    id: string; user_id: string; parent_id: string | null; position: string | null
   }[]>`
     WITH RECURSIVE ancestor_chain AS (
-      SELECT id, user_id, parent_id
+      SELECT id, user_id, parent_id, position
       FROM binary_tree_nodes WHERE id = ${buyerNode.parent_id}
       UNION ALL
-      SELECT n.id, n.user_id, n.parent_id
+      SELECT n.id, n.user_id, n.parent_id, n.position
       FROM binary_tree_nodes n
       INNER JOIN ancestor_chain a ON n.id = a.parent_id
     )
-    SELECT id, user_id, parent_id FROM ancestor_chain
+    SELECT id, user_id, parent_id, position FROM ancestor_chain
   `
 
   if (!ancestors || ancestors.length === 0) return
 
-  // Fetch all profiles in one batch
-  const ancestorUserIds = ancestors.map((a) => a.user_id)
-  const profiles = await prisma.resellerProfile.findMany({
-    where:  { user_id: { in: ancestorUserIds } },
-    select: {
-      user_id:         true,
-      points_reset_at: true,
-      package: { select: { point_php_value: true, point_reset_days: true } },
-    },
-  })
-  const profileMap = new Map(profiles.map((p) => [p.user_id, p]))
+  const today = new Date(); today.setHours(0, 0, 0, 0)
 
-  for (const ancestor of ancestors) {
-    const profile = profileMap.get(ancestor.user_id)
+  for (let i = 0; i < ancestors.length; i++) {
+    const ancestor = ancestors[i]
+
+    // Fresh read per ancestor to avoid stale data
+    const profile = await prisma.resellerProfile.findUnique({
+      where:  { user_id: ancestor.user_id },
+      select: {
+        user_id:             true,
+        points_reset_at:     true,
+        daily_pairing_count: true,
+        daily_pairing_date:  true,
+        package: { select: { point_php_value: true, point_reset_days: true } },
+      },
+    })
     if (!profile) continue
 
     const phpValue  = Number(profile.package?.point_php_value || 0) * 0.50
@@ -380,33 +388,82 @@ async function checkSponsorPairingPoints(
     let leftQty  = Number(leftResult[0]?.total  || 0)
     let rightQty = Number(rightResult[0]?.total || 0)
 
-    if (buyerNode.parent_id === ancestor.id) {
-      if (buyerNode.position === 'left') leftQty  += currentOrderQty
-      else                               rightQty += currentOrderQty
-    }
+    // Add current order qty to correct leg
+    // i=0: buyer is direct child of ancestor, use buyerNode.position
+    // i>0: use ancestors[i-1].position
+    const leg: 'left' | 'right' = i === 0
+      ? (buyerNode.position as 'left' | 'right')
+      : (ancestors[i - 1].position as 'left' | 'right') || 'left'
 
-    if (leftQty >= 2 && rightQty >= 2) {
+    if (leg === 'left') leftQty  += currentOrderQty
+    else                rightQty += currentOrderQty
+
+    // pairs = floor(MIN(left, right) / 2)
+    const possiblePairs = Math.floor(Math.min(leftQty, rightQty) / 2)
+    if (possiblePairs <= 0) continue
+
+    // Daily cap check — same as registration binary
+    const lastPairDate = profile.daily_pairing_date ? new Date(profile.daily_pairing_date) : null
+    const isToday      = lastPairDate ? lastPairDate >= today : false
+    const usedToday    = isToday ? Number(profile.daily_pairing_count || 0) : 0
+    const remaining    = Math.max(0, PRODUCT_DAILY_PAIRING_CAP - usedToday)
+
+    const paidPairs     = Math.min(possiblePairs, remaining)
+    const overflowPairs = possiblePairs - paidPairs
+
+    const paidEarnings     = paidPairs     * phpValue
+    const overflowEarnings = overflowPairs * phpValue
+
+    // Credit paid pairs to ancestor
+    if (paidPairs > 0) {
       await Promise.all([
-        tx.resellerProfile.update({
+        prisma.resellerProfile.update({
           where: { user_id: ancestor.user_id },
-          data:  { total_points: { increment: 1 }, points_reset_at: new Date() },
+          data:  {
+            total_points:        { increment: paidPairs },
+            points_reset_at:     new Date(),
+            daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs,
+            daily_pairing_date:  today,
+          },
         }),
         ...(phpValue > 0 ? [
-          tx.commission.create({
+          prisma.commission.create({
             data: {
               user_id:          ancestor.user_id,
               type:             'sponsor_point',
-              amount:           phpValue,
-              points:           1,
+              amount:           paidEarnings,
+              points:           paidPairs,
               source_user_id:   buyerUserId,
               is_pair_overflow: false,
             },
           }),
-          tx.wallet.update({
+          prisma.wallet.update({
             where: { user_id: ancestor.user_id },
-            data:  { balance: { increment: phpValue }, total_earned: { increment: phpValue } },
+            data:  { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } },
           }),
         ] : []),
+      ])
+    }
+
+    // Overflow to Hiroma
+    if (overflowPairs > 0 && overflowEarnings > 0 && hiromaUser) {
+      await Promise.all([
+        prisma.commission.create({
+          data: {
+            user_id:          hiromaUser.id,
+            type:             'sponsor_point',
+            amount:           overflowEarnings,
+            points:           overflowPairs,
+            source_user_id:   buyerUserId,
+            overflow_to:      hiromaUser.id,
+            is_pair_overflow: true,
+          },
+        }),
+        prisma.wallet.upsert({
+          where:  { user_id: hiromaUser.id },
+          update: { balance: { increment: overflowEarnings }, total_earned: { increment: overflowEarnings } },
+          create: { user_id: hiromaUser.id, balance: overflowEarnings, total_earned: overflowEarnings, total_withdrawn: 0 },
+        }),
       ])
     }
   }
@@ -459,6 +516,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
     }
 
+    let buyerIsReseller = false
+
     const updated = await prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.order.update({
         where: { id: order_id },
@@ -501,13 +560,22 @@ export async function PATCH(req: NextRequest) {
         })
 
         if (buyerRole?.role === 'reseller') {
-          const currentQty = order.items.reduce((s, i) => s + i.quantity, 0)
-          await checkSponsorPairingPoints(tx, order.buyer_id, currentQty)
+          buyerIsReseller = true
         }
       }
 
       return updatedOrder
     })
+
+    // Run product binary pairing OUTSIDE transaction to avoid timeout
+    if (status === 'delivered' && buyerIsReseller) {
+      try {
+        const currentQty = order.items.reduce((s, i) => s + i.quantity, 0)
+        await checkSponsorPairingPoints(order.buyer_id, currentQty)
+      } catch (e) {
+        console.error('[CITY ORDERS] Product binary pairing error:', e)
+      }
+    }
 
     return NextResponse.json({ success: true, order: updated })
   } catch (error) {
