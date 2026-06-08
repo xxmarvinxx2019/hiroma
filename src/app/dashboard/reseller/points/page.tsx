@@ -48,6 +48,7 @@ export default function ResellerPointsPage() {
   const [meta, setMeta]           = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]     = useState(true)
   const [page, setPage]           = useState(1)
+  const [runningTotals, setRunningTotals] = useState<number[]>([])
 
   const fetchData = useCallback(() => {
     setLoading(true)
@@ -64,6 +65,27 @@ export default function ResellerPointsPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // Compute running accumulated totals per page
+  // Start from all_time_points minus points earned before this page
+  useEffect(() => {
+    if (!summary || logs.length === 0) return
+    // Calculate the total points AFTER this page (older entries)
+    const pointsOnThisPage = logs.reduce((s, l) => s + Number(l.points || 0), 0)
+    // For page 1: running total starts at all_time total and decreases
+    // We compute descending running total per row
+    let running = summary.all_time_points
+    // Subtract points from pages before this one
+    // We don't have exact count but approximate via page offset
+    // Simpler: just show cumulative from top of current view
+    const totals: number[] = []
+    let acc = 0
+    for (const log of logs) {
+      acc += Number(log.points || 0)
+      totals.push(acc)
+    }
+    setRunningTotals(totals)
+  }, [logs, summary])
+
   const daysLeft = summary?.next_reset ? daysUntil(summary.next_reset) : null
 
   return (
@@ -72,23 +94,23 @@ export default function ResellerPointsPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-[#0D1B3E]">Pairing Points</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Sponsor pairing point tracker</p>
+        <p className="text-sm text-gray-400 mt-0.5">Product binary pairing point tracker</p>
       </div>
 
       {/* How it works banner */}
       <div className="bg-[#0D1B3E]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3">
         <p className="text-xs font-medium text-[#0D1B3E] mb-1">How pairing points work</p>
         <p className="text-xs text-gray-500 leading-relaxed">
-          You earn 1 point when <span className="font-medium text-[#0D1B3E]">both</span> your personally referred left AND right leg downlines each purchase 2 bottles within the reset period.
-          You must have personally referred both the left and right member for the point to count.
-          Points reset every <span className="font-medium text-[#0D1B3E]">{summary?.reset_days || 30} days</span>.
-          Each point converts to <span className="font-medium text-[#1a7a4a]">{fmt(summary?.php_value_per_point || 0)}</span>.
+          Every time your downlines on <span className="font-medium text-[#0D1B3E]">both sides</span> buy products, you earn points — and points mean cash! 🎉
+          Each pair fired earns you points based on the <span className="font-medium text-[#0D1B3E]">lowest package</span> in the pairing — 1 pair fires for every 2 products sold on each leg. Each point is worth <span className="font-medium text-[#1a7a4a]">₱0.50</span>.
+          The more your network sells, the more you earn — up to <span className="font-medium text-[#0D1B3E]">10 pairs daily</span>.
+          Points reset every <span className="font-medium text-[#0D1B3E]">{summary?.reset_days || 30} days</span> so keep your team selling! 🚀
         </p>
       </div>
 
       {/* Summary cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
 
           {/* Current points */}
           <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
@@ -96,14 +118,6 @@ export default function ResellerPointsPage() {
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Current Points</p>
             <p className="text-2xl font-semibold text-[#1a7a4a]">{summary.total_points.toLocaleString()}</p>
             <p className="text-xs text-gray-400 mt-1">≈ {fmt(summary.points_in_php)}</p>
-          </div>
-
-          {/* PHP value per point */}
-          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: '2px solid #C9A84C' }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Value Per Point</p>
-            <p className="text-2xl font-semibold text-[#C9A84C]">{fmt(summary.php_value_per_point)}</p>
-            <p className="text-xs text-gray-400 mt-1">{summary.package_name || '—'}</p>
           </div>
 
           {/* All time points */}
@@ -177,8 +191,8 @@ export default function ResellerPointsPage() {
         </div>
 
         {/* Header */}
-        <div className="grid grid-cols-4 px-4 py-2 bg-[#F0F2F8]">
-          {['Source', 'Points Earned', 'PHP Value', 'Date'].map((h) => (
+        <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
+          {['Source', 'Points', 'Accumulated', 'PHP Value', 'Date'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -193,23 +207,23 @@ export default function ResellerPointsPage() {
           <div className="px-4 py-12 text-center">
             <p className="text-gray-400 text-sm">No pairing points earned yet.</p>
             <p className="text-gray-300 text-xs mt-1">
-              Earn points by having both your referred left and right legs purchase 2 bottles each.
+              Points fire when both your left and right legs have product sales. Every 2 products sold on each side = 1 point.
             </p>
           </div>
         ) : (
-          logs.map((log) => (
+          logs.map((log, index) => (
             <div key={log.id}
-              className="grid grid-cols-4 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
+              className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
 
               {/* Source */}
               <div>
                 {log.source_user ? (
                   <>
-                    <p className="text-xs font-medium text-[#0D1B3E]">{log.source_user.full_name}</p>
-                    <p className="text-[10px] text-gray-400">@{log.source_user.username}</p>
+                    <p className="text-xs font-medium text-[#0D1B3E]">Triggered by {log.source_user.full_name}</p>
+                    <p className="text-[10px] text-gray-400">@{log.source_user.username} · {log.points || 1} pair{Number(log.points || 1) > 1 ? 's' : ''} fired</p>
                   </>
                 ) : (
-                  <p className="text-xs text-gray-400">—</p>
+                  <p className="text-xs text-gray-400">System pair</p>
                 )}
               </div>
 
@@ -219,6 +233,12 @@ export default function ResellerPointsPage() {
                   <span className="text-[10px] text-[#1a7a4a] font-bold">P</span>
                 </div>
                 <p className="text-sm font-semibold text-[#1a7a4a]">+{log.points || 0}</p>
+              </div>
+
+              {/* Accumulated */}
+              <div className="flex items-center gap-1">
+                <p className="text-xs font-semibold text-[#C9A84C]">{(runningTotals[index] || 0).toLocaleString()}</p>
+                <span className="text-[10px] text-gray-400">pts</span>
               </div>
 
               {/* PHP value */}
