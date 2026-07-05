@@ -48,13 +48,15 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id:           true,
-          order_number: true,
-          order_type:   true,
-          status:       true,
-          total_amount: true,
-          created_at:   true,
-          notes:        true,
+          id:             true,
+          order_number:   true,
+          order_type:     true,
+          status:         true,
+          payment_status: true,
+          payment_method: true,
+          total_amount:   true,
+          created_at:     true,
+          notes:          true,
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
             select: {
