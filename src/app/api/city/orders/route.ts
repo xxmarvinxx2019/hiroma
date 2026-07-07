@@ -104,13 +104,22 @@ export async function GET(req: NextRequest) {
     const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
     const isBuyer = tab === 'my_orders'
+    const isResellerTab = tab === 'reseller_orders'
 
     const where: Record<string, unknown> = {
-      ...(isBuyer ? { buyer_id: user.id } : { seller_id: user.id }),
+      // For reseller tab with a search: search ALL reseller orders, not just this city dist's
+      // For reseller tab without search: show only this city dist's reseller orders
+      ...(isBuyer
+        ? { buyer_id: user.id }
+        : (isResellerTab && search)
+          ? { buyer: { role: 'reseller' } }           // search all resellers
+          : { seller_id: user.id }                     // own reseller orders only
+      ),
       ...(status !== 'all' && { status }),
       ...(type   !== 'all' && { order_type: type }),
       ...(search && {
-        [isBuyer ? 'seller' : 'buyer']: {
+        buyer: {
+          ...(isResellerTab ? { role: 'reseller' } : {}),
           OR: [
             { full_name: { contains: search, mode: 'insensitive' } },
             { username:  { contains: search, mode: 'insensitive' } },
@@ -338,7 +347,8 @@ async function checkSponsorPairingPoints(
     })
     if (!profile) continue
 
-    const phpValue  = Number(profile.package?.point_php_value || 0) * 0.50
+    const pointValue = Number(profile.package?.point_php_value || 0)  // points per pair (e.g. Starter=10)
+    const phpPerPoint = 0.50                                               // ₱0.50 per point
     const resetDays = profile.package?.point_reset_days || 30
     const resetAt   = profile.points_reset_at
       ? new Date(profile.points_reset_at)
@@ -411,8 +421,10 @@ async function checkSponsorPairingPoints(
     const paidPairs     = Math.min(possiblePairs, remaining)
     const overflowPairs = possiblePairs - paidPairs
 
-    const paidEarnings     = paidPairs     * phpValue
-    const overflowEarnings = overflowPairs * phpValue
+    const pointsEarned     = paidPairs     * pointValue      // e.g. 2 pairs × 10 = 20 points
+    const overflowPoints   = overflowPairs * pointValue
+    const paidEarnings     = pointsEarned   * phpPerPoint    // e.g. 20 pts × ₱0.50 = ₱10
+    const overflowEarnings = overflowPoints * phpPerPoint
 
     // Credit paid pairs to ancestor
     if (paidPairs > 0) {
@@ -420,19 +432,19 @@ async function checkSponsorPairingPoints(
         prisma.resellerProfile.update({
           where: { user_id: ancestor.user_id },
           data:  {
-            total_points:        { increment: paidPairs },
+            total_points:        { increment: pointsEarned },
             points_reset_at:     new Date(),
             daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs,
             daily_pairing_date:  today,
           },
         }),
-        ...(phpValue > 0 ? [
+        ...(pointValue > 0 ? [
           prisma.commission.create({
             data: {
               user_id:          ancestor.user_id,
               type:             'sponsor_point',
               amount:           paidEarnings,
-              points:           paidPairs,
+              points:           pointsEarned,
               source_user_id:   buyerUserId,
               is_pair_overflow: false,
             },

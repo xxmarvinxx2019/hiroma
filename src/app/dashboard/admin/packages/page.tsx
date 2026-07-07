@@ -258,7 +258,7 @@ export default function PackagesPage() {
                   {[
                     { label: 'Direct referral bonus', value: `₱${Number(pkg.direct_referral_bonus).toLocaleString()}` },
                     { label: 'Binary Points', value: `${Number(pkg.pairing_bonus_value).toLocaleString()} pts` },
-                    { label: 'Product Binary Point Value', value: `₱${Number(pkg.point_php_value).toLocaleString()} / pt` },
+                    { label: 'Product Binary Point Value', value: `${Number(pkg.point_php_value).toLocaleString()} pts` },
                     { label: 'Point reset period', value: `Every ${pkg.point_reset_days} days` },
                   ].map((item) => (
                     <div key={item.label} className="flex justify-between py-1 border-b border-[#0D1B3E]/5">
@@ -371,7 +371,9 @@ export default function PackagesPage() {
                   },
                   {
                     label: 'Product Points Value',
-                    hint:  '0.50 means 100pts = ₱50',
+                    hint:  form.pairing_bonus_value && form.point_php_value
+                      ? `1 pair (${form.point_php_value}pts) = ₱${(Number(form.point_php_value) * Number(0.50)).toFixed(2)}`
+                      : 'Points added to upline on join',
                     required: true,
                     input: <input type="number" step="0.01" value={form.point_php_value}
                       onChange={(e) => setForm({ ...form, point_php_value: e.target.value })}
