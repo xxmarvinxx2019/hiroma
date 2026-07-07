@@ -63,6 +63,7 @@ const levelIcons: Record<string, string> = {
 
 export default function DistributorsPage() {
   const [distributors, setDistributors] = useState<Distributor[]>([])
+  const [totals, setTotals] = useState({ regional: 0, provincial: 0, city: 0 })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'regional' | 'provincial' | 'city'>('all')
   const [page, setPage] = useState(1)
@@ -71,6 +72,31 @@ export default function DistributorsPage() {
   const [assignParentId, setAssignParentId] = useState('')
   const [assignOptions, setAssignOptions] = useState<{ id: string; full_name: string; username: string; dist_level: string; coverage_area: string }[]>([])
   const [assignSaving, setAssignSaving] = useState(false)
+  const [editTarget, setEditTarget] = useState<Distributor | null>(null)
+  const [editForm, setEditForm] = useState({ full_name: '', mobile: '', address: '', email: '', coverage_area: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [togglingId, setTogglingId]   = useState<string | null>(null)
+  const [resettingId, setResettingId] = useState<string | null>(null)
+  const [resetResult, setResetResult] = useState<{ id: string; password: string } | null>(null)
+
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#'
+    return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+  }
+
+  const handleResetPassword = async (distId: string) => {
+    setResettingId(distId)
+    const newPassword = generatePassword()
+    const res = await fetch('/api/admin/distributors', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ distributor_id: distId, action: 'reset_password', password: newPassword }),
+    })
+    const data = await res.json()
+    setResettingId(null)
+    if (data.success) setResetResult({ id: distId, password: newPassword })
+  }
   const [assignError, setAssignError] = useState('')
   const [assignSuccess, setAssignSuccess] = useState('')
   const [search, setSearch] = useState('')
@@ -254,6 +280,44 @@ export default function DistributorsPage() {
     }
   }
 
+  const handleToggleStatus = async (dist: Distributor) => {
+    setTogglingId(dist.id)
+    await fetch('/api/admin/distributors', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ distributor_id: dist.id, action: 'toggle_status' }),
+    })
+    setTogglingId(null)
+    fetchDistributors()
+  }
+
+  const openEdit = (dist: Distributor) => {
+    setEditTarget(dist)
+    setEditForm({
+      full_name:    dist.full_name,
+      mobile:       dist.mobile || '',
+      address:      dist.address || '',
+      email:        '',
+      coverage_area: dist.distributor_profile?.coverage_area || '',
+    })
+    setEditError('')
+  }
+
+  const handleEditSave = async () => {
+    if (!editTarget) return
+    setEditSaving(true); setEditError('')
+    const res = await fetch('/api/admin/distributors', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ distributor_id: editTarget.id, action: 'edit', ...editForm }),
+    })
+    const data = await res.json()
+    setEditSaving(false)
+    if (data.error) { setEditError(data.error); return }
+    setEditTarget(null)
+    fetchDistributors()
+  }
+
   useEffect(() => { setPage(1) }, [filter, search])
 
   const fetchDistributors = useCallback(() => {
@@ -267,6 +331,7 @@ export default function DistributorsPage() {
       .then((r) => r.json())
       .then((data) => {
         setDistributors(data.distributors || [])
+        if (data.totals) setTotals(data.totals)
         if (data.meta) setMeta(data.meta)
         setLoading(false)
       })
@@ -339,9 +404,7 @@ export default function DistributorsPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {(['regional', 'provincial', 'city'] as const).map((level) => {
-          const count = distributors.filter(
-            (d) => d.distributor_profile?.dist_level === level
-          ).length
+          const count = totals[level]
           return (
             <div
               key={level}
@@ -436,15 +499,55 @@ export default function DistributorsPage() {
               <p className="text-xs text-gray-400">
                 {new Date(dist.created_at).toLocaleDateString('en-PH')}
               </p>
-              <div>
+              <div className="flex items-center gap-1.5">
                 {dist.distributor_profile?.dist_level !== 'regional' && (
-                  <button
-                    onClick={() => openAssignModal(dist)}
-                    className="text-xs text-[#C9A84C] hover:underline whitespace-nowrap"
-                  >
-                    {dist.distributor_profile?.parent ? 'Change Parent' : 'Assign Parent'}
+                  <button onClick={() => openAssignModal(dist)}
+                    className="w-7 h-7 rounded-lg bg-[#fef6e4] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group"
+                    title={dist.distributor_profile?.parent ? 'Change Parent' : 'Assign Parent'}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#C9A84C] group-hover:text-white">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9" cy="7" r="4"/>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
                   </button>
                 )}
+                {/* Edit */}
+                <button onClick={() => openEdit(dist)}
+                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group"
+                  title="Edit distributor">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </button>
+                {/* Deactivate/Activate */}
+                <button
+                  disabled={togglingId === dist.id}
+                  onClick={() => handleToggleStatus(dist)}
+                  className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group disabled:opacity-50 " + (dist.status === 'active' ? 'bg-[#fdecea] hover:bg-[#a03030]' : 'bg-[#e8f7ef] hover:bg-[#1a7a4a]')}
+                  title={dist.status === 'active' ? 'Deactivate' : 'Activate'}>
+                  {dist.status === 'active' ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white">
+                      <circle cx="12" cy="12" r="10"/><path d="M8 12h8"/>
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white">
+                      <circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/>
+                    </svg>
+                  )}
+                </button>
+                {/* Reset Password */}
+                <button
+                  disabled={resettingId === dist.id}
+                  onClick={() => handleResetPassword(dist.id)}
+                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group disabled:opacity-50"
+                  title="Reset password">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                </button>
               </div>
             </div>
           ))
@@ -510,13 +613,19 @@ export default function DistributorsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Password <span className="text-[#C9A84C]">*</span></label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-gray-400">Password <span className="text-[#C9A84C]">*</span></label>
+                    <button type="button" onClick={() => setForm({ ...form, password: generatePassword() })}
+                      className="text-[10px] text-[#C9A84C] hover:underline">
+                      ⚡ Auto-generate
+                    </button>
+                  </div>
                   <input
-                    type="password"
+                    type="text"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                     placeholder="Set initial password"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C] font-mono"
                   />
                 </div>
               </div>
@@ -738,6 +847,72 @@ export default function DistributorsPage() {
           </div>
         </div>
       )}
+    {/* Reset Password Result Modal */}
+    {resetResult && (
+      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+          <div className="w-12 h-12 bg-[#e8f7ef] rounded-full flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a7a4a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <h2 className="text-base font-semibold text-[#0D1B3E] mb-1">Password Reset!</h2>
+          <p className="text-xs text-gray-400 mb-4">Share this new password with the distributor</p>
+          <div className="bg-[#F0F2F8] rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+            <span className="font-mono text-sm font-semibold text-[#0D1B3E] tracking-wider">{resetResult.password}</span>
+            <button onClick={() => navigator.clipboard.writeText(resetResult!.password)}
+              className="text-[10px] text-[#C9A84C] hover:underline whitespace-nowrap">Copy</button>
+          </div>
+          <button onClick={() => setResetResult(null)}
+            className="w-full py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850]">
+            Done
+          </button>
+        </div>
+      </div>
+    )}
+
+    {/* Edit Modal */}
+    {editTarget && (
+      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-semibold text-[#0D1B3E]">Edit Distributor</h2>
+            <button onClick={() => setEditTarget(null)} className="text-gray-400 hover:text-[#0D1B3E]">✕</button>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: 'Full Name',     key: 'full_name',    type: 'text' },
+              { label: 'Mobile',        key: 'mobile',       type: 'text' },
+              { label: 'Address',       key: 'address',      type: 'text' },
+              { label: 'Email',         key: 'email',        type: 'email' },
+              { label: 'Coverage Area', key: 'coverage_area',type: 'text' },
+            ].map(({ label, key, type }) => (
+              <div key={key}>
+                <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={editForm[key as keyof typeof editForm]}
+                  onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
+                  className="w-full border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+            ))}
+            {editError && <p className="text-xs text-[#a03030]">{editError}</p>}
+          </div>
+          <div className="flex gap-2 mt-5">
+            <button onClick={() => setEditTarget(null)}
+              className="flex-1 py-2 rounded-lg border border-[#0D1B3E]/15 text-sm text-gray-500 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button onClick={handleEditSave} disabled={editSaving}
+              className="flex-1 py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50">
+              {editSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     </div>
   )
 }

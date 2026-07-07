@@ -168,7 +168,7 @@ export default function AdminOrdersPage() {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search buyer or seller..."
+            placeholder="Search buyer, seller or ref no..."
             className="flex-1 min-w-[180px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
 
@@ -236,7 +236,7 @@ export default function AdminOrdersPage() {
                   </div>
                   {order.payment_method && order.payment_method !== 'cash_on_pickup' && (
                     <div className="mt-1 space-y-0.5">
-                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : '🏦 Bank'}</p>
+                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : order.payment_method === 'bank_transfer' ? '🏦 Bank Transfer' : '💵 Cash'}</p>
                       {order.payment_reference    && <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>}
                       {order.payment_sender_name  && <p className="text-[10px] text-gray-400">Sender: {order.payment_sender_name}</p>}
                       {order.payment_datetime     && <p className="text-[10px] text-gray-400">{new Date(order.payment_datetime).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}

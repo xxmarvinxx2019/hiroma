@@ -79,6 +79,13 @@ export async function GET(req: NextRequest) {
       },
     })
 
+    // Overall totals — NOT affected by filter
+    const [totalRegional, totalProvincial, totalCity] = await Promise.all([
+      prisma.user.count({ where: { role: 'regional' } }),
+      prisma.user.count({ where: { role: 'provincial' } }),
+      prisma.user.count({ where: { role: 'city' } }),
+    ])
+
     // Include admin as a parent option (fallback)
     const adminUser = await prisma.user.findFirst({
       where:  { role: 'admin' },
@@ -88,6 +95,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       distributors,
       adminUser,
+      totals: { regional: totalRegional, provincial: totalProvincial, city: totalCity },
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -245,7 +253,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
-// ── PATCH assign or update parent distributor ──
+// ── PATCH edit distributor / assign parent / toggle status ──
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -253,64 +261,82 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { distributor_id, parent_dist_id } = await req.json()
+    const body = await req.json()
+    const { distributor_id, action, parent_dist_id, full_name, mobile, address, email, coverage_area } = body
 
     if (!distributor_id) {
       return NextResponse.json({ error: 'distributor_id is required.' }, { status: 400 })
     }
 
-    // Get the distributor profile being updated
     const profile = await prisma.distributorProfile.findUnique({
-      where: { user_id: distributor_id },
+      where:  { user_id: distributor_id },
       select: { dist_level: true, id: true },
     })
-
     if (!profile) {
       return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
     }
 
-    // If removing parent (null), just clear it
-    if (!parent_dist_id) {
-      await prisma.distributorProfile.update({
-        where: { user_id: distributor_id },
-        data:  { parent_dist_id: null },
+    // ── Toggle status (activate/deactivate) ──
+    if (action === 'toggle_status') {
+      const current = await prisma.user.findUnique({
+        where:  { id: distributor_id },
+        select: { status: true },
       })
+      const newStatus = current?.status === 'active' ? 'inactive' : 'active'
+      await Promise.all([
+        prisma.user.update({ where: { id: distributor_id }, data: { status: newStatus } }),
+        prisma.distributorProfile.update({ where: { user_id: distributor_id }, data: { is_active: newStatus === 'active' } }),
+      ])
+      return NextResponse.json({ success: true, message: `Distributor ${newStatus === 'active' ? 'activated' : 'deactivated'}.`, status: newStatus })
+    }
+
+    // ── Reset password ──
+    if (action === 'reset_password') {
+      const { password } = body
+      if (!password) return NextResponse.json({ error: 'Password required.' }, { status: 400 })
+      const hashed = await hashPassword(password)
+      await prisma.user.update({ where: { id: distributor_id }, data: { password_hash: hashed } })
+      return NextResponse.json({ success: true, message: 'Password reset successfully.' })
+    }
+
+    // ── Edit profile ──
+    if (action === 'edit') {
+      const updates: any = {}
+      if (full_name)    updates.full_name = full_name.trim()
+      if (mobile)       updates.mobile    = mobile.trim()
+      if (address)      updates.address   = address.trim()
+      if (email)        updates.email     = email.trim().toLowerCase()
+
+      await prisma.user.update({ where: { id: distributor_id }, data: updates })
+      if (coverage_area) {
+        await prisma.distributorProfile.update({ where: { user_id: distributor_id }, data: { coverage_area } })
+      }
+      return NextResponse.json({ success: true, message: 'Distributor updated successfully.' })
+    }
+
+    // ── Assign parent ──
+    if (!parent_dist_id) {
+      await prisma.distributorProfile.update({ where: { user_id: distributor_id }, data: { parent_dist_id: null } })
       return NextResponse.json({ success: true, message: 'Parent removed successfully.' })
     }
 
-    // Validate the new parent
     const parentProfile = await prisma.distributorProfile.findUnique({
-      where: { id: parent_dist_id },
+      where:  { id: parent_dist_id },
       select: { dist_level: true, is_active: true, user_id: true },
     })
-
-    if (!parentProfile) {
-      return NextResponse.json({ error: 'Parent distributor not found.' }, { status: 404 })
-    }
-    if (!parentProfile.is_active) {
-      return NextResponse.json({ error: 'Parent distributor is inactive.' }, { status: 400 })
-    }
-    if (parentProfile.user_id === distributor_id) {
-      return NextResponse.json({ error: 'Cannot assign distributor as their own parent.' }, { status: 400 })
-    }
-
-    // Validate hierarchy
-    if (profile.dist_level === 'provincial' && parentProfile.dist_level !== 'regional') {
+    if (!parentProfile)       return NextResponse.json({ error: 'Parent distributor not found.' }, { status: 404 })
+    if (!parentProfile.is_active) return NextResponse.json({ error: 'Parent distributor is inactive.' }, { status: 400 })
+    if (parentProfile.user_id === distributor_id) return NextResponse.json({ error: 'Cannot assign as own parent.' }, { status: 400 })
+    if (profile.dist_level === 'provincial' && parentProfile.dist_level !== 'regional')
       return NextResponse.json({ error: 'Provincial must be under a regional distributor.' }, { status: 400 })
-    }
-    if (profile.dist_level === 'city' && !['provincial', 'regional'].includes(parentProfile.dist_level)) {
+    if (profile.dist_level === 'city' && !['provincial', 'regional'].includes(parentProfile.dist_level))
       return NextResponse.json({ error: 'City must be under a provincial or regional distributor.' }, { status: 400 })
-    }
-    if (profile.dist_level === 'regional') {
+    if (profile.dist_level === 'regional')
       return NextResponse.json({ error: 'Regional distributors cannot have a parent.' }, { status: 400 })
-    }
 
-    await prisma.distributorProfile.update({
-      where: { user_id: distributor_id },
-      data:  { parent_dist_id },
-    })
-
+    await prisma.distributorProfile.update({ where: { user_id: distributor_id }, data: { parent_dist_id } })
     return NextResponse.json({ success: true, message: 'Parent assigned successfully.' })
+
   } catch (error) {
     console.error('[ADMIN DISTRIBUTORS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

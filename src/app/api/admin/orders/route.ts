@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
       ...(type   !== 'all' && { order_type: type }),
       ...(search && {
         OR: [
+          { order_number: { contains: search, mode: 'insensitive' } },
           { buyer:  { full_name: { contains: search, mode: 'insensitive' } } },
           { buyer:  { username:  { contains: search, mode: 'insensitive' } } },
           { seller: { full_name: { contains: search, mode: 'insensitive' } } },
