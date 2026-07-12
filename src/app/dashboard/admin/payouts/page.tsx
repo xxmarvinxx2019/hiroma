@@ -11,6 +11,7 @@ interface Payout {
   payment_reference:  string | null
   transaction_number: string | null
   cutoff_date:        string | null
+  payout_date:        string | null
   notes:              string | null
   requested_at:       string
   processed_at:       string | null
@@ -246,8 +247,8 @@ export default function AdminPayoutsPage() {
         </div>
 
         {/* Table header */}
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Reseller', 'Amount', 'Method', 'Cutoff', 'Status', 'Actions'].map((h) => (
+        <div className="grid grid-cols-7 px-4 py-2 bg-[#F0F2F8]">
+          {['Reseller', 'Amount', 'Method', 'Cutoff', 'Payout Date', 'Status', 'Actions'].map((h) => (
             <p key={h} className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -264,7 +265,7 @@ export default function AdminPayoutsPage() {
         ) : payouts.map((payout) => (
           <div key={payout.id}>
             <div
-              className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F8F9FC] transition-colors items-center cursor-pointer"
+              className="grid grid-cols-7 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F8F9FC] transition-colors items-center cursor-pointer"
               onClick={() => setExpandedId(expandedId === payout.id ? null : payout.id)}>
 
               {/* Reseller */}
@@ -287,6 +288,11 @@ export default function AdminPayoutsPage() {
               {/* Cutoff */}
               <p className="text-xs text-gray-500">
                 {payout.cutoff_date ? fmtDate(payout.cutoff_date) : '—'}
+              </p>
+
+              {/* Payout Date */}
+              <p className={`text-xs font-medium ${payout.payout_date ? 'text-[#1a7a4a]' : 'text-gray-300'}`}>
+                {payout.payout_date ? fmtDate(payout.payout_date) : '—'}
               </p>
 
               {/* Status */}
