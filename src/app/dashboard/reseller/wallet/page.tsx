@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 // ============================================================
@@ -34,9 +35,12 @@ interface Payout {
   id: string
   amount: number
   status: string
-  payment_method: string | null
-  payment_reference: string | null
-  requested_at: string
+  payment_method:     string | null
+  payment_reference:  string | null
+  transaction_number: string | null
+  cutoff_date:        string | null
+  notes:              string | null
+  requested_at:       string
   processed_at: string | null
 }
 
@@ -90,6 +94,7 @@ function PayoutModal({
   const handleSubmit = async () => {
     setError('')
     if (!amount || parseFloat(amount) <= 0) { setError('Enter a valid amount.'); return }
+    if (parseFloat(amount) < 500) { setError('Minimum payout request is ₱500.00.'); return }
     if (parseFloat(amount) > balance)        { setError('Amount exceeds your balance.'); return }
     if (!method)                             { setError('Select a payment method.'); return }
 
@@ -131,7 +136,7 @@ function PayoutModal({
               />
             </div>
             <div className="flex gap-2 mt-1.5">
-              {[100, 500, 1000].map((v) => (
+              {[500, 1000, 2000].map((v) => (
                 <button key={v} onClick={() => setAmount(String(Math.min(v, balance)))}
                   className="text-xs px-2 py-1 bg-[#F0F2F8] text-gray-500 rounded hover:bg-[#e4e6ef] transition-colors">
                   ₱{v}
@@ -347,7 +352,7 @@ export default function ResellerWalletPage() {
         {tab === 'payouts' && (
           <>
             <div className="grid grid-cols-4 px-4 py-2 bg-[#F0F2F8]">
-              {['Amount', 'Method', 'Status', 'Date'].map((h) => (
+              {['Amount', 'Method', 'Status', 'Date', ''].map((h) => (
                 <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
               ))}
             </div>
@@ -360,12 +365,15 @@ export default function ResellerWalletPage() {
               <p className="text-center text-gray-400 text-sm py-12">No payout requests yet.</p>
             ) : (
               payouts.map((p) => (
-                <div key={p.id} className="grid grid-cols-4 px-4 py-3 border-b border-[#0D1B3E]/5 items-center hover:bg-[#F0F2F8]/50 transition-colors">
+                <div key={p.id} className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 items-center hover:bg-[#F0F2F8]/50 transition-colors">
                   <p className="text-xs font-semibold text-[#0D1B3E]">{fmt(Number(p.amount))}</p>
                   <div>
                     <p className="text-xs text-[#0D1B3E]">{p.payment_method || '—'}</p>
                     {p.payment_reference && (
                       <p className="text-[10px] text-gray-400">{p.payment_reference}</p>
+                    )}
+                    {p.transaction_number && (
+                      <p className="text-[10px] font-mono text-[#1a7a4a] font-semibold mt-0.5">{p.transaction_number}</p>
                     )}
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${PAYOUT_STATUS_COLORS[p.status]}`}>
@@ -373,10 +381,20 @@ export default function ResellerWalletPage() {
                   </span>
                   <div>
                     <p className="text-xs text-gray-400">{new Date(p.requested_at).toLocaleDateString('en-PH')}</p>
+                    {p.cutoff_date && (
+                      <p className="text-[10px] text-gray-400">Cutoff: {new Date(p.cutoff_date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</p>
+                    )}
                     {p.processed_at && (
                       <p className="text-[10px] text-gray-300">Processed: {new Date(p.processed_at).toLocaleDateString('en-PH')}</p>
                     )}
                   </div>
+                  <Link href={`/dashboard/reseller/wallet/${p.id}`}
+                    className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group"
+                    title="View details">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </Link>
                 </div>
               ))
             )}

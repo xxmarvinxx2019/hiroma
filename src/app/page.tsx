@@ -18,7 +18,7 @@ export default function LandingPage() {
       <Navbar />
       <Hero />
       <Products />
-      <Opportunity />
+      {/* <Opportunity /> */}
       <Distributor />
       <Contact />
       <Footer />

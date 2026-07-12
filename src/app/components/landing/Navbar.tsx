@@ -32,9 +32,9 @@ export default function Navbar() {
           <a href="#products" className="text-white/60 text-sm hover:text-white transition-colors duration-150">
             Products
           </a>
-          <a href="#opportunity" className="text-white/60 text-sm hover:text-white transition-colors duration-150">
+          {/*<a href="#opportunity" className="text-white/60 text-sm hover:text-white transition-colors duration-150">
             Opportunity
-          </a>
+          </a>*/}
           <a href="#distributor" className="text-white/60 text-sm hover:text-white transition-colors duration-150">
             Distributors
           </a>

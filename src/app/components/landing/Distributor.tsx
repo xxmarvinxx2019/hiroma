@@ -116,9 +116,10 @@ export default function Distributor() {
         </div>
 
         {/* Divider */}
-        <div className="border-t border-[#0D1B3E]/10 mb-12" />
+        {/*<div className="border-t border-[#0D1B3E]/10 mb-12" />*/}
 
         {/* Supply Chain Visual */}
+        {/*
         <p className="text-[#C9A84C] text-xs font-semibold tracking-[0.2em] uppercase text-center mb-2">
           Supply chain
         </p>
@@ -146,7 +147,7 @@ export default function Distributor() {
         <p className="text-xs text-gray-400 text-center mb-12">
           Low stock? System auto-detects and suggests an alternative same-level distributor as supplier.
         </p>
-
+          */}
         {/* Divider */}
         <div className="border-t border-[#0D1B3E]/10 mb-12" />
 
