@@ -5,14 +5,14 @@ import prisma from '@/app/lib/prisma'
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'admin') {
+    if (!user || user.role !== 'reseller') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { id } = await params
 
     const payout = await prisma.payout.findUnique({
-      where:  { id },
+      where:  { id, user_id: user.id },
       select: {
         id:               true,
         amount:           true,
@@ -21,7 +21,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         payment_reference: true,
         requested_at:     true,
         processed_at:     true,
-        user:     { select: { full_name: true, username: true, mobile: true, address: true, role: true } },
         approver: { select: { full_name: true } },
       },
     })
@@ -39,7 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return NextResponse.json({ payout: { ...payout, ...extra } })
   } catch (error) {
-    console.error('[ADMIN PAYOUT DETAIL ERROR]', error)
+    console.error('[RESELLER WALLET PAYOUT DETAIL ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }

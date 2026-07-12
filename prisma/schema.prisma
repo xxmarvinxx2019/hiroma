@@ -38,8 +38,8 @@ model User {
   creator               User?               @relation("UserCreatedBy", fields: [created_by], references: [id])
   created_users         User[]              @relation("UserCreatedBy")
   wallet                Wallet?
-  pairing_logs    PairingLog[]
-  city_dist_pin_requests PinRequest[] @relation("CityDistPinRequests")
+  pairing_logs          PairingLog[]
+  city_dist_pin_requests PinRequest[]       @relation("CityDistPinRequests")
 
   @@map("users")
 }
@@ -83,7 +83,7 @@ model ResellerProfile {
   pending_pairing_balance Decimal   @default(0) @db.Decimal(10, 2)
   left_points             Int?      @default(0)
   right_points            Int?      @default(0)
-  daily_pairing_count     Int?      @default(0)
+  daily_pairing_count     Int       @default(0)
   daily_pairing_date      DateTime? @db.Date
   city_dist               User      @relation("ResellerRegisteredBy", fields: [city_dist_id], references: [id])
   package                 Package   @relation(fields: [package_id], references: [id])
@@ -106,8 +106,8 @@ model Package {
   products              PackageProduct[]
   pins                  Pin[]
   reseller_profiles     ResellerProfile[]
-  pin_requests PinRequest[]
-  
+  pin_requests          PinRequest[]
+
   @@map("packages")
 }
 
@@ -269,17 +269,21 @@ model Commission {
 }
 
 model Payout {
-  id                String       @id @default(uuid())
-  user_id           String
-  amount            Decimal      @db.Decimal(10, 2)
-  status            PayoutStatus @default(pending)
-  payment_method    String?
-  payment_reference String?
-  approved_by       String?
-  requested_at      DateTime     @default(now())
-  processed_at      DateTime?
-  approver          User?        @relation("PayoutApprover", fields: [approved_by], references: [id])
-  user              User         @relation("PayoutUser", fields: [user_id], references: [id])
+  id                 String       @id @default(uuid())
+  user_id            String
+  amount             Decimal      @db.Decimal(10, 2)
+  status             PayoutStatus @default(pending)
+  payment_method     String?
+  payment_reference  String?
+  transaction_number String?      @unique
+  cutoff_date        DateTime?
+  payout_date        DateTime?
+  notes              String?
+  approved_by        String?
+  requested_at       DateTime     @default(now())
+  processed_at       DateTime?
+  approver           User?        @relation("PayoutApprover", fields: [approved_by], references: [id])
+  user               User         @relation("PayoutUser", fields: [user_id], references: [id])
 
   @@map("payouts")
 }
@@ -293,17 +297,15 @@ model Order {
   status            OrderStatus @default(pending)
   total_amount      Decimal     @db.Decimal(10, 2)
   is_cross_purchase Boolean     @default(false)
-  payment_method    String?     @db.VarChar
+  payment_method    String?     @db.VarChar  @default("cash")
   payment_reference String?     @db.VarChar
   payment_status    String?     @default("unpaid") @db.VarChar
   notes             String?
   created_at        DateTime    @default(now())
   updated_at        DateTime    @default(now()) @updatedAt
-
-  // Relations
-  buyer  User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
-  seller User        @relation("OrderSeller", fields: [seller_id], references: [id])
-  items  OrderItem[]
+  buyer             User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
+  seller            User        @relation("OrderSeller", fields: [seller_id], references: [id])
+  items             OrderItem[]
 
   @@map("orders")
 }
@@ -347,6 +349,16 @@ model PaymentMethod {
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("payment_methods")
+}
+
+model SystemSetting {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  value      String
+  updated_at DateTime @updatedAt
+  updated_by String?
+
+  @@map("system_settings")
 }
 
 enum Role {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { getCutoffDays, getNextCutoffDate, getPayoutDateMap, getPayoutDateFromCutoff } from '@/app/api/admin/settings/route'
 import prisma from '@/app/lib/prisma'
 
 // ── GET wallet balance + commission history + payout history ──
@@ -38,13 +39,13 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id:                true,
-          amount:            true,
-          status:            true,
-          payment_method:    true,
-          payment_reference: true,
-          requested_at:      true,
-          processed_at:      true,
+          id:                 true,
+          amount:             true,
+          status:             true,
+          payment_method:     true,
+          payment_reference:  true,
+          requested_at:       true,
+          processed_at:       true,
         },
       }) : Promise.resolve([]),
 
@@ -85,6 +86,23 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Fetch new payout columns via raw SQL (safe if not migrated yet)
+    let enrichedPayouts = payouts
+    if (tab === 'payouts' && payouts.length > 0) {
+      try {
+        const ids = payouts.map((p: any) => p.id)
+        const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
+          SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id = ANY(${ids}::uuid[])
+        `
+        const extraMap: Record<string, any> = {}
+        extras.forEach((e) => { extraMap[e.id] = e })
+        enrichedPayouts = payouts.map((p: any) => ({
+          ...p,
+          ...(extraMap[p.id] || { transaction_number: null, cutoff_date: null, notes: null }),
+        }))
+      } catch { /* columns not migrated yet — return payouts without extra fields */ }
+    }
+
     return NextResponse.json({
       wallet: {
         balance:         Number(wallet?.balance         || 0),
@@ -120,6 +138,9 @@ export async function POST(req: NextRequest) {
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       return NextResponse.json({ error: 'Invalid amount.' }, { status: 400 })
     }
+    if (parseFloat(amount) < 500) {
+      return NextResponse.json({ error: 'Minimum payout request is ₱500.00.' }, { status: 400 })
+    }
 
     if (!payment_method?.trim()) {
       return NextResponse.json({ error: 'Payment method is required.' }, { status: 400 })
@@ -150,6 +171,12 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
+    // Compute next cutoff and payout dates from admin settings
+    const cutoffDays   = await getCutoffDays()
+    const payoutDateMap = await getPayoutDateMap()
+    const cutoffDate   = getNextCutoffDate(cutoffDays)
+    const payoutDate   = getPayoutDateFromCutoff(cutoffDate, payoutDateMap, cutoffDays)
+
     // Create payout — do NOT deduct balance here
     // Balance is deducted only when admin approves the payout
     const payout = await prisma.payout.create({
@@ -161,6 +188,13 @@ export async function POST(req: NextRequest) {
         payment_reference: payment_reference?.trim() || null,
       },
     })
+
+    // Set cutoff_date and payout_date via raw SQL (columns may not be migrated yet)
+    try {
+      await prisma.$executeRaw`
+        UPDATE payouts SET cutoff_date = ${cutoffDate}, payout_date = ${payoutDate} WHERE id = ${payout.id}::uuid
+      `
+    } catch { /* columns not migrated yet — run ALTER TABLE */ }
 
     return NextResponse.json({ success: true, payout })
   } catch (error) {
