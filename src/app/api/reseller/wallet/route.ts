@@ -91,14 +91,14 @@ export async function GET(req: NextRequest) {
     if (tab === 'payouts' && payouts.length > 0) {
       try {
         const ids = payouts.map((p: any) => p.id)
-        const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
+        const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; notes: string | null }[]>`
           SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id = ANY(${ids}::uuid[])
         `
         const extraMap: Record<string, any> = {}
         extras.forEach((e) => { extraMap[e.id] = e })
         enrichedPayouts = payouts.map((p: any) => ({
           ...p,
-          ...(extraMap[p.id] || { transaction_number: null, cutoff_date: null, notes: null }),
+          ...(extraMap[p.id] || { transaction_number: null, cutoff_date: null, payout_date: null, notes: null }),
         }))
       } catch { /* columns not migrated yet — return payouts without extra fields */ }
     }
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
       await prisma.$executeRaw`
         UPDATE payouts SET cutoff_date = ${cutoffDate}, payout_date = ${payoutDate} WHERE id = ${payout.id}::uuid
       `
-    } catch { /* columns not migrated yet — run ALTER TABLE */ }
+    } catch (e) { console.error('[WALLET] cutoff/payout date update failed — run ALTER TABLE:', e) }
 
     return NextResponse.json({ success: true, payout })
   } catch (error) {
