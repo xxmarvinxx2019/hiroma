@@ -6,7 +6,7 @@ import Link from 'next/link'
 interface Payout {
   id:                 string
   amount:             number
-  status:             'pending' | 'approved' | 'rejected'
+  status:             'pending' | 'approved' | 'rejected' | 'released'
   payment_method:     string | null
   payment_reference:  string | null
   transaction_number: string | null
@@ -26,6 +26,7 @@ const STATUS_STYLE: Record<string, string> = {
   pending:  'bg-[#fef9ee] text-[#9a6f1e] border border-[#C9A84C]/30',
   approved: 'bg-[#e8f7ef] text-[#1a7a4a] border border-[#1a7a4a]/20',
   rejected: 'bg-[#fdecea] text-[#a03030] border border-[#a03030]/20',
+  released: 'bg-[#e8f0fe] text-[#1a56db] border border-[#1a56db]/20',
 }
 
 const PAGE_SIZE = 15
@@ -235,7 +236,7 @@ export default function AdminPayoutsPage() {
 
           {/* Status filter */}
           <div className="flex gap-1">
-            {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
+            {(['all', 'pending', 'approved', 'rejected', 'released'] as const).map((s) => (
               <button key={s} onClick={() => setStatusFilter(s)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   statusFilter === s ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-500 hover:text-[#0D1B3E]'

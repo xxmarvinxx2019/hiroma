@@ -7,7 +7,7 @@ import Link from 'next/link'
 interface PayoutDetail {
   id:                 string
   amount:             number
-  status:             'pending' | 'approved' | 'rejected'
+  status:             'pending' | 'approved' | 'rejected' | 'released'
   payment_method:     string | null
   payment_reference:  string | null
   transaction_number: string | null
@@ -30,15 +30,16 @@ const fmt     = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimum
 const fmtDate = (d: string)  => new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const STATUS_STEPS = [
-  { key: 'pending',  label: 'Requested',   icon: '📋', desc: 'Payout request submitted and awaiting admin review.' },
-  { key: 'approved', label: 'Approved',    icon: '✅', desc: 'Payout has been approved and processed.' },
-  { key: 'rejected', label: 'Rejected',    icon: '❌', desc: 'Payout request was rejected by admin.' },
+  { key: 'pending',  label: 'Requested', icon: '📋', desc: 'Payout request submitted and awaiting admin review.' },
+  { key: 'approved', label: 'Approved',  icon: '✅', desc: 'Verified by admin. Will be released on payout date.' },
+  { key: 'released', label: 'Released',  icon: '💸', desc: 'Payout has been released. Funds sent to reseller.' },
 ]
 
 const STATUS_COLOR: Record<string, string> = {
   pending:  'bg-[#fef9ee] text-[#9a6f1e] border border-[#C9A84C]/30',
   approved: 'bg-[#e8f7ef] text-[#1a7a4a] border border-[#1a7a4a]/20',
   rejected: 'bg-[#fdecea] text-[#a03030] border border-[#a03030]/20',
+  released: 'bg-[#e8f0fe] text-[#1a56db] border border-[#1a56db]/20',
 }
 
 export default function AdminPayoutDetailPage() {
@@ -94,8 +95,8 @@ export default function AdminPayoutDetailPage() {
   if (error) return <p className="text-center text-[#a03030] py-16">{error}</p>
   if (!payout) return null
 
-  const currentStep = STATUS_STEPS.findIndex((s) => s.key === payout.status)
   const isRejected  = payout.status === 'rejected'
+  const currentStep = isRejected ? 1 : STATUS_STEPS.findIndex((s) => s.key === payout.status)
 
   return (
     <div className="max-w-3xl mx-auto">

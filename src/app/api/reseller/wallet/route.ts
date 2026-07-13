@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
       try {
         const ids = payouts.map((p: any) => p.id)
         const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; notes: string | null }[]>`
-          SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id = ANY(${ids}::uuid[])
+          SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ANY(${ids})
         `
         const extraMap: Record<string, any> = {}
         extras.forEach((e) => { extraMap[e.id] = e })
@@ -172,10 +172,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Compute next cutoff and payout dates from admin settings
-    const cutoffDays   = await getCutoffDays()
+    const cutoffDays    = await getCutoffDays()
     const payoutDateMap = await getPayoutDateMap()
-    const cutoffDate   = getNextCutoffDate(cutoffDays)
-    const payoutDate   = getPayoutDateFromCutoff(cutoffDate, payoutDateMap, cutoffDays)
+    const cutoffDate    = getNextCutoffDate(cutoffDays)
+    const payoutDate    = getPayoutDateFromCutoff(cutoffDate, payoutDateMap, cutoffDays)
+    console.log('[WALLET] cutoffDays:', cutoffDays)
+    console.log('[WALLET] payoutDateMap:', payoutDateMap)
+    console.log('[WALLET] cutoffDate:', cutoffDate)
+    console.log('[WALLET] payoutDate:', payoutDate)
 
     // Create payout — do NOT deduct balance here
     // Balance is deducted only when admin approves the payout
@@ -189,14 +193,39 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Set cutoff_date and payout_date via raw SQL (columns may not be migrated yet)
+    // Set cutoff_date and payout_date via raw SQL
+    console.log('[WALLET] payout.id:', payout.id)
+    console.log('[WALLET] cutoffDate to save:', cutoffDate)
+    console.log('[WALLET] payoutDate to save:', payoutDate)
     try {
-      await prisma.$executeRaw`
-        UPDATE payouts SET cutoff_date = ${cutoffDate}, payout_date = ${payoutDate} WHERE id = ${payout.id}::uuid
+      const updateResult = await prisma.$executeRaw`
+        UPDATE payouts SET cutoff_date = ${cutoffDate}, payout_date = ${payoutDate} WHERE id::text = ${payout.id}
       `
-    } catch (e) { console.error('[WALLET] cutoff/payout date update failed — run ALTER TABLE:', e) }
+      console.log('[WALLET] UPDATE result (rows affected):', updateResult)
+    } catch (e) {
+      console.error('[WALLET] cutoff/payout date update FAILED:', e)
+    }
 
-    return NextResponse.json({ success: true, payout })
+    // Verify it was saved
+    try {
+      const verify = await prisma.$queryRaw<any[]>`
+        SELECT id, cutoff_date, payout_date FROM payouts WHERE id::text = ${payout.id}
+      `
+      console.log('[WALLET] Verified saved payout:', verify)
+    } catch (e) {
+      console.error('[WALLET] Verify query failed:', e)
+    }
+
+    return NextResponse.json({
+      success: true,
+      payout,
+      debug: {
+        cutoffDays,
+        payoutDateMap,
+        cutoffDate,
+        payoutDate,
+      }
+    })
   } catch (error) {
     console.error('[RESELLER WALLET POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

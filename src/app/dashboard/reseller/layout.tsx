@@ -25,7 +25,7 @@ const navItems = [
     items: [
       { label: 'Wallet',         href: '/dashboard/reseller/wallet' },
       { label: 'Commissions',    href: '/dashboard/reseller/commissions' },
-      { label: 'Pairing Points', href: '/dashboard/reseller/points' },
+      { label: 'Product Pairing Points', href: '/dashboard/reseller/points' },
     ],
   },
   {

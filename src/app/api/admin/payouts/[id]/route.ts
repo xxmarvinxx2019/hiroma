@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     let extra = { transaction_number: null, cutoff_date: null, notes: null }
     try {
       const rows = await prisma.$queryRaw<{ transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
-        SELECT transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id = ${id}::uuid
+        SELECT transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ${id}
       `
       if (rows[0]) extra = rows[0] as any
     } catch {}

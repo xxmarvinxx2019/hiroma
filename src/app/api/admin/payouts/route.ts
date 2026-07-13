@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     let extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; notes: string | null }> = {}
     try {
       const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
-        SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id = ANY(${payouts.map(p => p.id)}::uuid[])
+        SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})
       `
       extras.forEach((e) => { extraData[e.id] = { transaction_number: e.transaction_number, cutoff_date: e.cutoff_date ? String(e.cutoff_date) : null, notes: e.notes } })
     } catch {
@@ -118,30 +118,19 @@ export async function PATCH(req: NextRequest) {
     if (action === 'approve') {
       const txNumber = generateTransactionNumber()
 
-      await prisma.$transaction(async (tx) => {
-        // Update base fields
-        await tx.payout.update({
-          where: { id: payout_id },
-          data:  { status: 'approved', approved_by: user.id, processed_at: new Date() },
-        })
-        // Update new columns via raw SQL
-        try {
-          await tx.$executeRaw`
-            UPDATE payouts SET transaction_number = ${txNumber}, notes = ${notes || null}
-            WHERE id = ${payout_id}
-          `
-        } catch { /* columns not migrated yet */ }
-        // Deduct from wallet
-        await tx.wallet.update({
-          where: { user_id: payout.user_id },
-          data:  {
-            balance:         { decrement: Number(payout.amount) },
-            total_withdrawn: { increment: Number(payout.amount) },
-          },
-        })
+      // Approve only — wallet is deducted when cron releases on payout_date
+      await prisma.payout.update({
+        where: { id: payout_id },
+        data:  { status: 'approved', approved_by: user.id, processed_at: new Date() },
       })
+      try {
+        await prisma.$executeRaw`
+          UPDATE payouts SET transaction_number = ${txNumber}, notes = ${notes || null}
+          WHERE id = ${payout_id}
+        `
+      } catch { /* columns not migrated yet */ }
 
-      return NextResponse.json({ success: true, transaction_number: txNumber, message: 'Payout approved.' })
+      return NextResponse.json({ success: true, transaction_number: txNumber, message: 'Payout approved. Will be released on payout date.' })
     }
 
     if (action === 'reject') {
