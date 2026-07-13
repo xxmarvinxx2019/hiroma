@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 interface PayoutDetail {
   id:                 string
   amount:             number
-  status:             'pending' | 'approved' | 'rejected'
+  status:             'pending' | 'approved' | 'rejected' | 'released'
   payment_method:     string | null
   payment_reference:  string | null
   transaction_number: string | null
@@ -22,15 +22,16 @@ const fmt     = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimum
 const fmtDate = (d: string)  => new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const STATUS_STEPS = [
-  { key: 'pending',  label: 'Submitted',  icon: '📋', desc: 'Your request has been submitted and is awaiting admin review.' },
-  { key: 'approved', label: 'Approved',   icon: '✅', desc: 'Your payout has been approved and is being processed.' },
-  { key: 'rejected', label: 'Rejected',   icon: '❌', desc: 'Your payout request was rejected. Please contact admin for details.' },
+  { key: 'pending',  label: 'Submitted', icon: '📋', desc: 'Your request has been submitted and is awaiting admin review.' },
+  { key: 'approved', label: 'Approved',  icon: '✅', desc: 'Verified! Your payout will be released on the scheduled payout date.' },
+  { key: 'released', label: 'Released',  icon: '💸', desc: 'Your payout has been released. Check your account!' },
 ]
 
 const STATUS_COLOR: Record<string, string> = {
   pending:  'bg-[#fef9ee] text-[#9a6f1e] border border-[#C9A84C]/30',
   approved: 'bg-[#e8f7ef] text-[#1a7a4a] border border-[#1a7a4a]/20',
   rejected: 'bg-[#fdecea] text-[#a03030] border border-[#a03030]/20',
+  released: 'bg-[#e8f0fe] text-[#1a56db] border border-[#1a56db]/20',
 }
 
 export default function ResellerPayoutDetailPage() {
@@ -61,8 +62,8 @@ export default function ResellerPayoutDetailPage() {
   if (error)   return <p className="text-center text-[#a03030] py-16">{error}</p>
   if (!payout) return null
 
-  const currentStep = STATUS_STEPS.findIndex((s) => s.key === payout.status)
   const isRejected  = payout.status === 'rejected'
+  const currentStep = isRejected ? 1 : STATUS_STEPS.findIndex((s) => s.key === payout.status)
 
   return (
     <div className="max-w-2xl mx-auto">

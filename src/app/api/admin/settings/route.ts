@@ -13,7 +13,8 @@ export async function getCutoffDays(): Promise<number[]> {
     `
     if (!rows || rows.length === 0) return DEFAULT_CUTOFF_DAYS
     return rows[0].value.split(',').map(Number).filter(Boolean).sort((a, b) => a - b)
-  } catch {
+  } catch (e) {
+    console.error('[SETTINGS] getCutoffDays failed:', e)
     return DEFAULT_CUTOFF_DAYS
   }
 }
@@ -28,7 +29,8 @@ export async function getPayoutDateMap(): Promise<Record<string, string>> {
     `
     if (!rows || rows.length === 0) return { '15': '18', '31': '3' }
     return JSON.parse(rows[0].value)
-  } catch {
+  } catch (e) {
+    console.error('[SETTINGS] getPayoutDateMap failed:', e)
     return { '15': '18', '31': '3' }
   }
 }

@@ -421,4 +421,5 @@ enum PayoutStatus {
   pending
   approved
   rejected
+  released
 }
