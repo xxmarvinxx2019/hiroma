@@ -19,7 +19,6 @@ interface Stats {
   commission_summary: {
     direct_referral: { amount: number; count: number }
     binary_pairing:  { amount: number; count: number }
-    multilevel:      { amount: number; count: number }
     sponsor_point:   { amount: number; count: number }
   }
   recent_commissions: {
@@ -39,20 +38,17 @@ const fmtShort = (n: number) => {
 const COMM_LABELS: Record<string, string> = {
   direct_referral: 'Direct Referral',
   binary_pairing:  'Binary Pairing',
-  multilevel:      'Multi-level',
-  sponsor_point:   'Sponsor Bonus',
+  sponsor_point:   'Product Binary',
 }
 const COMM_COLORS: Record<string, string> = {
   direct_referral: '#3b82f6',
   binary_pairing:  '#8b5cf6',
   sponsor_point:   '#f59e0b',
-  multilevel:      '#ec4899',
 }
 const COMM_ICONS: Record<string, string> = {
   direct_referral: '👥',
   binary_pairing:  '🔗',
   sponsor_point:   '⭐',
-  multilevel:      '🏆',
 }
 
 const RANK_PALETTE = [
@@ -172,7 +168,7 @@ export default function ResellerDashboardPage() {
   const totalEarned   = (stats.commission_summary?.direct_referral?.amount || 0)
     + (stats.commission_summary?.binary_pairing?.amount  || 0)
     + (stats.commission_summary?.sponsor_point?.amount   || 0)
-    + (stats.commission_summary?.multilevel?.amount      || 0)
+
 
   // Rank
   const ranks          = [...(stats.rank?.ranks || [])].sort((a, b) => a.sequence - b.sequence)
@@ -191,8 +187,7 @@ export default function ResellerDashboardPage() {
   const donutData = [
     { label: 'Direct Referral', value: stats.commission_summary?.direct_referral?.amount || 0, color: COMM_COLORS.direct_referral },
     { label: 'Binary Pairing',  value: stats.commission_summary?.binary_pairing?.amount  || 0, color: COMM_COLORS.binary_pairing  },
-    { label: 'Sponsor Bonus',   value: stats.commission_summary?.sponsor_point?.amount   || 0, color: COMM_COLORS.sponsor_point   },
-    { label: 'Multi-level',     value: stats.commission_summary?.multilevel?.amount      || 0, color: COMM_COLORS.multilevel      },
+    { label: 'Product Binary',   value: stats.commission_summary?.sponsor_point?.amount   || 0, color: COMM_COLORS.sponsor_point   },
   ].filter(d => d.value > 0)
 
   const firstName = stats.user.full_name.split(' ')[0]
@@ -404,7 +399,7 @@ export default function ResellerDashboardPage() {
           <div className="flex items-center gap-6">
             <DonutChart data={donutData} />
             <div className="flex-1 space-y-2">
-              {Object.entries(stats.commission_summary || {}).map(([type, data]) => {
+              {Object.entries(stats.commission_summary || {}).filter(([type, data]) => type !== 'multilevel' && data.amount > 0).map(([type, data]) => {
                 const pct = totalEarned > 0 ? Math.round((data.amount / totalEarned) * 100) : 0
                 return (
                   <div key={type}>
