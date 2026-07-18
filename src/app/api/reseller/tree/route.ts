@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const maxDepth   = 4
+    const maxDepth   = 2
     const rootUserId = searchParams.get('root_user_id') || null
     const search     = searchParams.get('search') || ''
 

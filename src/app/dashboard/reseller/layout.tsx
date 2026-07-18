@@ -24,8 +24,6 @@ const navItems = [
     section: 'Earnings',
     items: [
       { label: 'Wallet',         href: '/dashboard/reseller/wallet' },
-      { label: 'Commissions',    href: '/dashboard/reseller/commissions' },
-      { label: 'Pairing Points', href: '/dashboard/reseller/points' },
     ],
   },
   {

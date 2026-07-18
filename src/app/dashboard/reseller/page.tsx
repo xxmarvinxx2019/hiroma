@@ -190,7 +190,9 @@ export default function ResellerDashboardPage() {
     { label: 'Product Binary',   value: stats.commission_summary?.sponsor_point?.amount   || 0, color: COMM_COLORS.sponsor_point   },
   ].filter(d => d.value > 0)
 
-  const firstName = stats.user.full_name.split(' ')[0]
+  const firstName        = stats.user.full_name.split(' ')[0]
+  const directBonus      = stats.package?.direct_referral_bonus || 0
+  const potentialEarnings = refRemaining * directBonus
 
   return (
     <div className="w-full space-y-5">
@@ -209,13 +211,32 @@ export default function ResellerDashboardPage() {
             </span>
           )}
         </div>
-        <div className="relative z-10 bg-white/8 backdrop-blur rounded-2xl px-6 py-4 border border-white/10 text-right">
-          <p className="text-white/50 text-xs mb-1">Total Wallet Balance</p>
-          <p className="text-3xl xl:text-4xl font-bold text-white">{fmt(walletBal)}</p>
-          <Link href="/dashboard/reseller/wallet"
-            className="inline-block mt-2 bg-[#C9A84C] text-[#0D1B3E] text-xs px-4 py-1.5 rounded-full font-bold hover:bg-[#b8953f] transition-colors">
-            Withdraw →
-          </Link>
+        <div className="relative z-10 flex items-center gap-3">
+          {/* Potential Earnings */}
+          <div className="bg-white/8 backdrop-blur rounded-2xl px-5 py-4 border border-white/10">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xl">🎁</span>
+              <p className="text-white/50 text-xs">Today's Potential Earnings</p>
+            </div>
+            <p className="text-2xl font-bold text-white">{fmt(potentialEarnings)}</p>
+            {refRemaining > 0 ? (
+              <p className="text-white/40 text-[11px] mt-1">
+                <span className="text-[#C9A84C] font-semibold">{refRemaining} referral{refRemaining !== 1 ? 's' : ''}</span> to earn <span className="text-[#C9A84C] font-semibold">{fmt(directBonus)}</span> more!
+              </p>
+            ) : (
+              <p className="text-white/40 text-[11px] mt-1">Cap reached. Resets tomorrow 🎉</p>
+            )}
+          </div>
+
+          {/* Wallet */}
+          <div className="bg-white/8 backdrop-blur rounded-2xl px-5 py-4 border border-white/10 text-right">
+            <p className="text-white/50 text-xs mb-1">Total Wallet Balance</p>
+            <p className="text-2xl font-bold text-white">{fmt(walletBal)}</p>
+            <Link href="/dashboard/reseller/wallet"
+              className="inline-block mt-2 bg-[#C9A84C] text-[#0D1B3E] text-xs px-4 py-1.5 rounded-full font-bold hover:bg-[#b8953f] transition-colors">
+              Withdraw →
+            </Link>
+          </div>
         </div>
       </div>
 
