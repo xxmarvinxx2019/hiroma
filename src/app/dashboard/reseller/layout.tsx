@@ -25,7 +25,7 @@ const navItems = [
     items: [
       { label: 'Wallet',         href: '/dashboard/reseller/wallet' },
       { label: 'Commissions',    href: '/dashboard/reseller/commissions' },
-      { label: 'Product Pairing Points', href: '/dashboard/reseller/points' },
+      { label: 'Pairing Points', href: '/dashboard/reseller/points' },
     ],
   },
   {
@@ -226,7 +226,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
         </header>
 
         {/* Page Content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+        <main style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
           {children}
         </main>
       </div>
