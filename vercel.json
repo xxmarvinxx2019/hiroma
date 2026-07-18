@@ -1,8 +1,6 @@
 {
   "crons": [
-    {
-      "path": "/api/cron/release-payouts",
-      "schedule": "0 16 * * *"
-    }
+    { "path": "/api/cron/release-payouts", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/reset-ranks",     "schedule": "0 16 * * *" }
   ]
 }

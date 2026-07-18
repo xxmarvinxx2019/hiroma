@@ -23,6 +23,10 @@ interface Distributor {
   id: string; full_name: string; username: string; role: string
 }
 
+interface Reseller {
+  id: string; full_name: string; username: string
+}
+
 interface ProductStock {
   id: string; name: string; type: string
   cost_price: number; regional_price: number; provincial_price: number
@@ -47,12 +51,14 @@ const PRICE_KEY: Record<string, keyof ProductStock> = {
   regional:   'regional_price',
   provincial: 'provincial_price',
   city:       'city_price',
+  reseller:   'reseller_price',
 }
 
 const PRICE_LABEL: Record<string, string> = {
   regional:   'Regional Price',
   provincial: 'Provincial Price',
   city:       'City Price',
+  reseller:   'Reseller Price',
 }
 
 // ============================================================
@@ -219,16 +225,40 @@ function AssignStockModal({
   onClose:      () => void
   onSuccess:    () => void
 }) {
-  const [ownerId, setOwnerId]       = useState('')
-  const [cart, setCart]             = useState<CartItem[]>([])
-  const [notes, setNotes]           = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState('')
-  const [success, setSuccess]       = useState('')
-  const [search, setSearch]         = useState('')
+  const [ownerId, setOwnerId]           = useState('')
+  const [cart, setCart]                 = useState<CartItem[]>([])
+  const [notes, setNotes]               = useState('')
+  const [submitting, setSubmitting]     = useState(false)
+  const [error, setError]               = useState('')
+  const [success, setSuccess]           = useState('')
+  const [search, setSearch]             = useState('')
+  const [recipientSearch, setRecipientSearch] = useState('')
+  const [recipientRole, setRecipientRole]     = useState<'all'|'regional'|'provincial'|'city'|'reseller'>('all')
+  const [recipientPage, setRecipientPage]     = useState(1)
+  const [recipients, setRecipients]           = useState<Distributor[]>([])
+  const [recipientLoading, setRecipientLoading] = useState(false)
+  const [recipientMeta, setRecipientMeta]     = useState({ total: 0, totalPages: 1 })
 
-  const selectedDist = distributors.find((d) => d.id === ownerId)
+  const selectedDist = distributors.find((d) => d.id === ownerId) || recipients.find((r) => r.id === ownerId)
   const priceKey     = selectedDist ? PRICE_KEY[selectedDist.role] : null
+
+  // Search recipients from API
+  useEffect(() => {
+    if (ownerId) return
+    setRecipientLoading(true)
+    const params = new URLSearchParams({
+      recipient_search: recipientSearch,
+      recipient_role:   recipientRole,
+      recipient_page:   String(recipientPage),
+    })
+    fetch(`/api/admin/inventory?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setRecipients(data.recipients || [])
+        setRecipientMeta(data.recipientMeta || { total: 0, totalPages: 1 })
+      })
+      .finally(() => setRecipientLoading(false))
+  }, [recipientSearch, recipientRole, recipientPage, ownerId])
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -280,8 +310,8 @@ function AssignStockModal({
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
           <div>
-            <h2 className="text-sm font-semibold text-[#0D1B3E]">Assign Stock to Distributor</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Priced at distributor's level — recorded as a delivered order</p>
+            <h2 className="text-sm font-semibold text-[#0D1B3E]">Assign / Sell Stock</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Select distributor or reseller — priced at their level, recorded as a delivered order</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
         </div>
@@ -291,22 +321,71 @@ function AssignStockModal({
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Distributor *</label>
-                <select value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setCart([]) }}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
-                  <option value="">Select distributor...</option>
-                  {(['regional', 'provincial', 'city'] as const).map((role) => (
-                    <optgroup key={role} label={role.charAt(0).toUpperCase() + role.slice(1)}>
-                      {distributors.filter((d) => d.role === role).map((d) => (
-                        <option key={d.id} value={d.id}>{d.full_name} (@{d.username})</option>
+                <label className="block text-xs text-gray-400 mb-1">Select Recipient *</label>
+                {selectedDist ? (
+                  <div className="flex items-center justify-between bg-[#F0F2F8] border border-[#C9A84C] rounded-lg px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium text-[#0D1B3E]">{selectedDist.full_name}</p>
+                      <p className="text-[10px] text-gray-400">@{selectedDist.username} · <span className="capitalize">{selectedDist.role}</span> · {PRICE_LABEL[selectedDist.role]}</p>
+                    </div>
+                    <button onClick={() => { setOwnerId(''); setCart([]) }} className="text-gray-400 hover:text-[#a03030] text-xs ml-2">✕</button>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="relative">
+                      <input
+                        value={recipientSearch}
+                        onChange={(e) => { setRecipientSearch(e.target.value); setRecipientPage(1) }}
+                        placeholder="Search by name or username..."
+                        className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
+                      />
+                      {recipientLoading && (
+                        <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
+                      )}
+                    </div>
+                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                      {(['all', 'regional', 'provincial', 'city', 'reseller'] as const).map((r) => (
+                        <button key={r} onClick={() => { setRecipientRole(r); setRecipientPage(1) }}
+                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors capitalize ${recipientRole === r ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
+                          {r}
+                        </button>
                       ))}
-                    </optgroup>
-                  ))}
-                </select>
-                {selectedDist && (
-                  <p className="text-[10px] text-[#C9A84C] mt-0.5">
-                    Pricing at <strong>{PRICE_LABEL[selectedDist.role]}</strong>
-                  </p>
+                    </div>
+                    {recipients.length > 0 && (
+                      <div className="mt-1.5 border border-[#0D1B3E]/10 rounded-lg overflow-hidden max-h-44 overflow-y-auto">
+                        {recipients.map((r) => (
+                          <button key={r.id} onClick={() => { setOwnerId(r.id); setCart([]) }}
+                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#F0F2F8] text-left border-b border-[#0D1B3E]/5 last:border-0 transition-colors">
+                            <div>
+                              <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
+                              <p className="text-[10px] text-gray-400">@{r.username}</p>
+                            </div>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full capitalize ${
+                              r.role === 'reseller'   ? 'bg-[#fef9ee] text-[#9a6f1e]' :
+                              r.role === 'city'       ? 'bg-[#e8f7ef] text-[#1a7a4a]' :
+                              r.role === 'provincial' ? 'bg-[#f0f7ff] text-[#2563eb]' :
+                                                        'bg-[#eef0f8] text-[#0D1B3E]'
+                            }`}>{r.role}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {recipientMeta.totalPages > 1 && (
+                      <div className="flex items-center justify-between mt-1.5 text-[10px] text-gray-400">
+                        <span>{recipientMeta.total} results</span>
+                        <div className="flex gap-1 items-center">
+                          <button disabled={recipientPage === 1} onClick={() => setRecipientPage(p => p - 1)}
+                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 flex items-center justify-center">‹</button>
+                          <span>{recipientPage}/{recipientMeta.totalPages}</span>
+                          <button disabled={recipientPage === recipientMeta.totalPages} onClick={() => setRecipientPage(p => p + 1)}
+                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 flex items-center justify-center">›</button>
+                        </div>
+                      </div>
+                    )}
+                    {recipientSearch.length > 0 && recipients.length === 0 && !recipientLoading && (
+                      <p className="text-[10px] text-gray-400 mt-1.5 text-center">No results found</p>
+                    )}
+                  </div>
                 )}
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -614,8 +693,8 @@ export default function AdminInventoryPage() {
           <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
             <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}
               className="bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
-              <option value="">All distributors</option>
-              {(['regional', 'provincial', 'city'] as const).map((role) => (
+              <option value="">All</option>
+              {(['regional', 'provincial', 'city', 'reseller'] as const).map((role) => (
                 <optgroup key={role} label={role.charAt(0).toUpperCase() + role.slice(1)}>
                   {distributors.filter((d) => d.role === role).map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} (@{d.username})</option>

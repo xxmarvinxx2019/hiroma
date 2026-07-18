@@ -17,7 +17,11 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const owner_id     = searchParams.get('owner_id')    || ''
+    const owner_id          = searchParams.get('owner_id')          || ''
+    const recipient_search  = searchParams.get('recipient_search')  || ''
+    const recipient_role    = searchParams.get('recipient_role')    || 'all'
+    const recipient_page    = Math.max(1, parseInt(searchParams.get('recipient_page') || '1'))
+    const recipient_size    = 10
     const search       = searchParams.get('search')      || ''
     const stock_search = searchParams.get('stock_search')|| ''
     const type         = searchParams.get('type')        || 'all'
@@ -31,12 +35,12 @@ export async function GET(req: NextRequest) {
     }
 
     const where: Record<string, unknown> = {
-      owner: { role: { in: ['regional', 'provincial', 'city'] } },
+      owner: { role: { in: ['regional', 'provincial', 'city', 'reseller'] } },
       ...(owner_id && { owner_id }),
       ...(Object.keys(productFilter).length > 0 && { product: productFilter }),
     }
 
-    const [total, items, distributors, adminRevenue, adminTotalOrders] = await Promise.all([
+    const [total, items, distributors, adminRevenue, adminTotalOrders, recipientTotal, recipientList] = await Promise.all([
       prisma.inventory.count({ where }),
       prisma.inventory.findMany({
         where,
@@ -55,7 +59,7 @@ export async function GET(req: NextRequest) {
         },
       }),
       prisma.user.findMany({
-        where:   { role: { in: ['regional', 'provincial', 'city'] }, status: 'active' },
+        where:   { role: { in: ['regional', 'provincial', 'city', 'reseller'] }, status: 'active' },
         select:  { id: true, full_name: true, username: true, role: true },
         orderBy: { role: 'asc' },
       }),
@@ -64,11 +68,43 @@ export async function GET(req: NextRequest) {
         _sum:  { total_amount: true },
       }),
       prisma.order.count({ where: { seller_id: user.id } }),
+
+      // recipient count
+      prisma.user.count({
+        where: {
+          status: 'active',
+          role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+          ...(recipient_search && {
+            OR: [
+              { full_name: { contains: recipient_search, mode: 'insensitive' } },
+              { username:  { contains: recipient_search, mode: 'insensitive' } },
+            ],
+          }),
+        },
+      }),
+
+      // recipient list
+      prisma.user.findMany({
+        where: {
+          status: 'active',
+          role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+          ...(recipient_search && {
+            OR: [
+              { full_name: { contains: recipient_search, mode: 'insensitive' } },
+              { username:  { contains: recipient_search, mode: 'insensitive' } },
+            ],
+          }),
+        },
+        select:  { id: true, full_name: true, username: true, role: true },
+        orderBy: { full_name: 'asc' },
+        skip:    (recipient_page - 1) * recipient_size,
+        take:    recipient_size,
+      }),
     ])
 
     // ── All products with how many units distributed ──
     const allInventory = await prisma.inventory.findMany({
-      where:  { owner: { role: { in: ['regional', 'provincial', 'city'] } } },
+      where:  { owner: { role: { in: ['regional', 'provincial', 'city', 'reseller'] } } },
       select: {
         quantity: true, low_stock_threshold: true,
         product:  { select: { id: true } },
@@ -125,6 +161,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       items,
       distributors,
+      recipients:    recipientList,
+      recipientMeta: { total: recipientTotal, totalPages: Math.max(1, Math.ceil(recipientTotal / recipient_size)) },
       productStockSummary: productStockSummaryWithAdmin,
       adminRevenue:     Number(adminRevenue._sum.total_amount || 0),
       adminTotalOrders,
@@ -151,7 +189,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'owner_id and items are required.' }, { status: 400 })
 
     const owner = await prisma.user.findFirst({
-      where:  { id: owner_id, role: { in: ['regional', 'provincial', 'city'] }, status: 'active' },
+      where:  { id: owner_id, role: { in: ['regional', 'provincial', 'city', 'reseller'] }, status: 'active' },
       select: { id: true, full_name: true, role: true },
     })
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
