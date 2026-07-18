@@ -46,11 +46,18 @@ interface Payout {
 
 const PAGE_SIZE = 10
 
+const COMMISSION_ICONS: Record<string, string> = {
+  direct_referral: '👥',
+  binary_pairing:  '🔗',
+  sponsor_point:   '📦',
+  multilevel:      '🏆',
+}
+
 const COMMISSION_LABELS: Record<string, string> = {
   direct_referral: 'Direct Referral',
   binary_pairing:  'Binary Pairing',
   multilevel:      'Multi-level',
-  sponsor_point:   'Sponsor Point',
+  sponsor_point:   'Product Binary',
 }
 
 const COMMISSION_COLORS: Record<string, string> = {
@@ -248,14 +255,18 @@ export default function ResellerWalletPage() {
       {wallet && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: 'Available Balance', value: fmt(wallet.balance),         accent: '#C9A84C' },
-            { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#0D1B3E' },
-            { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#1a7a4a' },
+            { label: 'Available Balance', value: fmt(wallet.balance),         accent: '#C9A84C', icon: '💰', sub: 'Ready to withdraw' },
+            { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#1a7a4a', icon: '📈', sub: 'Lifetime earnings'  },
+            { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#0D1B3E', icon: '💸', sub: 'Paid out'           },
           ].map((c) => (
-            <div key={c.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5"
+            <div key={c.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
               style={{ borderTop: `2px solid ${c.accent}` }}>
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{c.label}</p>
-              <p className="text-2xl font-semibold" style={{ color: c.accent }}>{c.value}</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-gray-400 uppercase tracking-wide">{c.label}</p>
+                <span className="text-lg">{c.icon}</span>
+              </div>
+              <p className="text-xl font-bold" style={{ color: c.accent }}>{c.value}</p>
+              <p className="text-[10px] text-gray-400 mt-1">{c.sub}</p>
             </div>
           ))}
         </div>
@@ -266,14 +277,15 @@ export default function ResellerWalletPage() {
         <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5">
           <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Earnings Breakdown</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {Object.entries(commissionSummary).map(([type, data]) => (
-              <div key={type} className="rounded-xl p-3 border border-[#0D1B3E]/8">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COMMISSION_COLORS[type] }} />
-                  <p className="text-[10px] text-gray-400 leading-tight">{COMMISSION_LABELS[type]}</p>
+            {Object.entries(commissionSummary).filter(([type]) => type !== 'multilevel').map(([type, data]) => (
+              <div key={type} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
+                style={{ borderTop: `2px solid ${COMMISSION_COLORS[type] || '#9ca3af'}` }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide">{COMMISSION_LABELS[type] || type}</p>
+                  <span className="text-base">{COMMISSION_ICONS[type] || '💼'}</span>
                 </div>
-                <p className="text-base font-semibold text-[#0D1B3E]">{fmt(data.amount)}</p>
-                <p className="text-[10px] text-gray-400">{data.count} transactions</p>
+                <p className="text-xl font-bold" style={{ color: COMMISSION_COLORS[type] || '#0D1B3E' }}>{fmt(data.amount)}</p>
+                <p className="text-[10px] text-gray-400 mt-1">{data.count} transaction{data.count !== 1 ? 's' : ''}</p>
               </div>
             ))}
           </div>
