@@ -304,12 +304,13 @@ export default function ResellerTreePage() {
 
       {/* Stat Cards */}
       {earnings && meta && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { label: 'Total Earned',   value: fmt(earnings.total_earned),                     sub: `Wallet: ${fmt(earnings.wallet_balance)}`,  color: '#1a7a4a', icon: '💰' },
-            { label: 'Left Leg',       value: String(meta.left_count),                         sub: 'Downline members',                         color: '#3b82f6', icon: '👥' },
-            { label: 'Right Leg',      value: String(meta.right_count),                        sub: 'Downline members',                         color: '#f59e0b', icon: '👥' },
-            { label: 'Product Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`, sub: `≈ ${fmt(earnings.total_points * 0.50)}`,   color: '#C9A84C', icon: '⭐' },
+            { label: 'Total Earned',   value: fmt(earnings.total_earned),                          sub: `Wallet: ${fmt(earnings.wallet_balance)}`,               color: '#1a7a4a', icon: '💰' },
+            { label: 'Left Leg',       value: String(meta.left_count),                              sub: 'Downline members',                                      color: '#3b82f6', icon: '👥' },
+            { label: 'Right Leg',      value: String(meta.right_count),                             sub: 'Downline members',                                      color: '#f59e0b', icon: '👥' },
+            { label: 'Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`,      sub: `≈ ${fmt(earnings.total_points * 0.50)}`,                color: '#C9A84C', icon: '⭐' },
+            { label: 'Carry Over',     value: `${earnings.pending_pairing_balance.toLocaleString()} pts`, sub: 'Unmatched binary points',                         color: '#9a6f1e', icon: '🔄' },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all">
               <div className="flex items-center justify-between mb-3">
@@ -448,6 +449,18 @@ export default function ResellerTreePage() {
                     <span className="text-sm font-semibold text-[#C9A84C]">{selectedNode.total_pu} PU</span>
                   </div>
                 )}
+                <div className="flex justify-between items-center py-1.5 border-t border-[#0D1B3E]/8 pt-2.5">
+                  <span className="text-sm text-gray-400">Carry Over (Left)</span>
+                  <span className="text-sm font-semibold text-[#9a6f1e]">{selectedNode.left_points} pts</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5">
+                  <span className="text-sm text-gray-400">Carry Over (Right)</span>
+                  <span className="text-sm font-semibold text-[#9a6f1e]">{selectedNode.right_points} pts</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5">
+                  <span className="text-sm text-gray-400">Total Carry Over</span>
+                  <span className="text-sm font-bold text-[#9a6f1e]">{selectedNode.pending_pairing_balance} pts</span>
+                </div>
               </div>
               {!selectedNode.is_self && (
                 <button onClick={() => { setRootUserId(selectedNode.user_id); setSelectedNode(null) }}
