@@ -667,34 +667,42 @@ export default function CityResellersPage() {
         </Link>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Total resellers', value: meta.total, accent: '#0D1B3E' },
-          { label: 'Current page', value: `${meta.page} of ${meta.totalPages}`, accent: '#C9A84C' },
-          { label: 'Per page', value: PAGE_SIZE, accent: '#0D1B3E' },
+          { label: 'Total Resellers', value: meta.total.toLocaleString(),                  icon: '👥', color: '#0D1B3E' },
+          { label: 'This Page',       value: `${resellers.length} shown`,                  icon: '📄', color: '#C9A84C' },
+          { label: 'Active',          value: resellers.filter(r => r.status === 'active').length, icon: '✅', color: '#1a7a4a' },
+          { label: 'Inactive',        value: resellers.filter(r => r.status !== 'active').length, icon: '⚠️', color: '#e05252' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4" style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all" style={{ borderTop: `2px solid ${s.color}` }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
+              <span className="text-lg">{s.icon}</span>
+            </div>
+            <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
           </div>
         ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+      {/* Search + List */}
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
+        {/* Search bar */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by name or username..."
-            className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
-          />
+          <div className="flex items-center gap-2 flex-1 bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-xl px-3 py-2 focus-within:border-[#C9A84C] transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by name or username..."
+              className="flex-1 bg-transparent text-sm text-[#0D1B3E] outline-none placeholder:text-gray-300" />
+          </div>
         </div>
 
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Reseller', 'Mobile', 'Package', 'Points', 'Wallet', 'Status', ''].map((h) => (
-            <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+        {/* Column headers */}
+        <div className="grid grid-cols-6 px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
+          {['Reseller', 'Mobile', 'Package', 'Address', 'Status', 'Action'].map((h) => (
+            <p key={h} className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{h}</p>
           ))}
         </div>
 
@@ -705,29 +713,60 @@ export default function CityResellersPage() {
           </div>
         ) : resellers.length === 0 ? (
           <div className="px-4 py-12 text-center">
+            <span className="text-4xl block mb-3">👥</span>
             <p className="text-gray-400 text-sm mb-2">No resellers found</p>
-            <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline">Register your first reseller →</button>
+            <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline font-medium">Register your first reseller →</button>
           </div>
         ) : (
           resellers.map((r) => (
-            <div key={r.id} className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
-              <div>
-                <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
-                <p className="text-xs text-gray-400">@{r.username}</p>
+            <div key={r.id} className="grid grid-cols-6 px-5 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
+              {/* Reseller */}
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                  {r.full_name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
+                  <p className="text-[10px] text-gray-400">@{r.username}</p>
+                </div>
               </div>
-              <p className="text-xs text-gray-400">{r.mobile}</p>
-              <span><span className="text-xs bg-[#fef6e4] text-[#9a6f1e] px-2 py-0.5 rounded-full">{r.reseller_profile?.package?.name || '—'}</span></span>
-              <p className="text-xs font-medium text-[#C9A84C]">{r.reseller_profile?.total_points || 0} pts</p>
-              <p className="text-xs font-medium text-[#0D1B3E]">₱{Number(r.wallet?.balance || 0).toLocaleString()}</p>
-              <span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${r.status === 'active' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'}`}>
-                  {r.status}
+              {/* Mobile */}
+              <div className="flex items-center gap-1.5">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5 19.79 19.79 0 0 1 1.58 5a2 2 0 0 1 1.95-2.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10.09a16 16 0 0 0 6 6l.92-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
+                <p className="text-xs text-gray-500">{r.mobile || '—'}</p>
+              </div>
+              {/* Package */}
+              <div>
+                <span className="text-[10px] bg-[#fef6e4] text-[#9a6f1e] px-2 py-1 rounded-full font-medium">
+                  {r.reseller_profile?.package?.name || '—'}
                 </span>
-              </span>
-              <button onClick={() => setUpgradingReseller(r)}
-                className="text-xs bg-[#eef0f8] text-[#0D1B3E] px-2.5 py-1.5 rounded-lg hover:bg-[#C9A84C] hover:text-white transition-colors font-medium">
-                Upgrade
-              </button>
+              </div>
+              {/* Address */}
+              <div className="flex items-center gap-1.5">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                </svg>
+                <p className="text-xs text-gray-500 truncate">{r.address || '—'}</p>
+              </div>
+
+              {/* Status */}
+              <div>
+                <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full font-semibold ${r.status === 'active' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${r.status === 'active' ? 'bg-[#1a7a4a]' : 'bg-[#a03030]'}`} />
+                  {r.status === 'active' ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              {/* Action — icon button instead of text */}
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setUpgradingReseller(r)} title="Upgrade Package"
+                  className="w-8 h-8 rounded-lg bg-[#f8f9fc] border border-[#0D1B3E]/8 hover:bg-[#C9A84C] hover:border-[#C9A84C] hover:text-white text-[#0D1B3E] transition-all flex items-center justify-center group">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           ))
         )}

@@ -14,6 +14,7 @@ function isValidUsername(username: string): boolean {
 }
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 
 interface VerifiedPin {
@@ -54,6 +55,7 @@ export default function CityRegisterResellerPage() {
 
   // Step 1 — PIN
   const [pinInput, setPinInput]   = useState('')
+  const searchParams = useSearchParams()
   const [pinData, setPinData]     = useState<VerifiedPin | null>(null)
   const [pinError, setPinError]   = useState('')
   const [pinLoading, setPinLoading] = useState(false)
@@ -180,6 +182,28 @@ export default function CityRegisterResellerPage() {
   }, [])
 
   // Step 1 — Verify PIN
+  // Auto-fill and verify PIN from URL param
+  useEffect(() => {
+    const pinFromUrl = searchParams.get('pin')
+    if (pinFromUrl) {
+      setPinInput(pinFromUrl.toUpperCase())
+      // Auto-verify after short delay
+      setTimeout(async () => {
+        const res = await fetch('/api/city/pins/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin_code: pinFromUrl.trim().toUpperCase() }),
+        })
+        const data = await res.json()
+        if (res.ok && data.pin) {
+          setPinData(data.pin)
+        } else {
+          setPinError(data.error || 'Invalid PIN')
+        }
+      }, 300)
+    }
+  }, [])
+
   const verifyPin = async () => {
     if (!pinInput.trim()) { setPinError('Please enter a PIN code.'); return }
     setPinLoading(true); setPinError('')
