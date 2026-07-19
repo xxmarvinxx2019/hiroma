@@ -60,9 +60,9 @@ export async function GET() {
       inventory,
       newProvincialThisMonth,
     ] = await Promise.all([
-      prisma.order.count({ where: { buyer_id: user.id } }),
-      prisma.order.count({ where: { buyer_id: user.id, status: 'pending' } }),
-      prisma.order.count({ where: { buyer_id: user.id, status: 'delivered' } }),
+      prisma.order.count({ where: { OR: [{ buyer_id: user.id }, { seller_id: user.id }] } }),
+      prisma.order.count({ where: { OR: [{ buyer_id: user.id }, { seller_id: user.id }], status: 'pending' } }),
+      prisma.order.count({ where: { OR: [{ buyer_id: user.id }, { seller_id: user.id }], status: 'delivered' } }),
       prisma.inventory.findMany({
         where:  { owner_id: user.id },
         select: { quantity: true, low_stock_threshold: true, product: { select: { name: true } } },
@@ -79,6 +79,7 @@ export async function GET() {
     // ── Today's sales ──
     const todayItems = await prisma.orderItem.findMany({
       where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: today } } },
+      // Note: seller_id covers both provincial and direct city dist orders
       select: { quantity: true, subtotal: true },
     })
     const yesterdayItems = await prisma.orderItem.findMany({

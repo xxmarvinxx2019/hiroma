@@ -11,18 +11,26 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const search   = searchParams.get('search') || ''
-    const type     = searchParams.get('type') || 'all'
-    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const search     = searchParams.get('search') || ''
+    const type       = searchParams.get('type')   || 'all'
+    const stockParam = searchParams.get('stock')  || 'all'
+    const page       = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize   = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
     const productFilter: Record<string, unknown> = {
       ...(type !== 'all' && { type }),
       ...(search && { name: { contains: search, mode: 'insensitive' } }),
     }
 
+    // Build stock level filter
+    let stockWhere: Record<string, unknown> = {}
+    if (stockParam === 'out') stockWhere = { quantity: { equals: 0 } }
+    if (stockParam === 'low') stockWhere = { quantity: { gt: 0 } }  // further filtered client-side
+    if (stockParam === 'ok')  stockWhere = { quantity: { gt: 0 } }  // further filtered client-side
+
     const where: Record<string, unknown> = {
       owner_id: user.id,
+      ...stockWhere,
       ...(Object.keys(productFilter).length > 0 && { product: productFilter }),
     }
 
@@ -68,7 +76,7 @@ export async function GET(req: NextRequest) {
         items: {
           select: {
             quantity: true, subtotal: true,
-            product: { select: { regional_price: true } },
+            product: { select: { id: true, name: true, type: true, regional_price: true } },
           },
         },
       },
