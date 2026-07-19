@@ -309,7 +309,7 @@ export default function ResellerTreePage() {
             { label: 'Total Earned',   value: fmt(earnings.total_earned),                     sub: `Wallet: ${fmt(earnings.wallet_balance)}`,  color: '#1a7a4a', icon: '💰' },
             { label: 'Left Leg',       value: String(meta.left_count),                         sub: 'Downline members',                         color: '#3b82f6', icon: '👥' },
             { label: 'Right Leg',      value: String(meta.right_count),                        sub: 'Downline members',                         color: '#f59e0b', icon: '👥' },
-            { label: 'Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`, sub: `≈ ${fmt(earnings.total_points * 0.50)}`,   color: '#C9A84C', icon: '⭐' },
+            { label: 'Product Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`, sub: `≈ ${fmt(earnings.total_points * 0.50)}`,   color: '#C9A84C', icon: '⭐' },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all">
               <div className="flex items-center justify-between mb-3">
