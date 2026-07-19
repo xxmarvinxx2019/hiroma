@@ -93,7 +93,7 @@ function CreateOrderModal({
   const [notes, setNotes]                 = useState('')
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState('')
-  const [paymentMethod, setPaymentMethod]         = useState('cash_on_pickup')
+  const [paymentMethod, setPaymentMethod]         = useState('cash')
   const [paymentReference, setPaymentReference]   = useState('')
   const [paymentSenderName, setPaymentSenderName] = useState('')
   const [paymentDatetime, setPaymentDatetime]     = useState('')
@@ -133,13 +133,13 @@ function CreateOrderModal({
 
   const handleSubmit = async () => {
     if (cart.length === 0) { setError('Add at least one item.'); return }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
+    if (paymentMethod !== 'cash' && !paymentReference.trim()) {
       setError('Please enter the payment reference number.'); return
     }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentSenderName.trim()) {
+    if (paymentMethod !== 'cash' && !paymentSenderName.trim()) {
       setError('Please enter the sender name.'); return
     }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentDatetime) {
+    if (paymentMethod !== 'cash' && !paymentDatetime) {
       setError('Please enter the payment date and time.'); return
     }
     setSubmitting(true)
@@ -277,11 +277,11 @@ function CreateOrderModal({
               <div>
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
-                  <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference(''); setPaymentSenderName(''); setPaymentDatetime('') }}
-                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${paymentMethod === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
+                  <div onClick={() => { setPaymentMethod('cash'); setPaymentReference('') }}
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${paymentMethod === 'cash' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
                     <span className="text-sm">💵</span>
                     <p className="text-[10px] font-medium text-[#0D1B3E] flex-1">Cash on Pickup</p>
-                    {paymentMethod === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
+                    {paymentMethod === 'cash' && <span className="text-[#C9A84C] text-xs">✓</span>}
                   </div>
                   {paymentMethods.map((pm) => (
                     <div key={pm.id} onClick={() => setPaymentMethod(pm.type)}
@@ -296,7 +296,7 @@ function CreateOrderModal({
                     </div>
                   ))}
                 </div>
-                {paymentMethod !== 'cash_on_pickup' && (
+                {paymentMethod !== 'cash' && (
                   <div className="mt-2 space-y-1.5">
                     <input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)}
                       placeholder="Reference number *"
@@ -341,7 +341,7 @@ function CreateOrderModal({
 // ============================================================
 
 export default function RegionalOrdersPage() {
-  const [tab, setTab]           = useState<'my_orders' | 'provincial_orders'>('my_orders')
+  const [tab, setTab]           = useState<'my_orders' | 'distributor_orders'>('my_orders')
   const [orders, setOrders]     = useState<Order[]>([])
   const [meta, setMeta]         = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]   = useState(true)
@@ -407,7 +407,7 @@ export default function RegionalOrdersPage() {
           <p className="text-sm text-gray-400 mt-0.5">
             {tab === 'my_orders'
               ? supplier ? `Buying from: ${supplier.level} — ${supplier.full_name}` : 'Your purchase orders'
-              : 'Orders from your resellers'}
+              : 'Orders from provincial & city distributors'}
           </p>
         </div>
         {tab === 'my_orders' && (
@@ -423,12 +423,12 @@ export default function RegionalOrdersPage() {
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         {([
-          { key: 'my_orders',       label: 'My Orders',           desc: 'To Admin' },
-          { key: 'provincial_orders', label: 'Provincial Orders', desc: 'From provincial distributors' },
+          { key: 'my_orders',          label: 'My Orders',         desc: 'To Admin' },
+          { key: 'distributor_orders', label: 'Distributor Orders', desc: 'From provincial & city distributors' },
         ] as const).map((t) => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key as 'my_orders' | 'provincial_orders'); setStatusFilter('all'); setTypeFilter('all'); setSearch(''); setSearchInput('') }}
+            onClick={() => { setTab(t.key as 'my_orders' | 'distributor_orders'); setStatusFilter('all'); setTypeFilter('all'); setSearch(''); setSearchInput('') }}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${
               tab === t.key
                 ? 'bg-[#0D1B3E] text-white'
@@ -442,35 +442,27 @@ export default function RegionalOrdersPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         {[
-          { label: 'Total',      value: summary.total,      accent: 'navy'  },
-          { label: 'Pending',    value: summary.pending,    accent: 'gold'  },
-          { label: 'Processing', value: summary.processing, accent: 'navy'  },
-          { label: 'Delivered',  value: summary.delivered,  accent: 'green' },
-          { label: 'Cancelled',  value: summary.cancelled,  accent: 'red'   },
+          { label: 'Total Orders', value: summary.total,      color: '#0D1B3E', icon: '📋' },
+          { label: 'Pending',      value: summary.pending,    color: '#f59e0b', icon: '🕐' },
+          { label: 'Processing',   value: summary.processing, color: '#3b82f6', icon: '📦' },
+          { label: 'Delivered',    value: summary.delivered,  color: '#1a7a4a', icon: '✅' },
+          { label: 'Cancelled',    value: summary.cancelled,  color: '#e05252', icon: '❌' },
         ].map((s) => (
-          <div
-            key={s.label}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${
-              s.accent === 'gold'  ? '#C9A84C' :
-              s.accent === 'green' ? '#1a7a4a' :
-              s.accent === 'red'   ? '#e05252' : '#0D1B3E'
-            }` }}
-          >
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color:
-              s.accent === 'gold'  ? '#C9A84C' :
-              s.accent === 'green' ? '#1a7a4a' :
-              s.accent === 'red'   ? '#e05252' : '#0D1B3E'
-            }}>{s.value}</p>
+          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
+            style={{ borderTop: `2px solid ${s.color}` }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
+              <span className="text-lg">{s.icon}</span>
+            </div>
+            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
           </div>
         ))}
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
@@ -513,12 +505,12 @@ export default function RegionalOrdersPage() {
           </div>
         ) : orders.length === 0 ? (
           <div className="px-4 py-12 text-center text-gray-400 text-sm">
-            {tab === 'my_orders' ? 'No purchase orders yet. Click "+ New Order" to place one.' : 'No provincial distributor orders yet.'}
+            {tab === 'my_orders' ? 'No purchase orders yet. Click "+ New Order" to place one.' : 'No distributor orders yet.'}
           </div>
         ) : (
           orders.map((order) => {
             const counterparty = tab === 'my_orders' ? order.seller : order.buyer
-            const nextStatuses = tab === 'provincial_orders' ? STATUS_NEXT[order.status] : (order.status === 'pending' ? ['cancelled'] : [])
+            const nextStatuses = tab === 'distributor_orders' ? STATUS_NEXT[order.status] : (order.status === 'pending' ? ['cancelled'] : [])
             return (
               <div key={order.id}>
                 <div
@@ -530,9 +522,9 @@ export default function RegionalOrdersPage() {
                     <p className="text-xs font-medium text-[#0D1B3E]">{counterparty.full_name}</p>
                     <p className="text-xs text-gray-400 capitalize">@{counterparty.username} · {counterparty.role}</p>
                   {/* Payment info */}
-                  {order.payment_method && order.payment_method !== 'cash_on_pickup' && (
+                  {order.payment_method && (
                     <div className="mt-0.5 space-y-0.5">
-                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : '🏦 Bank'}</p>
+                      <p className="text-[10px] text-gray-400">{order.payment_method === 'gcash' ? '📱 GCash' : order.payment_method === 'bank_transfer' ? '🏦 Bank Transfer' : '💵 Cash'}</p>
                       {order.payment_reference    && <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>}
                       {order.payment_status === 'paid'
                         ? <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>

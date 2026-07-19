@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const where: Record<string, unknown> = {
       ...(isBuyer
         ? { buyer_id: user.id }
-        : { seller_id: user.id, buyer: { role: 'provincial' } }
+        : { seller_id: user.id, buyer: { role: { in: ['provincial', 'city'] } } }
       ),
       ...(status !== 'all' && { status }),
       ...(type   !== 'all' && { order_type: type }),
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
         by: ['status'],
         where: isBuyer
           ? { buyer_id: user.id }
-          : { seller_id: user.id, buyer: { role: 'provincial' } },
+          : { seller_id: user.id, buyer: { role: { in: ['provincial', 'city'] } } },
         _count: { status: true },
       }),
       isBuyer ? resolveSupplier() : Promise.resolve(null),
@@ -208,7 +208,7 @@ export async function PATCH(req: NextRequest) {
       where: {
         id: order_id,
         OR: [
-          { seller_id: user.id, buyer: { role: 'provincial' } },
+          { seller_id: user.id, buyer: { role: { in: ['provincial', 'city'] } } },
           { buyer_id: user.id, status: 'pending' },
         ],
       },

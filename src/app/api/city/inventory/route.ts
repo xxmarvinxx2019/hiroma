@@ -11,18 +11,25 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const search   = searchParams.get('search') || ''
-    const type     = searchParams.get('type') || 'all'
-    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const search     = searchParams.get('search') || ''
+    const type       = searchParams.get('type')   || 'all'
+    const stockParam = searchParams.get('stock')  || 'all'
+    const page       = Math.max(1, parseInt(searchParams.get('page')     || '1'))
+    const pageSize   = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
     const productFilter: Record<string, unknown> = {
       ...(type !== 'all' && { type }),
       ...(search && { name: { contains: search, mode: 'insensitive' } }),
     }
 
+    let stockWhere: Record<string, unknown> = {}
+    if (stockParam === 'out') stockWhere = { quantity: { equals: 0 } }
+    if (stockParam === 'low') stockWhere = { quantity: { gt: 0 } }
+    if (stockParam === 'ok')  stockWhere = { quantity: { gt: 0 } }
+
     const where: Record<string, unknown> = {
       owner_id: user.id,
+      ...stockWhere,
       ...(Object.keys(productFilter).length > 0 && { product: productFilter }),
     }
 
@@ -71,7 +78,7 @@ export async function GET(req: NextRequest) {
           select: {
             quantity: true,
             subtotal: true,
-            product:  { select: { city_price: true } },
+            product:  { select: { id: true, name: true, type: true, city_price: true } },
           },
         },
       },
@@ -83,6 +90,23 @@ export async function GET(req: NextRequest) {
     const actualCost = deliveredOrders.reduce(
       (s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price) * i.quantity, 0), 0
     )
+
+    // Build product sales map
+    const salesMap = new Map<string, { name: string; type: string; units_sold: number; revenue: number; cost: number }>()
+    for (const o of deliveredOrders) {
+      for (const item of o.items) {
+        const p = item.product as any
+        if (!p?.id) continue
+        const existing = salesMap.get(p.id) || { name: p.name, type: p.type, units_sold: 0, revenue: 0, cost: 0 }
+        existing.units_sold += item.quantity
+        existing.revenue    += Number(item.subtotal)
+        existing.cost       += Number(p.city_price) * item.quantity
+        salesMap.set(p.id, existing)
+      }
+    }
+    const productSales = Array.from(salesMap.entries())
+      .map(([product_id, data]) => ({ product_id, ...data, profit: data.revenue - data.cost }))
+      .sort((a, b) => b.units_sold - a.units_sold)
 
     const summary = {
       total_products:      all.length,
@@ -107,18 +131,7 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    const salesMap = new Map<string, { name: string; type: string; units_sold: number; revenue: number; cost: number }>()
-    for (const item of soldItems) {
-      const existing = salesMap.get(item.product.id) || { name: item.product.name, type: item.product.type, units_sold: 0, revenue: 0, cost: 0 }
-      existing.units_sold += item.quantity
-      existing.revenue    += Number(item.subtotal)
-      existing.cost       += Number(item.product.city_price) * item.quantity
-      salesMap.set(item.product.id, existing)
-    }
 
-    const productSales = Array.from(salesMap.entries())
-      .map(([product_id, data]) => ({ product_id, ...data, profit: data.revenue - data.cost }))
-      .sort((a, b) => b.units_sold - a.units_sold)
 
     return NextResponse.json({
       items, summary, productSales,
