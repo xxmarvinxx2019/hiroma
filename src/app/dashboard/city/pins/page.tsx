@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -264,17 +266,28 @@ export default function CityPinsPage() {
               className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center">
 
               {/* PIN Code */}
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-mono font-medium text-[#0D1B3E] tracking-wide">{pin.pin_code}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {pin.status === 'unused' ? (
+                  <Link href={`/dashboard/city/resellers/register?pin=${pin.pin_code}`}
+                    className="text-xs font-mono font-semibold text-[#2563eb] tracking-wide hover:text-[#C9A84C] hover:underline transition-colors"
+                    title="Click to register a reseller with this PIN">
+                    {pin.pin_code}
+                  </Link>
+                ) : (
+                  <p className="text-xs font-mono font-medium text-gray-400 tracking-wide">{pin.pin_code}</p>
+                )}
                 {pin.status === 'unused' && (
-                  <button onClick={() => handleCopy(pin.pin_code, pin.id)}
-                    className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full transition-all ${
-                      copiedId === pin.id
-                        ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                        : 'bg-[#F0F2F8] text-gray-400 hover:bg-[#0D1B3E] hover:text-white'
-                    }`}>
-                    {copiedId === pin.id ? '✓ Copied' : 'Copy'}
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => handleCopy(pin.pin_code, pin.id)}
+                      className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full transition-all ${
+                        copiedId === pin.id
+                          ? 'bg-[#e8f7ef] text-[#1a7a4a]'
+                          : 'bg-[#F0F2F8] text-gray-400 hover:bg-[#0D1B3E] hover:text-white'
+                      }`}>
+                      {copiedId === pin.id ? '✓ Copied' : 'Copy'}
+                    </button>
+                    <span className="text-[9px] text-[#2563eb]/50">↗ Register</span>
+                  </div>
                 )}
               </div>
 
