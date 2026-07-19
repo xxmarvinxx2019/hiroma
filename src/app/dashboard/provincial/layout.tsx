@@ -20,10 +20,16 @@ const navItems = [
   {
     section: 'Distribution',
     items: [
-      { label: 'Inventory', href: '/dashboard/provincial/inventory', icon: '📦' },
-      { label: 'Orders', href: '/dashboard/provincial/orders', icon: '🛒' },
-      { label: 'Payment Methods', href: '/dashboard/provincial/payment-methods', icon: '💳' },
-      { label: 'City Distributors', href: '/dashboard/provincial/distributors', icon: '🏢' },
+      { label: 'Inventory',        href: '/dashboard/provincial/inventory',      icon: '📦' },
+      { label: 'Orders',           href: '/dashboard/provincial/orders',         icon: '🛒' },
+      { label: 'Payment Methods',  href: '/dashboard/provincial/payment-methods', icon: '💳' },
+    ],
+  },
+  {
+    section: 'Network',
+    items: [
+      { label: 'Distributors', href: '/dashboard/provincial/distributors', icon: '🏢' },
+      { label: 'Resellers',    href: '/dashboard/provincial/resellers',    icon: '👥' },
     ],
   },
   {

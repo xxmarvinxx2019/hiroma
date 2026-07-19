@@ -109,17 +109,30 @@ export default function CityPinsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Total PINs', value: summary.total,   accent: '#0D1B3E' },
-          { label: 'Unused',     value: summary.unused,  accent: '#C9A84C' },
-          { label: 'Used',       value: summary.used,    accent: '#0D1B3E' },
-          { label: 'Expired',    value: summary.expired, accent: '#e05252' },
+          { label: 'Total PINs', value: summary.total,   color: '#0D1B3E', icon: '🔑', sub: 'All time' },
+          { label: 'Available',  value: summary.unused,  color: '#C9A84C', icon: '🔓', sub: 'Ready to use', badge: summary.unused === 0 ? 'Request more' : undefined },
+          { label: 'Used',       value: summary.used,    color: '#1a7a4a', icon: '✅', sub: 'Activated by resellers' },
+          { label: 'Expired',    value: summary.expired, color: '#e05252', icon: '❌', sub: 'No longer valid' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
+            style={{ borderTop: `2px solid ${s.color}` }}>
+            <div className="flex items-start justify-between mb-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
+                style={{ backgroundColor: s.color + '15' }}>
+                {s.icon}
+              </div>
+              {s.badge && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: s.color + '15', color: s.color }}>
+                  {s.badge}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
+            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
+            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
           </div>
         ))}
       </div>
