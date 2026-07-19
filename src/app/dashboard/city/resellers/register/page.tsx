@@ -13,7 +13,7 @@ function isValidUsername(username: string): boolean {
   return /^[a-z][a-z0-9]*$/.test(username)
 }
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 
@@ -49,7 +49,7 @@ interface VerifiedReferral {
   node_id: string
 }
 
-export default function CityRegisterResellerPage() {
+function CityRegisterResellerPageInner() {
   const router = useRouter()
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
 
@@ -715,5 +715,17 @@ export default function CityRegisterResellerPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function CityRegisterResellerPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <div className="w-7 h-7 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <CityRegisterResellerPageInner />
+    </Suspense>
   )
 }
