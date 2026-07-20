@@ -48,8 +48,22 @@ export async function GET(req: NextRequest) {
       else                         stats.inactive += row._count.id
     }
 
+    // Fetch pu_value and binary_eligible via raw SQL
+    const productIds = products.map(p => p.id)
+    const puData = productIds.length > 0
+      ? await prisma.$queryRaw<{ id: string; pu_value: number; binary_eligible: boolean }[]>`
+          SELECT id::text, pu_value, binary_eligible FROM products WHERE id::text = ANY(${productIds}::text[])`
+      : []
+    const puMap = new Map(puData.map(p => [p.id, p]))
+
+    const productsWithPU = products.map(p => ({
+      ...p,
+      pu_value:        puMap.get(p.id)?.pu_value        ?? 0,
+      binary_eligible: puMap.get(p.id)?.binary_eligible ?? true,
+    }))
+
     return NextResponse.json({
-      products, stats,
+      products: productsWithPU, stats,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -69,6 +83,7 @@ export async function POST(req: NextRequest) {
       name, description, type, image_url,
       srp, cost_price,
       regional_price, provincial_price, city_price, reseller_price,
+      pu_value, binary_eligible,
     } = await req.json()
 
     if (!name || !reseller_price || !srp) {
@@ -80,7 +95,7 @@ export async function POST(req: NextRequest) {
         name:             name.trim(),
         description:      description?.trim() || null,
         type:             type || 'physical',
-        price:            parseFloat(srp),            // SRP — independent field
+        price:            parseFloat(srp),
         cost_price:       parseFloat(cost_price       || 0),
         regional_price:   parseFloat(regional_price   || 0),
         provincial_price: parseFloat(provincial_price || 0),
@@ -90,6 +105,11 @@ export async function POST(req: NextRequest) {
         is_active:        true,
       },
     })
+
+    // Set pu_value and binary_eligible via raw SQL
+    const puVal  = pu_value != null ? parseInt(pu_value) : 0
+    const binVal = binary_eligible !== false
+    await prisma.$executeRaw`UPDATE products SET pu_value = ${puVal}::int, binary_eligible = ${binVal}::boolean WHERE id::text = ${product.id}`
 
     return NextResponse.json({ success: true, product })
   } catch (error) {
@@ -109,6 +129,7 @@ export async function PATCH(req: NextRequest) {
       id, name, description, type, image_url, is_active,
       srp, cost_price,
       regional_price, provincial_price, city_price, reseller_price,
+      pu_value, binary_eligible,
     } = await req.json()
 
     if (!id) {
@@ -121,7 +142,7 @@ export async function PATCH(req: NextRequest) {
         ...(name             != null && { name:             name.trim() }),
         ...(description      != null && { description:      description?.trim() || null }),
         ...(type             != null && { type }),
-        ...(srp              != null && { price:            parseFloat(srp) }),  // SRP independent
+        ...(srp              != null && { price:            parseFloat(srp) }),
         ...(cost_price       != null && { cost_price:       parseFloat(cost_price) }),
         ...(regional_price   != null && { regional_price:   parseFloat(regional_price) }),
         ...(provincial_price != null && { provincial_price: parseFloat(provincial_price) }),
@@ -131,6 +152,14 @@ export async function PATCH(req: NextRequest) {
         ...(is_active        != null && { is_active }),
       },
     })
+
+    // pu_value and binary_eligible via raw SQL (columns added outside Prisma schema)
+    if (pu_value != null || binary_eligible != null) {
+      const puVal  = pu_value        != null ? parseInt(pu_value)            : null
+      const binVal = binary_eligible != null ? (binary_eligible !== false)   : null
+      if (puVal  != null) await prisma.$executeRaw`UPDATE products SET pu_value = ${puVal}::int WHERE id::text = ${id}`
+      if (binVal != null) await prisma.$executeRaw`UPDATE products SET binary_eligible = ${binVal}::boolean WHERE id::text = ${id}`
+    }
 
     return NextResponse.json({ success: true, product })
   } catch (error) {
