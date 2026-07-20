@@ -57,12 +57,16 @@ interface ReportData {
 const fmt  = (n: number) => `₱${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtN = (n: number) => Number(n).toLocaleString()
 
-function StatCard({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
+function StatCard({ label, value, accent, sub, icon, badge }: { label: string; value: string; accent: string; sub?: string; icon?: string; badge?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4" style={{ borderTop: `2px solid ${accent}` }}>
+    <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all" style={{ borderTop: `2px solid ${accent}` }}>
+      <div className="flex items-start justify-between mb-3">
+        {icon ? <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: accent + '15' }}>{icon}</div> : <div />}
+        {badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: accent + '15', color: accent }}>{badge}</span>}
+      </div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-xl font-semibold" style={{ color: accent }}>{value}</p>
-      {sub && <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>}
+      <p className="text-xl font-bold" style={{ color: accent }}>{value}</p>
+      {sub && <p className="text-[10px] text-gray-400 mt-1">{sub}</p>}
     </div>
   )
 }
@@ -111,7 +115,8 @@ function BarChart({ data }: { data: DailySale[] }) {
 export default function AdminReportsPage() {
   const [report, setReport]   = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'pins' | 'packages' | 'network' | 'mlm'>('overview')
+  const [activeTab, setActiveTab]   = useState<'overview' | 'products' | 'pins' | 'packages' | 'network' | 'mlm'>('overview')
+  const [showAllTime, setShowAllTime] = useState(false)
 
   // Filters
   const [days,     setDays]     = useState(30)
@@ -338,35 +343,55 @@ export default function AdminReportsPage() {
           {/* Overall sales summary */}
           <div>
             <SectionTitle title="Overall Sales Summary" subtitle="Product sales + PIN sales combined for the period" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Total Revenue"    value={fmt(overview.overallRevenue)}   accent="#0D1B3E" />
-              <StatCard label="Total Profit"     value={fmt(overview.overallProfit)}    accent="#1a7a4a" />
-              <StatCard label="Product Revenue"  value={fmt(overview.totalProductRevenue)} accent="#2563eb" sub={`${fmtN(overview.totalProductUnitsSold)} units sold`} />
-              <StatCard label="PIN Revenue"      value={fmt(overview.totalPinRevenue)}  accent="#C9A84C" sub={`${fmtN(overview.totalPinsSoldPeriod)} PINs sold`} />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Revenue"   icon="💰" value={fmt(overview.overallRevenue)}          accent="#1a7a4a" sub="PIN + Product combined" />
+              <StatCard label="Total Profit"    icon="📈" value={fmt(overview.overallProfit)}           accent="#2563eb" sub={`${Math.round(overview.overallRevenue > 0 ? (overview.overallProfit/overview.overallRevenue)*100 : 0)}% margin`} />
+              <StatCard label="Product Revenue" icon="🧴" value={fmt(overview.totalProductRevenue)}     accent="#0D1B3E" sub={`${fmtN(overview.totalProductUnitsSold)} units sold`} />
+              <StatCard label="PIN Revenue"     icon="🔑" value={fmt(overview.totalPinRevenue)}         accent="#C9A84C" sub={`${fmtN(overview.totalPinsSoldPeriod)} PINs sold`} />
             </div>
           </div>
 
           {/* Admin direct sales */}
           <div>
-            <SectionTitle title="Admin Direct Sales" subtitle="Orders where admin is the seller (all time)" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Total Revenue"   value={fmt(sales.adminRevenue)}  accent="#0D1B3E" />
-              <StatCard label="Total Cost"      value={fmt(sales.adminCost)}     accent="#e05252" />
-              <StatCard label="Net Profit"      value={fmt(sales.adminProfit)}   accent="#1a7a4a" />
-              <StatCard label="Units Sold"      value={fmtN(sales.adminUnitsSold)} accent="#C9A84C" sub={`${fmtN(sales.adminOrders)} orders`} />
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-base font-bold text-[#0D1B3E]">Admin Direct Sales</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {showAllTime ? 'All-time performance' : `Last ${report.period.days} days`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 bg-white border border-[#0D1B3E]/8 rounded-xl p-1">
+                <button onClick={() => setShowAllTime(false)}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${!showAllTime ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  Period
+                </button>
+                <button onClick={() => setShowAllTime(true)}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${showAllTime ? 'bg-[#C9A84C] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  All Time
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Revenue" icon="💰"
+                value={fmt(showAllTime ? sales.adminRevenue : sales.periodRevenue)}
+                accent="#1a7a4a"
+                sub={showAllTime ? `${fmtN(sales.adminOrders)} total orders` : `${fmtN(sales.periodOrders)} orders this period`} />
+              <StatCard label="Total Cost" icon="🏷️"
+                value={fmt(showAllTime ? sales.adminCost : sales.adminCost * (sales.periodRevenue / (sales.adminRevenue || 1)))}
+                accent="#e05252"
+                sub="Cost of goods sold" />
+              <StatCard label="Net Profit" icon="📈"
+                value={fmt(showAllTime ? sales.adminProfit : sales.periodRevenue - (sales.adminCost * (sales.periodRevenue / (sales.adminRevenue || 1))))}
+                accent="#2563eb"
+                sub={sales.adminRevenue > 0 ? `${Math.round((sales.adminProfit / sales.adminRevenue) * 100)}% margin` : ''} />
+              <StatCard label="Units Sold" icon="📦"
+                value={fmtN(showAllTime ? sales.adminUnitsSold : Math.round(sales.adminUnitsSold * (sales.periodRevenue / (sales.adminRevenue || 1))))}
+                accent="#C9A84C"
+                sub={showAllTime ? 'All time' : 'Estimated period'} />
             </div>
           </div>
 
-          {/* Chain revenue by distributor level */}
-          <div>
-            <SectionTitle title="Chain Revenue by Level" subtitle="Revenue generated at each distributor level (period)" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Regional Orders"   value={fmt(sales.regionalRevenue)}   accent="#7c3aed" sub={`${fmtN(sales.regionalOrders)} orders`} />
-              <StatCard label="Provincial Orders" value={fmt(sales.provincialRevenue)} accent="#2563eb" sub={`${fmtN(sales.provincialOrders)} orders`} />
-              <StatCard label="City Orders"       value={fmt(sales.cityRevenue)}       accent="#0D1B3E" sub={`${fmtN(sales.cityOrders)} orders`} />
-              <StatCard label="Total Chain"       value={fmt(sales.chainRevenue)}      accent="#1a7a4a" sub={`${fmtN(sales.chainOrders)} total orders`} />
-            </div>
-          </div>
+
 
           {/* Daily revenue chart */}
           <div>
@@ -389,7 +414,7 @@ export default function AdminReportsPage() {
         <div className="space-y-6">
 
           {/* Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Revenue"    value={fmt(overview.totalProductRevenue)}    accent="#0D1B3E" />
             <StatCard label="Total Cost"       value={fmt(overview.totalProductCost)}       accent="#e05252" />
             <StatCard label="Total Profit"     value={fmt(overview.totalProductProfit)}     accent="#1a7a4a" />
@@ -471,7 +496,7 @@ export default function AdminReportsPage() {
         <div className="space-y-6">
 
           {/* Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total PIN Revenue" value={fmt(pinSales.totalRevenue)}  accent="#0D1B3E" />
             <StatCard label="PINs Sold (Period)" value={fmtN(pinSales.totalPinsSold)} accent="#C9A84C" />
             <StatCard label="Total Generated"   value={fmtN(catalog.totalPinsGenerated)} accent="#0D1B3E" />
@@ -526,7 +551,7 @@ export default function AdminReportsPage() {
           {/* Catalog summary */}
           <div>
             <SectionTitle title="Package Catalog" subtitle="All packages and PINs in the system" />
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard label="Active Packages"   value={fmtN(catalog.totalPackages)}       accent="#0D1B3E" />
               <StatCard label="Total PINs"        value={fmtN(catalog.totalPinsGenerated)}  accent="#0D1B3E" />
               <StatCard label="Unused PINs"       value={fmtN(catalog.unusedPins)}          accent="#C9A84C" sub={`${fmtN(catalog.usedPins)} used`} />
@@ -540,7 +565,7 @@ export default function AdminReportsPage() {
       {/* PACKAGE SALES TAB */}
       {activeTab === 'packages' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Packages Sold"      value={fmtN(pinSales.totalPinsSold)} accent="#0D1B3E" />
             <StatCard label="PIN Revenue"         value={fmt(pinSales.totalRevenue)}   accent="#C9A84C" />
             <StatCard label="Products Revenue"    value={fmt(pinSales.breakdown.reduce((s, p) => s + (p.products_value || 0) * p.pins_sold, 0))} accent="#2563eb" />
@@ -591,7 +616,7 @@ export default function AdminReportsPage() {
         <div className="space-y-6">
           <div>
             <SectionTitle title="Reseller Network" />
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard label="Total Resellers"  value={fmtN(network.totalResellers)}   accent="#0D1B3E" />
               <StatCard label="Active Resellers" value={fmtN(network.activeResellers)}  accent="#1a7a4a" />
               <StatCard label="Inactive"         value={fmtN(network.suspendedResellers)} accent="#e05252" />
@@ -599,7 +624,7 @@ export default function AdminReportsPage() {
           </div>
           <div>
             <SectionTitle title="Distributor Network" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard label="Total Distributors" value={fmtN(network.totalDistributors)} accent="#0D1B3E" />
               <StatCard label="Regional"           value={fmtN(network.regionalCount)}     accent="#7c3aed" />
               <StatCard label="Provincial"         value={fmtN(network.provincialCount)}   accent="#2563eb" />
@@ -608,7 +633,7 @@ export default function AdminReportsPage() {
           </div>
           <div>
             <SectionTitle title="Financial Overview" />
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard label="Total Wallet Balance"  value={fmt(financial.totalWalletBalance)}   accent="#0D1B3E" />
               <StatCard label="Total Earned (All)"    value={fmt(financial.totalEarned)}          accent="#1a7a4a" />
               <StatCard label="Total Withdrawn"       value={fmt(financial.totalWithdrawn)}       accent="#e05252" />
@@ -626,7 +651,7 @@ export default function AdminReportsPage() {
         <div className="space-y-6">
           <div>
             <SectionTitle title="Commission Breakdown" subtitle="All commissions ever paid" />
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard label="Total Commissions"   value={fmtN(mlm.totalCommissions)}    accent="#0D1B3E" />
               <StatCard label="Direct Referrals"    value={fmtN(mlm.directReferralCount)} accent="#1a7a4a" />
               <StatCard label="Binary Pairings"     value={fmtN(mlm.binaryPairingCount)}  accent="#C9A84C" />

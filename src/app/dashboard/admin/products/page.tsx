@@ -18,6 +18,8 @@ interface Product {
   provincial_price: number
   city_price:       number
   reseller_price:   number
+  pu_value:         number
+  binary_eligible:  boolean
   image_url:        string | null
   is_active:        boolean
   created_at:       string
@@ -48,6 +50,8 @@ export default function ProductsPage() {
     provincial_price: '',
     city_price:       '',
     reseller_price:   '',
+    pu_value:         '0',
+    binary_eligible:  true,
     image_url:        '',
   })
   const [formLoading, setFormLoading] = useState(false)
@@ -85,7 +89,7 @@ export default function ProductsPage() {
 
   const openCreate = () => {
     setEditProduct(null)
-    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '' })
+    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '', pu_value: '0', binary_eligible: true })
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -103,6 +107,8 @@ export default function ProductsPage() {
       provincial_price: String(p.provincial_price),
       city_price:       String(p.city_price),
       reseller_price:   String(p.reseller_price),
+      pu_value:         String(p.pu_value || 0),
+      binary_eligible:  p.binary_eligible ?? true,
       image_url:        p.image_url         || '',
     })
     setFormError('')
@@ -169,33 +175,42 @@ export default function ProductsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         {[
-          { label: 'Total',    value: stats.total,    accent: '#0D1B3E' },
-          { label: 'Physical', value: stats.physical, accent: '#0D1B3E' },
-          { label: 'Digital',  value: stats.digital,  accent: '#2563eb' },
-          { label: 'Active',   value: stats.active,   accent: '#1a7a4a' },
-          { label: 'Inactive', value: stats.inactive, accent: '#e05252' },
+          { label: 'Total Products', value: stats.total,    color: '#0D1B3E', icon: '📋', sub: 'All products' },
+          { label: 'Physical',       value: stats.physical, color: '#0D1B3E', icon: '📦', sub: 'Physical goods' },
+          { label: 'Digital',        value: stats.digital,  color: '#2563eb', icon: '💾', sub: 'Digital goods' },
+          { label: 'Active',         value: stats.active,   color: '#1a7a4a', icon: '✅', sub: 'Available for sale' },
+          { label: 'Inactive',       value: stats.inactive, color: '#e05252', icon: '❌', sub: 'Hidden from orders', badge: stats.inactive > 0 ? 'Hidden' : undefined },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
+            style={{ borderTop: `2px solid ${s.color}` }}>
+            <div className="flex items-start justify-between mb-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
+                style={{ backgroundColor: s.color + '15' }}>{s.icon}</div>
+              {s.badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: s.color + '15', color: s.color }}>{s.badge}</span>}
+            </div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
+            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
+            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
           </div>
         ))}
       </div>
 
       {/* Product Grid */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
 
         {/* Search & Filter */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search products..."
-            className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
-          />
+          <div className="flex items-center gap-2 flex-1 bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-xl px-3 py-2 focus-within:border-[#C9A84C] transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search products..."
+              className="flex-1 bg-transparent text-sm text-[#0D1B3E] outline-none placeholder:text-gray-300" />
+          </div>
           <div className="flex gap-1">
             {(['all', 'physical', 'digital'] as const).map((f) => (
               <button
@@ -214,8 +229,8 @@ export default function ProductsPage() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Product', 'Type', 'Price', 'Status', 'Added', 'Actions'].map((h) => (
+        <div className="grid grid-cols-7 px-4 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
+          {['Product', 'Type', 'Price', 'PU / Binary', 'Status', 'Added', 'Actions'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
           ))}
         </div>
@@ -238,56 +253,80 @@ export default function ProductsPage() {
           </div>
         ) : (
           filtered.map((p) => (
-            <div
-              key={p.id}
-              className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
+            <div key={p.id}
+              className="grid grid-cols-7 px-4 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center"
             >
-              <div>
-                <p className="text-xs font-medium text-[#0D1B3E]">{p.name}</p>
-                {p.description && (
-                  <p className="text-xs text-gray-400 truncate max-w-[160px]">{p.description}</p>
-                )}
+              {/* Product name */}
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                  style={{ background: p.type === 'physical' ? '#eef0f8' : '#fef6e4' }}>
+                  {p.type === 'physical' ? '📦' : '💾'}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-[#0D1B3E] truncate">{p.name}</p>
+                  {p.description && <p className="text-[10px] text-gray-400 truncate">{p.description}</p>}
+                </div>
               </div>
-              <span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  p.type === 'physical'
-                    ? 'bg-[#eef0f8] text-[#0D1B3E]'
-                    : 'bg-[#fef6e4] text-[#9a6f1e]'
-                }`}>
-                  {p.type === 'physical' ? '📦 Physical' : '💾 Digital'}
-                </span>
+              {/* Type */}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium w-fit ${
+                p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#fef6e4] text-[#9a6f1e]'
+              }`}>
+                {p.type === 'physical' ? 'Physical' : 'Digital'}
               </span>
-              <div>
-                <p className="text-xs font-semibold text-[#C9A84C]">₱{Number(p.price).toLocaleString()} <span className="text-gray-400 font-normal">SRP</span></p>
-                <p className="text-xs text-gray-400">Reseller: ₱{Number(p.reseller_price).toLocaleString()}</p>
+              {/* Pricing */}
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-[#C9A84C]">₱{Number(p.price).toLocaleString()} <span className="text-[10px] font-normal text-gray-400">SRP</span></p>
                 <p className="text-[10px] text-gray-400">Cost: ₱{Number(p.cost_price).toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400">Reseller: ₱{Number(p.reseller_price).toLocaleString()}</p>
               </div>
-              <span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  p.is_active
-                    ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                    : 'bg-[#fdecea] text-[#a03030]'
-                }`}>
-                  {p.is_active ? 'Active' : 'Inactive'}
+              {/* PU & Binary */}
+              <div className="space-y-1">
+                <span className="inline-flex items-center gap-1 text-[10px] bg-[#fef6e4] text-[#9a6f1e] px-2 py-0.5 rounded-full font-semibold">
+                  ⭐ {p.pu_value || 0} PU
                 </span>
+                <br />
+                <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold ${p.binary_eligible ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#e05252]'}`}>
+                  {p.binary_eligible ? '✓ Binary' : '✕ No binary'}
+                </span>
+              </div>
+              {/* Status */}
+              <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold w-fit ${
+                p.is_active ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${p.is_active ? 'bg-[#1a7a4a]' : 'bg-[#a03030]'}`} />
+                {p.is_active ? 'Active' : 'Inactive'}
               </span>
-              <p className="text-xs text-gray-400">
-                {new Date(p.created_at).toLocaleDateString('en-PH')}
+              {/* Date */}
+              <p className="text-[10px] text-gray-400">
+                {new Date(p.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
               </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => openEdit(p)}
-                  className="text-xs text-[#C9A84C] hover:underline font-medium"
-                >
-                  Edit
+              {/* Actions */}
+              <div className="flex items-center gap-1.5">
+                {/* Edit */}
+                <button onClick={() => openEdit(p)} title="Edit product"
+                  className="w-8 h-8 rounded-lg bg-[#f8f9fc] border border-[#0D1B3E]/8 hover:bg-[#C9A84C] hover:border-[#C9A84C] hover:text-white text-[#0D1B3E] transition-all flex items-center justify-center">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
                 </button>
-                <button
-                  onClick={() => handleToggleActive(p.id, p.is_active)}
-                  className={`text-xs hover:underline font-medium ${
-                    p.is_active ? 'text-red-400' : 'text-[#1a7a4a]'
-                  }`}
-                >
-                  {p.is_active ? 'Deactivate' : 'Activate'}
+                {/* Activate / Deactivate */}
+                <button onClick={() => handleToggleActive(p.id, p.is_active)}
+                  title={p.is_active ? 'Deactivate product' : 'Activate product'}
+                  className={`w-8 h-8 rounded-lg border transition-all flex items-center justify-center ${
+                    p.is_active
+                      ? 'bg-[#fdecea] border-[#fdecea] text-[#e05252] hover:bg-[#e05252] hover:text-white'
+                      : 'bg-[#e8f7ef] border-[#e8f7ef] text-[#1a7a4a] hover:bg-[#1a7a4a] hover:text-white'
+                  }`}>
+                  {p.is_active ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                    </svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>
@@ -361,7 +400,7 @@ export default function ProductsPage() {
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">₱</span>
                         <input
                           type="number" min={0}
-                          value={form[f.key as keyof typeof form]}
+                          value={form[f.key as keyof typeof form] as string}
                           onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                           placeholder="0.00"
                           className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg pl-6 pr-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
@@ -381,6 +420,46 @@ export default function ProductsPage() {
                   placeholder="https://..."
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
                 />
+              </div>
+
+              {/* PU & Binary Settings */}
+              <div className="border-t border-[#0D1B3E]/8 pt-4">
+                <p className="text-xs font-semibold text-[#0D1B3E] mb-3">MLM / Binary Settings</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">
+                      PU Value
+                      <span className="ml-1 text-[#C9A84C]">(Product Units)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.pu_value}
+                      onChange={(e) => setForm({ ...form, pu_value: e.target.value })}
+                      placeholder="0"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Points reseller earns per unit purchased</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Binary Eligible</label>
+                    <div className="flex gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, binary_eligible: true })}
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-all ${form.binary_eligible ? 'bg-[#1a7a4a] text-white border-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400 border-transparent'}`}>
+                        ✅ Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, binary_eligible: false })}
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-all ${!form.binary_eligible ? 'bg-[#e05252] text-white border-[#e05252]' : 'bg-[#F0F2F8] text-gray-400 border-transparent'}`}>
+                        ❌ No
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">Count in binary pairing system</p>
+                  </div>
+                </div>
               </div>
 
               {formError && (
