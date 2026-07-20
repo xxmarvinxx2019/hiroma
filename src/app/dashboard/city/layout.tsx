@@ -27,13 +27,7 @@ const navItems = [
       { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑', badge: 'pinRequests' },
     ],
-  },
-  {
-    section: 'Account',
-    items: [
-      { label: 'Profile', href: '/dashboard/city/profile', icon: '👤' },
-    ],
-  },
+  }
 ]
 
 // ============================================================
@@ -118,12 +112,7 @@ function Sidebar({
             </p>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="w-full text-left text-white/40 text-xs hover:text-red-400 transition-colors px-1 py-1 cursor-pointer"
-        >
-          Sign out →
-        </button>
+
       </div>
     </div>
   )
@@ -145,6 +134,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
     onLogout:  ()     => { setShowWarning(false) },
   })
   const [sidebarOpen, setSidebarOpen]               = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen]       = useState(false)
   const [user, setUser]                               = useState<any>(null)
   const [approvedPinRequests, setApprovedPinRequests] = useState(0)
 
@@ -228,10 +218,36 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
             <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-semibold px-3 py-1 rounded-full border border-[#1D9E75]/30 tracking-wide">
               CITY DIST.
             </span>
-            <div className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center">
-              <span className="text-[#C9A84C] text-xs font-bold">
-                {user?.full_name?.charAt(0) || 'C'}
-              </span>
+            <div className="relative">
+              <button onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
+                <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'C'}</span>
+              </button>
+              {profileMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                  <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-[#0D1B3E]/8 w-52 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#0D1B3E]/8 bg-[#f8f9fc]">
+                      <p className="text-xs font-bold text-[#0D1B3E]">{user?.full_name || 'City Dist.'}</p>
+                      <p className="text-[10px] text-gray-400">@{user?.username || ''}</p>
+                    </div>
+                    <div className="py-1">
+                      <Link href="/dashboard/city/profile" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="text-base">👤</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                      </Link>
+                    </div>
+                    <div className="border-t border-[#0D1B3E]/8 py-1">
+                      <button onClick={() => { setProfileMenuOpen(false); handleLogout() }}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#fdecea] transition-colors w-full text-left">
+                        <span className="text-base">🚪</span>
+                        <span className="text-xs text-[#e05252] font-medium">Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>

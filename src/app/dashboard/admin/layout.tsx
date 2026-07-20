@@ -32,15 +32,9 @@ const navItems = [
       { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
       { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑', badge: 'pinRequests' },
-      { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
-      { label: 'Reports', href: '/dashboard/admin/reports', icon: '📈' },
-    ],
-  },
-  {
-    section: 'System',
-    items: [
-      { label: 'Tier settings', href: '/dashboard/admin/tiers', icon: '⚙️' },
-      { label: 'Settings', href: '/dashboard/admin/settings', icon: '🔧' },
+      { label: 'Commissions',       href: '/dashboard/admin/commissions', icon: '💰' },
+      { label: 'Reports',            href: '/dashboard/admin/reports',     icon: '📈' },
+      { label: 'Flushout/Overflow',  href: '/dashboard/admin/flushout',    icon: '⚡' },
     ],
   },
 ]
@@ -153,12 +147,7 @@ function Sidebar({
             </p>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="w-full text-left text-white/40 text-xs hover:text-red-400 transition-colors duration-150 px-1 py-1 cursor-pointer"
-        >
-          Sign out →
-        </button>
+
       </div>
     </div>
   )
@@ -179,7 +168,8 @@ export default function AdminLayout({
     onActive:  ()     => { setShowWarning(false); setCountdown(30) },
     onLogout:  ()     => { setShowWarning(false) },
   })
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen]   = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
   const [pendingPayouts, setPendingPayouts]         = useState(0)
   const [pendingPinRequests, setPendingPinRequests] = useState(0)
@@ -310,10 +300,46 @@ export default function AdminLayout({
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               ADMIN
             </span>
-            <div className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center">
-              <span className="text-[#C9A84C] text-xs font-bold">
-                {user?.full_name?.charAt(0) || 'A'}
-              </span>
+            <div className="relative">
+              <button
+                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
+                <span className="text-[#C9A84C] text-xs font-bold">
+                  {user?.full_name?.charAt(0) || 'A'}
+                </span>
+              </button>
+              {profileMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                  <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-[#0D1B3E]/8 w-52 overflow-hidden">
+                    {/* User info */}
+                    <div className="px-4 py-3 border-b border-[#0D1B3E]/8 bg-[#f8f9fc]">
+                      <p className="text-xs font-bold text-[#0D1B3E]">{user?.full_name || 'Admin'}</p>
+                      <p className="text-[10px] text-gray-400">@{user?.username || 'hiroadmin'}</p>
+                    </div>
+                    {/* Menu items */}
+                    <div className="py-1">
+                      <Link href="/dashboard/admin/tiers" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="text-base">⚙️</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Tier Settings</span>
+                      </Link>
+                      <Link href="/dashboard/admin/settings" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="text-base">🔧</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Settings</span>
+                      </Link>
+                    </div>
+                    <div className="border-t border-[#0D1B3E]/8 py-1">
+                      <button onClick={() => { setProfileMenuOpen(false); handleLogout() }}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#fdecea] transition-colors w-full text-left">
+                        <span className="text-base">🚪</span>
+                        <span className="text-xs text-[#e05252] font-medium">Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
