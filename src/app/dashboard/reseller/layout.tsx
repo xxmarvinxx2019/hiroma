@@ -17,7 +17,7 @@ const navItems = [
     section: 'My Network',
     items: [
       { label: 'Binary Tree',   href: '/dashboard/reseller/tree' },
-      { label: 'Genealogy',     href: '/dashboard/reseller/genealogy' },
+      { label: 'Referrals',     href: '/dashboard/reseller/genealogy' },
     ],
   },
   {
@@ -30,12 +30,6 @@ const navItems = [
     section: 'Orders',
     items: [
       { label: 'Order History',  href: '/dashboard/reseller/orders' },
-    ],
-  },
-  {
-    section: 'Account',
-    items: [
-      { label: 'Profile',        href: '/dashboard/reseller/profile' },
     ],
   },
 ]
@@ -134,7 +128,8 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
     onActive:  ()     => { setShowWarning(false); setCountdown(30) },
     onLogout:  ()     => { setShowWarning(false) },
   })
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen]     = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
 
   useEffect(() => {
@@ -215,10 +210,39 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               RESELLER
             </span>
-            <div className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center">
-              <span className="text-[#C9A84C] text-xs font-bold">
-                {user?.full_name?.charAt(0) || 'R'}
-              </span>
+            <div className="relative">
+              <button
+                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
+                <span className="text-[#C9A84C] text-xs font-bold">
+                  {user?.full_name?.charAt(0) || 'R'}
+                </span>
+              </button>
+              {profileMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                  <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-[#0D1B3E]/8 w-52 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#0D1B3E]/8 bg-[#f8f9fc]">
+                      <p className="text-xs font-bold text-[#0D1B3E]">{user?.full_name || 'Reseller'}</p>
+                      <p className="text-[10px] text-gray-400">@{user?.username || ''}</p>
+                    </div>
+                    <div className="py-1">
+                      <Link href="/dashboard/reseller/profile" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="text-base">👤</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                      </Link>
+                    </div>
+                    <div className="border-t border-[#0D1B3E]/8 py-1">
+                      <button onClick={() => { setProfileMenuOpen(false); handleLogout() }}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#fdecea] transition-colors w-full text-left">
+                        <span className="text-base">🚪</span>
+                        <span className="text-xs text-[#e05252] font-medium">Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
