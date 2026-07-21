@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import NotificationBell from '@/app/components/ui/NotificationBell'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -47,7 +48,7 @@ function Sidebar({
   onClose,
   onLogout,
 }: {
-  user: { full_name: string; username: string } | null
+  user: { id: string; full_name: string; username: string } | null
   pendingPayouts: number
   pendingPinRequests: number
   pathname: string
@@ -170,7 +171,7 @@ export default function AdminLayout({
   })
   const [sidebarOpen, setSidebarOpen]   = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
+  const [user, setUser] = useState<{ id: string; full_name: string; username: string } | null>(null)
   const [pendingPayouts, setPendingPayouts]         = useState(0)
   const [pendingPinRequests, setPendingPinRequests] = useState(0)
 
@@ -297,6 +298,7 @@ export default function AdminLayout({
                 <span>{pendingPayouts} pending</span>
               </Link>
             )}
+            <NotificationBell userId={user?.id} role="admin" />
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               ADMIN
             </span>

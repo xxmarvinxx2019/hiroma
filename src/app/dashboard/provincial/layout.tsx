@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import NotificationBell from '@/app/components/ui/NotificationBell'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -200,6 +201,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
             <span className="text-white/60 text-sm">{currentLabel}</span>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell userId={user?.id} role="provincial" />
             <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-semibold px-3 py-1 rounded-full border border-[#1D9E75]/30 tracking-wide">
               PROVINCIAL DIST.
             </span>
