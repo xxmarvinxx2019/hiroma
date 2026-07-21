@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
+import { broadcastNewOrder } from '@/app/lib/orderNotification'
 // ── Resolve provincial's supplier ──
 async function resolveSupplier(provincialUserId: string) {
   const profile = await prisma.distributorProfile.findUnique({
@@ -234,7 +234,7 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
     })
-
+    await broadcastNewOrder(order.id)
     return NextResponse.json({
       success: true,
       message: `Order placed to ${supplier.level} — ${supplier.full_name}.`,

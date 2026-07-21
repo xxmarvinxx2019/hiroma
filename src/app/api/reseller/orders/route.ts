@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
+import { broadcastNewOrder } from '@/app/lib/orderNotification'
 // ── GET reseller's orders + their city distributor as supplier ──
 export async function GET(req: NextRequest) {
   try {
@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
         seller: { select: { full_name: true, username: true } },
       },
     })
-
+    await broadcastNewOrder(order.id)
     return NextResponse.json({
       success: true,
       message: `Order placed to ${cityDist.full_name}.`,

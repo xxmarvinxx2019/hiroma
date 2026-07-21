@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
+import { broadcastNewOrder } from '@/app/lib/orderNotification'
 // ── GET all distributor orders with filter, search & pagination ──
 export async function GET(req: NextRequest) {
   try {

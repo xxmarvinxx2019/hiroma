@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import NotificationBell from '@/app/components/ui/NotificationBell'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -297,6 +298,7 @@ export default function AdminLayout({
                 <span>{pendingPayouts} pending</span>
               </Link>
             )}
+            <NotificationBell />
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               ADMIN
             </span>
