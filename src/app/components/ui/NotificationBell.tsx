@@ -2,7 +2,9 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useNotifications, Notification } from '@/app/hooks/useNotifications'
+import { useEffect, useRef } from 'react'
 
 const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -19,9 +21,10 @@ function timeAgo(date: string) {
   return new Date(date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
 }
 
-export function NotificationToast({ notif }: { notif: Notification }) {
+export function NotificationToast({ notif, href }: { notif: Notification; href: string }) {
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] animate-slide-up">
+    <div className="fixed bottom-5 right-5 z-[9999] animate-slide-up cursor-pointer"
+      onClick={() => window.location.href = href}>
       <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 p-4 w-80 flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-[#1a7a4a]/15 flex items-center justify-center text-xl flex-shrink-0">
           🛒
@@ -42,14 +45,32 @@ export function NotificationToast({ notif }: { notif: Notification }) {
   )
 }
 
-export default function NotificationBell() {
-  const { notifications, unreadCount, toast, markAllRead } = useNotifications()
+export default function NotificationBell({ userId, role }: { userId?: string; role?: string }) {
+  const { notifications, unreadCount, toast, markAllRead } = useNotifications(userId)
+  const router = useRouter()
+
+  const getOrderRoute = (sellerId: string) => {
+    switch (role) {
+      case 'admin':      return '/dashboard/admin/orders'
+      case 'regional':   return '/dashboard/regional/orders'
+      case 'provincial': return '/dashboard/provincial/orders'
+      case 'city':       return '/dashboard/city/orders'
+      case 'reseller':   return '/dashboard/reseller/orders'
+      default:           return '/dashboard'
+    }
+  }
+
+  const handleNotifClick = (n: Notification) => {
+    markAllRead()
+    setOpen(false)
+    router.push(getOrderRoute(n.seller_id))
+  }
   const [open, setOpen] = useState(false)
 
   return (
     <>
       {/* Toast */}
-      {toast && <NotificationToast notif={toast} />}
+      {toast && <NotificationToast notif={toast} href={getOrderRoute(toast.seller_id)} />}
 
       {/* Bell */}
       <div className="relative">
@@ -96,7 +117,8 @@ export default function NotificationBell() {
                   </div>
                 ) : notifications.map(n => (
                   <div key={n.id}
-                    className={`flex items-start gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors ${!n.read ? 'bg-[#fffbeb]' : ''}`}>
+                    onClick={() => handleNotifClick(n)}
+                    className={`flex items-start gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors cursor-pointer ${!n.read ? 'bg-[#fffbeb]' : ''}`}>
                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${!n.read ? 'bg-[#1a7a4a]/15' : 'bg-[#f1f5f9]'}`}>
                       🛒
                     </div>

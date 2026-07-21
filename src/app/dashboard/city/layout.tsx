@@ -216,7 +216,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
             <span className="text-white/60 text-sm">{currentLabel}</span>
           </div>
           <div className="flex items-center gap-3">
-            <NotificationBell />
+            <NotificationBell userId={user?.id} role="city" />
             <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-semibold px-3 py-1 rounded-full border border-[#1D9E75]/30 tracking-wide">
               CITY DIST.
             </span>
