@@ -8,6 +8,7 @@ interface Stats {
   totalRevenueYesterday: number
   netProfitToday: number
   pinRevenueToday: number
+  pinRevenueYesterday: number
   orderRevenueToday: number
   totalUnitsSoldToday: number
   newResellersToday: number
@@ -35,7 +36,8 @@ interface Stats {
   growthPct: number
   totalStock: number
   criticalStock: number
-  topProducts: { name: string; total_sold: number; revenue: number }[]
+  topProducts:         { name: string; total_sold: number; revenue: number }[]
+  topCityDistsOverall: TopCityDist[]
   recentOrders: {
     id: string; order_number: string | null; status: string
     total_amount: number; created_at: string
@@ -61,6 +63,11 @@ interface RecentPayout {
 interface PinSale {
   id: string; total_amount: number; created_at: string; notes: string | null
   buyer: { full_name: string; username: string }
+}
+
+interface TopCityDist {
+  id: string; full_name: string; username: string
+  revenue: number; pin_orders: number; prod_orders: number
 }
 
 interface DistributorSales {
@@ -180,19 +187,19 @@ export default function AdminDashboardPage() {
 
       {/* Row 1 — Today's KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Today's Sales"      value={fmtS(stats?.totalRevenueToday || 0)}     color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmtS(stats?.totalRevenueYesterday || 0)}`} />
-        <StatCard label="Today's Net Profit" value={fmtS(stats?.netProfitToday || 0)}         color="#2563eb" icon="📈" sub="PIN + Product" />
-        <StatCard label="New Members Today"  value={stats?.newResellersToday || 0}             color="#C9A84C" icon="👥" sub={`vs Yesterday: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" />
-        <StatCard label="Pending Payouts"    value={stats?.pendingPayouts || 0}               color="#e05252" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : undefined} />
-        <StatCard label="Active Products"    value={stats?.totalProducts || 0}                color="#8b5cf6" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
+        <StatCard label="Today's Sales"      value={fmtS(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`PIN + Product · vs Yesterday: ${fmtS(stats?.totalRevenueYesterday || 0)}`} />
+        <StatCard label="Today's PIN Sales"  value={fmtS(stats?.pinRevenueToday || 0)}      color="#C9A84C" icon="🔑" sub={`vs Yesterday: ${fmtS(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
+        <StatCard label="Today's Product Sales" value={fmtS(stats?.orderRevenueToday || 0)} color="#2563eb" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
+        <StatCard label="Today's Net Profit" value={fmtS(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Revenue minus cost" />
+        <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#8b5cf6" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
       </div>
 
       {/* Row 2 — Sales breakdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Today's PIN Sales"    value={fmtS(stats?.pinRevenueToday || 0)}   color="#C9A84C" icon="🔑" sub={`${stats?.activePins || 0} active PINs`}          href="/dashboard/admin/pins" />
-        <StatCard label="Today's Product Sales" value={fmtS(stats?.orderRevenueToday || 0)} color="#1a7a4a" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units`}       href="/dashboard/admin/orders" />
-        <StatCard label="Total Resellers"      value={(stats?.totalResellers || 0).toLocaleString()} color="#2563eb" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this month`} href="/dashboard/admin/resellers" />
-        <StatCard label="New This Month"       value={stats?.newResellersThisMonth || 0}    color="#9a6f1e" icon="🆕" sub={`+${stats?.newResellersToday || 0} today`}          href="/dashboard/admin/resellers" />
+        <StatCard label="New Members Today"  value={stats?.newResellersToday || 0}                 color="#C9A84C" icon="👥" sub={`vs Yesterday: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" badge={stats?.newResellersToday ? 'New!' : undefined} />
+        <StatCard label="Pending Payouts"    value={stats?.pendingPayouts || 0}                    color="#e05252" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : undefined} />
+        <StatCard label="Total Resellers"    value={(stats?.totalResellers || 0).toLocaleString()} color="#2563eb" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this month`} href="/dashboard/admin/resellers" />
+        <StatCard label="New This Month"     value={stats?.newResellersThisMonth || 0}             color="#9a6f1e" icon="🆕" sub={`+${stats?.newResellersToday || 0} today`} href="/dashboard/admin/resellers" />
       </div>
 
 
@@ -529,21 +536,21 @@ export default function AdminDashboardPage() {
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
               <p className="text-sm font-bold text-[#0D1B3E]">Top City Distributors</p>
-              <p className="text-xs text-gray-400 mt-0.5">By PIN purchases</p>
+              <p className="text-xs text-gray-400 mt-0.5">By total sales (PIN + Products)</p>
             </div>
-            {distSales.length === 0 ? (
+            {(stats?.topCityDistsOverall || []).length === 0 ? (
               <div className="px-5 py-6 text-center text-gray-400 text-sm">No data yet</div>
-            ) : distSales.slice(0, 5).map((d, i) => (
-              <div key={d.city_dist_id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5">
+            ) : (stats?.topCityDistsOverall || []).map((d, i) => (
+              <div key={d.id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5">
                 <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
                   style={{ background: i === 0 ? '#C9A84C' : '#f1f5f9', color: i === 0 ? '#0D1B3E' : '#9ca3af' }}>
                   {i + 1}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-[#0D1B3E] truncate">{d.city_distributor?.full_name || '—'}</p>
-                  <p className="text-[10px] text-gray-400">{d._count.id} PINs bought</p>
+                  <p className="text-xs font-semibold text-[#0D1B3E] truncate">{d.full_name}</p>
+                  <p className="text-[10px] text-gray-400">{d.pin_orders} PIN · {d.prod_orders} product orders</p>
                 </div>
-                <p className="text-xs font-bold text-[#C9A84C]">{fmtS(Number(d._sum.price || 0))}</p>
+                <p className="text-xs font-bold text-[#C9A84C]">{fmtS(d.revenue)}</p>
               </div>
             ))}
           </div>

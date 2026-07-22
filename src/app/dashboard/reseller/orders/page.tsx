@@ -425,6 +425,8 @@ function CreateOrderModal({
           </div>
         </div>
       </div>
+
+      {/* Cancel Confirmation Modal */}
     </div>
   )
 }
@@ -443,6 +445,7 @@ export default function ResellerOrdersPage() {
   const [page, setPage]                 = useState(1)
   const [expandedId, setExpandedId]     = useState<string | null>(null)
   const [cancelling, setCancelling]     = useState<string | null>(null)
+  const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
   const [showCreate, setShowCreate]     = useState(false)
 
   const [summary, setSummary] = useState({
@@ -610,7 +613,7 @@ export default function ResellerOrdersPage() {
 
                   {/* Cancel */}
                   {order.status === 'pending' && (
-                    <button disabled={cancelling === order.id} onClick={() => handleCancel(order.id)}
+                    <button disabled={cancelling === order.id} onClick={() => setCancelConfirm(order.id)}
                       className="w-7 h-7 rounded-lg bg-[#fdecea] hover:bg-[#a03030] flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50"
                       title="Cancel order">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white">
@@ -659,6 +662,39 @@ export default function ResellerOrdersPage() {
           onClose={() => setShowCreate(false)}
           onSuccess={() => { setShowCreate(false); fetchOrders() }}
         />
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {cancelConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 p-6 w-80 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#fdecea] flex items-center justify-center flex-shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e05252" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#0D1B3E]">Cancel Order?</p>
+                <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mb-5">
+              Are you sure you want to cancel this order? The order status will be permanently set to cancelled.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setCancelConfirm(null)}
+                className="flex-1 py-2 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
+                Keep Order
+              </button>
+              <button onClick={() => { handleCancel(cancelConfirm); setCancelConfirm(null) }}
+                className="flex-1 py-2 rounded-xl bg-[#e05252] text-white text-xs font-bold hover:bg-[#c03030] transition-colors">
+                Yes, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

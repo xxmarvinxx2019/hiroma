@@ -69,6 +69,11 @@ const STATUS_NEXT: Record<string, string[]> = {
   cancelled:  [],
 }
 
+// Orders must be paid before moving to processing
+function canProcess(order: any) {
+  return order.payment_status === 'paid'
+}
+
 const PAYMENT_LABEL: Record<string, string> = {
   cash_on_pickup: '💵 Cash on Pickup',
   gcash:          '📱 GCash',
@@ -241,6 +246,8 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
           </div>
         </div>
       </div>
+
+
     </div>
   )
 }
@@ -436,6 +443,8 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
           </div>
         </div>
       </div>
+
+
     </div>
   )
 }
@@ -456,6 +465,7 @@ export default function CityOrdersPage() {
   const [page, setPage]                     = useState(1)
   const [expandedId, setExpandedId]         = useState<string | null>(null)
   const [updatingId, setUpdatingId]         = useState<string | null>(null)
+  const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
   const [supplier, setSupplier]             = useState<Supplier | null>(null)
   const [showCreate, setShowCreate]         = useState(false)
   const [showResellerOrder, setShowResellerOrder] = useState(false)
@@ -575,7 +585,7 @@ export default function CityOrdersPage() {
       <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={tab === 'my_orders' ? 'Search supplier...' : 'Search buyer...'}
+            placeholder={tab === 'my_orders' ? 'Search supplier...' : 'Search any reseller...'}
             className="flex-1 min-w-[180px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
           <div className="flex gap-1 flex-wrap">
             {(['all', 'pending', 'processing', 'delivered', 'cancelled'] as const).map((f) => (
@@ -609,7 +619,7 @@ export default function CityOrdersPage() {
           </div>
         ) : orders.length === 0 ? (
           <div className="px-4 py-12 text-center text-gray-400 text-sm">
-            {tab === 'my_orders' ? 'No purchase orders yet. Click "+ New Order" to place one.' : 'No reseller orders yet.'}
+            {tab === 'my_orders' ? 'No purchase orders yet. Click "+ New Order" to place one.' : search ? `No orders found for "${search}"` : 'No reseller orders yet.'}
           </div>
         ) : (
           orders.map((order) => {
@@ -680,9 +690,11 @@ export default function CityOrdersPage() {
                       </button>
                     )}
                     {nextStatuses.map((next) => (
-                      <button key={next} disabled={updatingId === order.id} onClick={() => handleStatusUpdate(order.id, next)}
-                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
-                        title={next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
+                      <button key={next}
+                        disabled={updatingId === order.id || (next === 'processing' && !canProcess(order))}
+                        onClick={() => next === 'cancelled' ? setCancelConfirm(order.id) : handleStatusUpdate(order.id, next)}
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        title={next === 'processing' && !canProcess(order) ? 'Mark as paid first' : next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
                         {next === 'cancelled' ? (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         ) : next === 'delivered' ? (
@@ -740,6 +752,40 @@ export default function CityOrdersPage() {
           onSuccess={() => { setShowCreate(false); fetchOrders() }}
         />
       )}
+
+
+      {/* Cancel Confirmation Modal */}
+      {cancelConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 p-6 w-80 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#fdecea] flex items-center justify-center flex-shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e05252" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#0D1B3E]">Cancel Order?</p>
+                <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mb-5">
+              Are you sure you want to cancel this order? The order status will be permanently set to cancelled.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setCancelConfirm(null)}
+                className="flex-1 py-2 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
+                Keep Order
+              </button>
+              <button onClick={() => { handleStatusUpdate(cancelConfirm, 'cancelled'); setCancelConfirm(null) }}
+                className="flex-1 py-2 rounded-xl bg-[#e05252] text-white text-xs font-bold hover:bg-[#c03030] transition-colors">
+                Yes, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  ) 
+  )
 }
