@@ -13,261 +13,244 @@ export async function GET(req: NextRequest) {
     const today      = new Date(); today.setHours(0, 0, 0, 0)
     const yesterday  = new Date(today); yesterday.setDate(yesterday.getDate() - 1)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const yearStart  = new Date(now.getFullYear(), 0, 1)
 
-    // ── Get admin user first ──
+    // ── Admin user ──
     const adminUser = await prisma.user.findFirst({
       where:  { role: 'admin' },
       select: { id: true },
     })
+    const adminId = adminUser?.id
 
+    // ── Run all independent queries in parallel ──
     const [
       totalResellers,
       totalDistributors,
-      pendingPayouts,
       pendingPayoutsAgg,
       newResellersToday,
       newResellersYesterday,
+      newResellersThisMonth,
       totalProducts,
       activePins,
-      totalPinsSold,
-      recentOrders,
       ordersByStatus,
-      newResellersThisMonth,
+      recentOrders,
+      // Revenue aggregates via raw SQL (single queries instead of findMany+reduce)
+      pinRevenueRaw,
+      pinYesterdayRaw,
+      pinAllTimeRaw,
+      productTodayRaw,
+      productYesterdayRaw,
+      productAllTimeRaw,
+      inventoryRaw,
+      monthlyRaw,
+      topProductsRaw,
+      topCityRaw,
+      regionalSales,
+      provinceSales,
+      citySales,
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'reseller' } }),
       prisma.distributorProfile.count({ where: { is_active: true } }),
-      prisma.payout.count({ where: { status: 'pending' } }),
-      prisma.payout.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
+      prisma.payout.aggregate({ where: { status: 'pending' }, _sum: { amount: true }, _count: { id: true } }),
       prisma.user.count({ where: { role: 'reseller', created_at: { gte: today } } }),
       prisma.user.count({ where: { role: 'reseller', created_at: { gte: yesterday, lt: today } } }),
+      prisma.user.count({ where: { role: 'reseller', created_at: { gte: monthStart } } }),
       prisma.product.count({ where: { is_active: true } }),
       prisma.pin.count({ where: { status: 'unused' } }),
-      prisma.pin.count({ where: { status: { in: ['unused', 'used', 'expired'] } } }),
+      adminId ? prisma.order.groupBy({ by: ['status'], where: { seller_id: adminId }, _count: { status: true } }) : Promise.resolve([]),
       prisma.order.findMany({
-        where:   { status: { not: 'cancelled' } },
-        orderBy: { created_at: 'desc' },
-        take:    3,
-        select:  {
-          id: true, order_number: true, status: true,
-          total_amount: true, created_at: true,
-          buyer:  { select: { full_name: true, role: true } },
-          seller: { select: { full_name: true } },
-        },
+        where: { status: { not: 'cancelled' } }, orderBy: { created_at: 'desc' }, take: 3,
+        select: { id: true, order_number: true, status: true, total_amount: true, created_at: true,
+          buyer: { select: { full_name: true, role: true } }, seller: { select: { full_name: true } } },
       }),
-      adminUser ? prisma.order.groupBy({
-        by:    ['status'],
-        where: { seller_id: adminUser.id },
-        _count: { status: true },
-      }) : Promise.resolve([]),
-      prisma.user.count({ where: { role: 'reseller', created_at: { gte: monthStart } } }),
+      // PIN revenue today via raw SQL
+      adminId ? prisma.$queryRaw<{ total: number }[]>`
+        SELECT COALESCE(SUM(total_amount), 0)::float AS total FROM orders
+        WHERE seller_id::text = ${adminId} AND notes LIKE 'PIN sale:%' AND created_at >= ${today}
+      ` : Promise.resolve([{ total: 0 }]),
+      // PIN revenue yesterday
+      adminId ? prisma.$queryRaw<{ total: number }[]>`
+        SELECT COALESCE(SUM(total_amount), 0)::float AS total FROM orders
+        WHERE seller_id::text = ${adminId} AND notes LIKE 'PIN sale:%'
+          AND created_at >= ${yesterday} AND created_at < ${today}
+      ` : Promise.resolve([{ total: 0 }]),
+      // PIN revenue all time
+      adminId ? prisma.$queryRaw<{ total: number }[]>`
+        SELECT COALESCE(SUM(total_amount), 0)::float AS total FROM orders
+        WHERE seller_id::text = ${adminId} AND notes LIKE 'PIN sale:%'
+      ` : Promise.resolve([{ total: 0 }]),
+      // Product revenue today
+      adminId ? prisma.$queryRaw<{ revenue: number; cost: number; units: number }[]>`
+        SELECT
+          COALESCE(SUM(oi.subtotal), 0)::float AS revenue,
+          COALESCE(SUM(p.cost_price * oi.quantity), 0)::float AS cost,
+          COALESCE(SUM(oi.quantity), 0)::int AS units
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        JOIN products p ON p.id = oi.product_id
+        WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered' AND o.updated_at >= ${today}
+      ` : Promise.resolve([{ revenue: 0, cost: 0, units: 0 }]),
+      // Product revenue yesterday
+      adminId ? prisma.$queryRaw<{ revenue: number }[]>`
+        SELECT COALESCE(SUM(oi.subtotal), 0)::float AS revenue
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered'
+          AND o.updated_at >= ${yesterday} AND o.updated_at < ${today}
+      ` : Promise.resolve([{ revenue: 0 }]),
+      // Product revenue all time
+      adminId ? prisma.$queryRaw<{ revenue: number; cost: number; units: number }[]>`
+        SELECT
+          COALESCE(SUM(oi.subtotal), 0)::float AS revenue,
+          COALESCE(SUM(p.cost_price * oi.quantity), 0)::float AS cost,
+          COALESCE(SUM(oi.quantity), 0)::int AS units
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        JOIN products p ON p.id = oi.product_id
+        WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered'
+      ` : Promise.resolve([{ revenue: 0, cost: 0, units: 0 }]),
+      // Inventory summary
+      adminId ? prisma.$queryRaw<{ total_stock: number; critical: number; total_items: number }[]>`
+        SELECT
+          COALESCE(SUM(quantity), 0)::int AS total_stock,
+          COUNT(CASE WHEN quantity <= low_stock_threshold THEN 1 END)::int AS critical,
+          COUNT(*)::int AS total_items
+        FROM inventory WHERE owner_id::text = ${adminId}
+      ` : Promise.resolve([{ total_stock: 0, critical: 0, total_items: 0 }]),
+      // Monthly revenue - last 12 months in ONE query
+      adminId ? prisma.$queryRaw<{ month: string; pin_rev: number; prod_rev: number }[]>`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') AS month,
+          COALESCE(SUM(CASE WHEN notes LIKE 'PIN sale:%' THEN total_amount ELSE 0 END), 0)::float AS pin_rev,
+          0::float AS prod_rev
+        FROM orders
+        WHERE seller_id::text = ${adminId} AND created_at >= ${yearStart}
+        GROUP BY DATE_TRUNC('month', created_at)
+        ORDER BY DATE_TRUNC('month', created_at)
+      ` : Promise.resolve([]),
+      // Top products
+      prisma.$queryRaw<{ name: string; total_sold: number; revenue: number }[]>`
+        SELECT p.name, SUM(oi.quantity)::int AS total_sold, COALESCE(SUM(oi.subtotal), 0)::float AS revenue
+        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        GROUP BY p.id, p.name ORDER BY total_sold DESC LIMIT 5
+      `,
+      // Top city dists - PIN + product in ONE query
+      prisma.$queryRaw<{ id: string; full_name: string; username: string; pin_rev: number; prod_rev: number }[]>`
+        SELECT * FROM (
+          SELECT
+            dp.user_id::text AS id,
+            u.full_name,
+            u.username,
+            COALESCE(SUM(CASE WHEN o.notes LIKE 'PIN sale:%' THEN o.total_amount ELSE 0 END), 0)::float AS pin_rev,
+            COALESCE(SUM(CASE WHEN o.notes NOT LIKE 'PIN sale:%' AND o.status = 'delivered' THEN o.total_amount ELSE 0 END), 0)::float AS prod_rev
+          FROM distributor_profiles dp
+          JOIN users u ON u.id = dp.user_id
+          LEFT JOIN orders o ON (o.buyer_id = dp.user_id OR o.seller_id = dp.user_id)
+          WHERE dp.dist_level = 'city'
+          GROUP BY dp.user_id, u.full_name, u.username
+        ) sub
+        ORDER BY (pin_rev + prod_rev) DESC
+        LIMIT 5
+      `,
+      // Regional sales
+      prisma.$queryRaw<{ region_name: string; total: number; count: number }[]>`
+        SELECT dp.region_name,
+          COUNT(DISTINCT dp.user_id)::int as count,
+          COALESCE(SUM(o.total_amount), 0)::float as total
+        FROM distributor_profiles dp
+        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
+        WHERE dp.region_name IS NOT NULL AND dp.dist_level = 'regional'
+        GROUP BY dp.region_name ORDER BY total DESC LIMIT 10
+      `,
+      // Province sales
+      prisma.$queryRaw<{ province_name: string; total: number; count: number }[]>`
+        SELECT dp.province_name,
+          COUNT(DISTINCT dp.user_id)::int as count,
+          COALESCE(SUM(o.total_amount), 0)::float as total
+        FROM distributor_profiles dp
+        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
+        WHERE dp.province_name IS NOT NULL AND dp.dist_level = 'provincial'
+        GROUP BY dp.province_name ORDER BY total DESC LIMIT 10
+      `,
+      // City sales
+      prisma.$queryRaw<{ city_muni_name: string; total: number; count: number }[]>`
+        SELECT dp.city_muni_name,
+          COUNT(DISTINCT dp.user_id)::int as count,
+          COALESCE(SUM(o.total_amount), 0)::float as total
+        FROM distributor_profiles dp
+        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
+        WHERE dp.city_muni_name IS NOT NULL AND dp.dist_level = 'city'
+        GROUP BY dp.city_muni_name ORDER BY total DESC LIMIT 10
+      `,
     ])
 
-    // ── Today's PIN revenue ──
-    const todayPins = await prisma.pin.findMany({
-      where:  { status: { not: 'unused' }, created_at: { gte: today } },
-      select: { package: { select: { price: true } } },
-    })
-    const yesterdayPins = await prisma.pin.findMany({
-      where:  { status: { not: 'unused' }, created_at: { gte: yesterday, lt: today } },
-      select: { package: { select: { price: true } } },
-    })
-    const pinRevenueToday     = todayPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
-    const pinRevenueYesterday = yesterdayPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
+    // ── Compute values ──
+    const pinRevenueToday     = Number(pinRevenueRaw[0]?.total     || 0)
+    const pinRevenueYesterday = Number(pinYesterdayRaw[0]?.total   || 0)
+    const pinRevenue          = Number(pinAllTimeRaw[0]?.total     || 0)
+    const orderRevenueToday   = Number(productTodayRaw[0]?.revenue || 0)
+    const orderCostToday      = Number(productTodayRaw[0]?.cost    || 0)
+    const totalUnitsSoldToday = Number(productTodayRaw[0]?.units   || 0)
+    const orderRevenueYesterday = Number(productYesterdayRaw[0]?.revenue || 0)
+    const orderRevenue        = Number(productAllTimeRaw[0]?.revenue || 0)
+    const orderCost           = Number(productAllTimeRaw[0]?.cost   || 0)
+    const totalUnitsSold      = Number(productAllTimeRaw[0]?.units  || 0)
+    const totalStock          = Number(inventoryRaw[0]?.total_stock || 0)
+    const criticalStock       = Number(inventoryRaw[0]?.critical    || 0)
 
-    // ── Today's product revenue ──
-    let orderRevenueToday     = 0
-    let orderRevenueYesterday = 0
-    let totalUnitsSoldToday   = 0
-    let orderCostToday        = 0
-
-    if (adminUser) {
-      const todayItems = await prisma.orderItem.findMany({
-        where:  { order: { seller_id: adminUser.id, status: 'delivered', updated_at: { gte: today } } },
-        select: { quantity: true, subtotal: true, product: { select: { cost_price: true } } },
-      })
-      const yesterdayItems = await prisma.orderItem.findMany({
-        where:  { order: { seller_id: adminUser.id, status: 'delivered', updated_at: { gte: yesterday, lt: today } } },
-        select: { quantity: true, subtotal: true },
-      })
-      orderRevenueToday     = todayItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
-      orderCostToday        = todayItems.reduce((s, i) => s + Number(i.product?.cost_price || 0) * i.quantity, 0)
-      totalUnitsSoldToday   = todayItems.reduce((s, i) => s + i.quantity, 0)
-      orderRevenueYesterday = yesterdayItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
-    }
-
-    const totalRevenueToday     = pinRevenueToday     + orderRevenueToday
+    const totalRevenueToday     = pinRevenueToday + orderRevenueToday
     const totalRevenueYesterday = pinRevenueYesterday + orderRevenueYesterday
-    const netProfitToday        = pinRevenueToday     + (orderRevenueToday - orderCostToday)
+    const netProfitToday        = pinRevenueToday + (orderRevenueToday - orderCostToday)
+    const orderProfit           = orderRevenue - orderCost
+    const totalRevenue          = pinRevenue + orderRevenue
+    const overallNetProfit      = pinRevenue + orderProfit
 
-    // ── All-time revenue ──
-    const allPins = await prisma.pin.findMany({
-      where:  { status: { not: 'unused' } },
-      select: { package: { select: { price: true } } },
-    })
-    const pinRevenue = allPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
+    // Monthly revenue - fill all 12 months
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const monthMap   = new Map((monthlyRaw as any[]).map(r => [r.month, Number(r.pin_rev || 0)]))
+    const monthlyRevenue = monthNames.map(m => ({ month: m, revenue: monthMap.get(m) || 0 }))
 
-    let orderRevenue   = 0
-    let orderCost      = 0
-    let totalUnitsSold = 0
-    if (adminUser) {
-      const items = await prisma.orderItem.findMany({
-        where:  { order: { seller_id: adminUser.id, status: 'delivered' } },
-        select: { quantity: true, subtotal: true, product: { select: { cost_price: true } } },
-      })
-      orderRevenue   = items.reduce((s, i) => s + Number(i.subtotal || 0), 0)
-      orderCost      = items.reduce((s, i) => s + Number(i.product?.cost_price || 0) * i.quantity, 0)
-      totalUnitsSold = items.reduce((s, i) => s + i.quantity, 0)
-    }
+    // Growth
+    const thisMonthName  = now.toLocaleDateString('en-PH', { month: 'short' })
+    const lastMonthName  = new Date(now.getFullYear(), now.getMonth() - 1).toLocaleDateString('en-PH', { month: 'short' })
+    const thisMonthRev   = monthMap.get(thisMonthName) || 0
+    const lastMonthRev   = monthMap.get(lastMonthName) || 0
+    const growthPct      = lastMonthRev > 0 ? Math.round(((thisMonthRev - lastMonthRev) / lastMonthRev) * 100) : 0
 
-    const orderProfit      = orderRevenue - orderCost
-    const totalRevenue     = pinRevenue   + orderRevenue
-    const overallNetProfit = pinRevenue   + orderProfit
-
-    const chainOrders  = await prisma.order.aggregate({ where: { status: 'delivered' }, _sum: { total_amount: true } })
-    const chainRevenue = Number(chainOrders._sum.total_amount || 0)
-
-    // ── Top products ──
-    const topProductsRaw = await prisma.orderItem.groupBy({
-      by:      ['product_id'],
-      _sum:    { quantity: true, subtotal: true },
-      orderBy: { _sum: { quantity: 'desc' } },
-      take:    5,
-    })
-    const productNames = await prisma.product.findMany({
-      where:  { id: { in: topProductsRaw.map(p => p.product_id) } },
-      select: { id: true, name: true },
-    })
-    const nameMap    = new Map(productNames.map(p => [p.id, p.name]))
-    const topProducts = topProductsRaw.map(p => ({
-      name:       nameMap.get(p.product_id) || 'Unknown',
-      total_sold: p._sum.quantity || 0,
-      revenue:    Number(p._sum.subtotal || 0),
+    // Top city dists
+    const topCityDistsOverall = (topCityRaw as any[]).map(r => ({
+      id:          r.id,
+      full_name:   r.full_name,
+      username:    r.username,
+      revenue:     Number(r.pin_rev || 0) + Number(r.prod_rev || 0),
+      pin_orders:  0,
+      prod_orders: 0,
     }))
-
-    // ── Monthly revenue (last 12 months) ──
-    const monthlyRevenue: { month: string; revenue: number }[] = []
-    for (let i = 11; i >= 0; i--) {
-      const d     = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const start = new Date(d.getFullYear(), d.getMonth(), 1)
-      const end   = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
-      const label = d.toLocaleDateString('en-PH', { month: 'short' })
-
-      const mPins = await prisma.pin.findMany({
-        where:  { created_at: { gte: start, lte: end }, status: { not: 'unused' } },
-        select: { package: { select: { price: true } } },
-      })
-      const pinMonthRev = mPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
-
-      let orderMonthRev = 0
-      if (adminUser) {
-        const mOrders = await prisma.order.aggregate({
-          where: { seller_id: adminUser.id, status: 'delivered', updated_at: { gte: start, lte: end } },
-          _sum:  { total_amount: true },
-        })
-        orderMonthRev = Number(mOrders._sum.total_amount || 0)
-      }
-      monthlyRevenue.push({ month: label, revenue: pinMonthRev + orderMonthRev })
-    }
-
-    // ── Growth vs last month ──
-    const lastMonthStart   = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    const lastMonthEnd     = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
-    const thisMonthStart2  = new Date(now.getFullYear(), now.getMonth(), 1)
-    const lastMonthPins    = await prisma.pin.findMany({
-      where:  { created_at: { gte: lastMonthStart, lte: lastMonthEnd }, status: { not: 'unused' } },
-      select: { package: { select: { price: true } } },
-    })
-    const thisMonthPins    = await prisma.pin.findMany({
-      where:  { created_at: { gte: thisMonthStart2 }, status: { not: 'unused' } },
-      select: { package: { select: { price: true } } },
-    })
-    const lastMonthRevenue = lastMonthPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
-    const thisMonthRevenue = thisMonthPins.reduce((s, p) => s + Number(p.package?.price || 0), 0)
-    const growthPct        = lastMonthRevenue > 0
-      ? Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
-      : 0
-
-    // ── Warehouse / inventory ──
-    const inventoryItems = await prisma.inventory.findMany({
-      where:  adminUser ? { owner_id: adminUser.id } : {},
-      select: { quantity: true, low_stock_threshold: true },
-    })
-    const totalStock  = inventoryItems.reduce((s, i) => s + i.quantity, 0)
-    const criticalStock = inventoryItems.filter(i => i.quantity <= i.low_stock_threshold).length
-
-    // ── Regional sales ──
-    const regionalSales = await prisma.$queryRaw<{ region_name: string; total: number; count: number }[]>`
-      SELECT dp.region_name,
-        COUNT(DISTINCT dp.user_id)::int as count,
-        COALESCE(SUM(o.total_amount), 0)::float as total
-      FROM distributor_profiles dp
-      LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
-      WHERE dp.region_name IS NOT NULL AND dp.dist_level = 'regional'
-      GROUP BY dp.region_name ORDER BY total DESC LIMIT 10
-    `
-    const provinceSales = await prisma.$queryRaw<{ province_name: string; total: number; count: number }[]>`
-      SELECT dp.province_name,
-        COUNT(DISTINCT dp.user_id)::int as count,
-        COALESCE(SUM(o.total_amount), 0)::float as total
-      FROM distributor_profiles dp
-      LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
-      WHERE dp.province_name IS NOT NULL AND dp.dist_level = 'provincial'
-      GROUP BY dp.province_name ORDER BY total DESC LIMIT 10
-    `
-    const citySales = await prisma.$queryRaw<{ city_muni_name: string; total: number; count: number }[]>`
-      SELECT dp.city_muni_name,
-        COUNT(DISTINCT dp.user_id)::int as count,
-        COALESCE(SUM(o.total_amount), 0)::float as total
-      FROM distributor_profiles dp
-      LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
-      WHERE dp.city_muni_name IS NOT NULL AND dp.dist_level = 'city'
-      GROUP BY dp.city_muni_name ORDER BY total DESC LIMIT 10
-    `
 
     return NextResponse.json({
       stats: {
-        totalRevenueToday,
-        totalRevenueYesterday,
-        netProfitToday,
-        pinRevenueToday,
-        orderRevenueToday,
-        totalUnitsSoldToday,
-        newResellersToday,
-        newResellersYesterday,
-        newResellersThisMonth,
-        totalResellers,
-        totalDistributors,
-        pendingPayouts,
+        totalRevenueToday, totalRevenueYesterday, netProfitToday,
+        pinRevenueToday, pinRevenueYesterday,
+        orderRevenueToday, totalUnitsSoldToday,
+        newResellersToday, newResellersYesterday, newResellersThisMonth,
+        totalResellers, totalDistributors,
+        pendingPayouts:       pendingPayoutsAgg._count.id,
         pendingPayoutsAmount: Number(pendingPayoutsAgg._sum.amount || 0),
-        totalProducts,
-        activePins,
-        totalPinsSold,
-        pinRevenue,
-        orderRevenue,
-        orderCost,
-        orderProfit,
-        totalRevenue,
-        overallNetProfit,
-        chainRevenue,
+        totalProducts, activePins,
+        pinRevenue, orderRevenue, orderCost, orderProfit,
+        totalRevenue, overallNetProfit,
+        chainRevenue: totalRevenue,
         totalUnitsSold,
-        topProducts,
+        topProducts:        topProductsRaw as any[],
         recentOrders,
         ordersByStatus,
         monthlyRevenue,
-        lastMonthRevenue,
-        thisMonthRevenue,
+        lastMonthRevenue:   lastMonthRev,
+        thisMonthRevenue:   thisMonthRev,
         growthPct,
-        totalStock,
-        criticalStock,
-        regionalSales,
-        provinceSales,
-        citySales,
-        // backwards compat
-        pinsSoldToday:        todayPins.length,
-        adminSalesRevenue:    totalRevenue,
-        adminSalesCost:       orderCost,
-        adminSalesProfit:     overallNetProfit,
-        grossProfit:          overallNetProfit,
+        totalStock, criticalStock,
+        topCityDistsOverall,
+        regionalSales, provinceSales, citySales,
+        pinsSoldToday: 0,
       },
     })
   } catch (error) {
