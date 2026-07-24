@@ -38,6 +38,12 @@ const navItems = [
       { label: 'Flushout/Overflow',  href: '/dashboard/admin/flushout',    icon: '⚡' },
     ],
   },
+  {
+    section: 'Security',
+    items: [
+      { label: 'Audit Logs',         href: '/dashboard/admin/audit-logs',  icon: '🛡️' },
+    ],
+  },
 ]
 
 function Sidebar({

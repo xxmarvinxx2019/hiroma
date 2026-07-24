@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
@@ -111,7 +112,18 @@ export async function POST(req: NextRequest) {
     const binVal = binary_eligible !== false
     await prisma.$executeRaw`UPDATE products SET pu_value = ${puVal}::int, binary_eligible = ${binVal}::boolean WHERE id::text = ${product.id}`
 
-    return NextResponse.json({ success: true, product })
+        createAuditLog({
+      user_id:       user.id,
+      user_name:     user.full_name || user.username,
+      user_role:     user.role,
+      member_id:     formatMemberId(user.id, user.role),
+      activity_type: 'product_updated',
+      category:      'product',
+      description:   `Product updated`,
+      risk_level:    'low',
+      status:        'completed',
+    })
+return NextResponse.json({ success: true, product })
   } catch (error) {
     console.error('[CREATE PRODUCT ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
@@ -161,7 +173,18 @@ export async function PATCH(req: NextRequest) {
       if (binVal != null) await prisma.$executeRaw`UPDATE products SET binary_eligible = ${binVal}::boolean WHERE id::text = ${id}`
     }
 
-    return NextResponse.json({ success: true, product })
+        createAuditLog({
+      user_id:       user.id,
+      user_name:     user.full_name || user.username,
+      user_role:     user.role,
+      member_id:     formatMemberId(user.id, user.role),
+      activity_type: 'product_updated',
+      category:      'product',
+      description:   `Product updated`,
+      risk_level:    'low',
+      status:        'completed',
+    })
+return NextResponse.json({ success: true, product })
   } catch (error) {
     console.error('[PATCH PRODUCT ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

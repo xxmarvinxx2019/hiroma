@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms'
+import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
+// import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       prisma.binaryTreeNode.findUnique({ where: { id: actual_parent_node_id } }),
       prisma.user.findUnique({
         where:  { username: referrer_username.trim().toLowerCase() },
-        select: { id: true, username: true, role: true },
+        select: { id: true, username: true, role: true, status: true },
       }),
     ])
 
@@ -65,6 +66,11 @@ export async function POST(req: NextRequest) {
     if (slotTaken)       return NextResponse.json({ error: 'Slot already taken. Please refresh.' }, { status: 400 })
     if (!parentNodeExists) return NextResponse.json({ error: 'Parent node not found.' }, { status: 400 })
     if (!referrer)       return NextResponse.json({ error: 'Referrer not found.' }, { status: 400 })
+
+    // Block if referrer is deactivated
+    if (referrer.username !== 'hiroma' && referrer.status !== 'active') {
+      return NextResponse.json({ error: 'The referrer account is not active. Please use an active referrer.' }, { status: 400 })
+    }
 
     const normalizedName = full_name.trim().toLowerCase()
     const nameCap = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
@@ -135,6 +141,8 @@ export async function POST(req: NextRequest) {
           city_dist_id:         user.id,  // admin acts as city dist
           pin_id:               pin.id,
           total_points:         0,
+          rank:                 'default',
+          total_pu:             0,
           daily_referral_count: 0,
           daily_pairs_count:    0,
         },
@@ -207,11 +215,39 @@ export async function POST(req: NextRequest) {
           where: { user_id: referrer.id },
           data:  { daily_referral_count: isToday ? { increment: 1 } : 1, last_referral_date: new Date() },
         })
-        const directBonus = Number(referrerProfile?.package?.direct_referral_bonus || 0)
-        if (directBonus > 0) {
-          await prisma.commission.create({ data: { user_id: referrer.id, type: 'direct_referral', amount: directBonus, source_user_id: newUser.id, is_pair_overflow: false } })
-          await prisma.wallet.update({ where: { user_id: referrer.id }, data: { balance: { increment: directBonus }, total_earned: { increment: directBonus } } })
+        const referrerBonus = Number(referrerProfile?.package?.direct_referral_bonus || 0)
+        // Get referred reseller's package bonus
+        const referredPkg   = await prisma.package.findUnique({
+          where:  { id: pin.package_id },
+          select: { direct_referral_bonus: true },
+        })
+        const referredBonus = Number(referredPkg?.direct_referral_bonus || 0)
+
+        // Referrer earns MIN(referrer bonus, referred bonus)
+        const earned   = Math.min(referrerBonus, referredBonus)
+        // Overflow = MAX(0, referrer bonus - referred bonus) → Hiroma
+        const overflow = Math.abs(referrerBonus - referredBonus)
+
+        const hiromaUser = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
+
+        const bonusOps: Promise<any>[] = []
+        if (earned > 0) {
+          bonusOps.push(
+            prisma.commission.create({ data: { user_id: referrer.id, type: 'direct_referral', amount: earned, source_user_id: newUser.id, is_pair_overflow: false } }),
+            prisma.wallet.update({ where: { user_id: referrer.id }, data: { balance: { increment: earned }, total_earned: { increment: earned } } })
+          )
         }
+        if (overflow > 0 && hiromaUser) {
+          bonusOps.push(
+            prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'direct_referral', amount: overflow, source_user_id: newUser.id, is_pair_overflow: true, overflow_to: hiromaUser.id } }),
+            prisma.wallet.upsert({
+              where:  { user_id: hiromaUser.id },
+              update: { balance: { increment: overflow }, total_earned: { increment: overflow } },
+              create: { user_id: hiromaUser.id, balance: overflow, total_earned: overflow, total_withdrawn: 0 },
+            })
+          )
+        }
+        await Promise.all(bonusOps)
       } catch (e) { console.error('[ADMIN REGISTER] Referral bonus error:', e) }
     }
 
@@ -230,18 +266,20 @@ export async function POST(req: NextRequest) {
             INNER JOIN ancestor_chain a ON n.id = a.parent_id
           ) SELECT id, user_id, parent_id, position FROM ancestor_chain
         `
-        const hiromaUser = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
+        const [hiromaUser, ancestorProfiles] = await Promise.all([
+          prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } }),
+          prisma.resellerProfile.findMany({
+            where:  { user_id: { in: ancestors.map(a => a.user_id) } },
+            select: { user_id: true, left_points: true, right_points: true, daily_pairing_count: true, daily_pairing_date: true, package: { select: { pairing_bonus_value: true } }, user: { select: { status: true } } },
+          }),
+        ])
+        const profileMap = new Map(ancestorProfiles.map(p => [p.user_id, p]))
         const today = new Date(); today.setHours(0, 0, 0, 0)
         let currentLeg = actual_position as 'left' | 'right'
 
         for (let i = 0; i < ancestors.length; i++) {
           const ancestor = ancestors[i]
-
-          // Fresh read per ancestor to avoid stale data
-          const profile = await prisma.resellerProfile.findUnique({
-            where:  { user_id: ancestor.user_id },
-            select: { user_id: true, left_points: true, right_points: true, daily_pairing_count: true, daily_pairing_date: true, package: { select: { pairing_bonus_value: true } } },
-          })
+          const profile  = profileMap.get(ancestor.user_id)
           if (!profile) { currentLeg = (ancestor.position as 'left' | 'right') || currentLeg; continue }
 
           const ancestorPkgPts = Number(profile.package?.pairing_bonus_value || 0)
@@ -268,14 +306,28 @@ export async function POST(req: NextRequest) {
             const deduct       = matchable
             leftPts  -= deduct; rightPts -= deduct
 
+            const isAncestorActive = profile.user?.status === 'active'
+            const pairOps: Promise<any>[] = [
+              prisma.resellerProfile.update({
+                where: { user_id: ancestor.user_id },
+                data:  { left_points: leftPts, right_points: rightPts, daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs, daily_pairing_date: today },
+              }),
+            ]
             if (paidPairs > 0 && paidEarnings > 0) {
-              await prisma.commission.create({ data: { user_id: ancestor.user_id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * matchable, source_user_id: newUser.id, is_pair_overflow: false } })
-              await prisma.wallet.update({ where: { user_id: ancestor.user_id }, data: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } } })
+              if (isAncestorActive) {
+                pairOps.push(
+                  prisma.commission.create({ data: { user_id: ancestor.user_id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * matchable, source_user_id: newUser.id, is_pair_overflow: false } }),
+                  prisma.wallet.update({ where: { user_id: ancestor.user_id }, data: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } } })
+                )
+              } else if (hiromaUser) {
+                // Deactivated ancestor → flush to Hiroma, record source as deactivated ancestor
+                pairOps.push(
+                  prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * matchable, source_user_id: ancestor.user_id, overflow_to: hiromaUser.id, is_pair_overflow: true } }),
+                  prisma.wallet.upsert({ where: { user_id: hiromaUser.id }, update: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } }, create: { user_id: hiromaUser.id, balance: paidEarnings, total_earned: paidEarnings, total_withdrawn: 0 } })
+                )
+              }
             }
-            await prisma.resellerProfile.update({
-              where: { user_id: ancestor.user_id },
-              data:  { left_points: leftPts, right_points: rightPts, daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs, daily_pairing_date: today },
-            })
+            await Promise.all(pairOps)
           } else {
             await prisma.resellerProfile.update({ where: { user_id: ancestor.user_id }, data: { left_points: leftPts, right_points: rightPts } })
           }
@@ -290,22 +342,34 @@ export async function POST(req: NextRequest) {
       select: { name: true, price: true, products: { select: { quantity: true, product: { select: { name: true, type: true, price: true } } } } },
     })
 
-    // ── Send welcome SMS ──
-   /* try {
-      const pkg = packageWithProducts
-      const smsMessage = smsWelcomeReseller({
-        full_name,
-        username:     cleanUsername,
-        password,
-        package_name: pkg?.name || 'Starter',
-      })
-      await sendSMS(mobile, smsMessage)
-    } catch (e) {
-      console.error('[ADMIN REGISTER] SMS error:', e)
-      // Non-blocking — registration still succeeds even if SMS fails
-    }
-  */
-    return NextResponse.json({
+    // ── Send welcome SMS ── (commented out to save SMS costs)
+    // try {
+    //   const pkg = packageWithProducts
+    //   const smsMessage = smsWelcomeReseller({
+    //     full_name,
+    //     username:     cleanUsername,
+    //     password,
+    //     package_name: pkg?.name || 'Starter',
+    //   })
+    //   await sendSMS(mobile, smsMessage)
+    // } catch (e) {
+    //   console.error('[ADMIN REGISTER] SMS error:', e)
+    //   // Non-blocking — registration still succeeds even if SMS fails
+    // }
+
+        createAuditLog({
+      user_id:       user.id,
+      user_name:     user.full_name || user.username,
+      user_role:     user.role,
+      member_id:     formatMemberId(user.id, user.role),
+      activity_type: 'reseller_registered',
+      category:      'reseller',
+      description:   `New reseller registered: ${full_name} (@${username.trim().toLowerCase()})`,
+      metadata:      { reseller_id: newUser.id, package_id: pin.package_id },
+      risk_level:    'low',
+      status:        'normal',
+    })
+return NextResponse.json({
       success:  true,
       message:  `${full_name} has been registered successfully.`,
       reseller: { full_name, username: cleanUsername },

@@ -1,534 +1,401 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
-
-// ============================================================
-// TYPES
-// ============================================================
+import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 interface Pin {
-  id: string
-  pin_code: string
-  status: string
-  created_at: string
-  used_at: string | null
-  package: { name: string } | null
+  id:               string
+  pin_code:         string
+  status:           string
+  created_at:       string
+  used_at:          string | null
+  package:          { name: string } | null
   city_distributor: { full_name: string; username: string } | null
-  used_by_user: { full_name: string; username: string } | null
+  used_by_user:     { full_name: string; username: string } | null
 }
 
-interface Package {
-  id: string
-  name: string
-  price: number
-  is_active: boolean
-}
+interface Package { id: string; name: string; price: number; is_active: boolean }
+interface CityDist { id: string; full_name: string; username: string }
 
-interface CityDist {
-  id: string
-  full_name: string
-  username: string
-}
+const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-// ============================================================
-// PAGE
-// ============================================================
+const STATUS_STYLES: Record<string, string> = {
+  unused:    'bg-[#fff8e6] text-[#b87a00]',
+  used:      'bg-[#e8f7ef] text-[#1a7a4a]',
+  cancelled: 'bg-[#fdecea] text-[#a03030]',
+}
 
 export default function PinsPage() {
-  const [pins, setPins] = useState<Pin[]>([])
-  const [packages, setPackages] = useState<Package[]>([])
-  const [cityDists, setCityDists]       = useState<CityDist[]>([])
-  const [distSearch, setDistSearch]     = useState('')
-  const [showDistDrop, setShowDistDrop] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [pins, setPins]               = useState<Pin[]>([])
+  const [packages, setPackages]       = useState<Package[]>([])
+  const [cityDists, setCityDists]     = useState<CityDist[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [search, setSearch]           = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('all')
-  const [page, setPage] = useState(1)
-  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({
-    package_id: '',
-    city_dist_id: '',
-    quantity: '1',
-  })
-  const [formLoading, setFormLoading]   = useState(false)
-  const [selectedIds, setSelectedIds]   = useState<string[]>([])
-  const [cancelling, setCancelling]     = useState(false)
-  const [cancelSuccess, setCancelSuccess] = useState('')
-  const [showConfirm, setShowConfirm]     = useState(false)
-  const [cancelError, setCancelError]     = useState('')
-  const [formError, setFormError] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'cancelled'>('all')
+  const [page, setPage]               = useState(1)
+  const [meta, setMeta]               = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
+  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, cancelled: 0 })
+  const [showForm, setShowForm]       = useState(false)
+  const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1' })
+  const [formLoading, setFormLoading] = useState(false)
+  const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [generatedPins, setGeneratedPins] = useState<string[]>([])
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [cancelling, setCancelling]   = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [cancelError, setCancelError] = useState('')
+  const [distSearch, setDistSearch]   = useState('')
+  const [showDistDrop, setShowDistDrop] = useState(false)
 
-  // Fetch packages and city dists once on mount
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/admin/packages?pageSize=100&active=true').then((r) => r.json()),
-      fetch('/api/admin/distributors?pageSize=200&level=city').then((r) => r.json()),
-    ]).then(([packagesData, distsData]) => {
-      setPackages(packagesData.packages || [])
-      const cityDistList = (distsData.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city')
-      // Add admin (self) at top so admin can generate PINs for themselves
-      setCityDists([{ id: distsData.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin', coverage_area: 'All areas' }, ...cityDistList])
-    })
-  }, [])
+  // Date filter
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [dateMode, setDateMode]     = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
+  const [dateFrom, setDateFrom]     = useState(todayStr)
+  const [dateTo, setDateTo]         = useState(todayStr)
 
-  const handleBulkCancel = () => {
-    if (selectedIds.length === 0) return
-    setCancelError('')
-    setShowConfirm(true)
-  }
-
-  const confirmCancel = async () => {
-    setCancelling(true)
-    setCancelError('')
-    const res = await fetch('/api/admin/pins', {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin_ids: selectedIds }),
-    })
-    const data = await res.json()
-    setCancelling(false)
-    if (res.ok) {
-      setShowConfirm(false)
-      setCancelSuccess(data.message)
-      setSelectedIds([])
-      // Re-fetch by changing page state to trigger useEffect
-      window.dispatchEvent(new Event('pins-refresh'))
-      setTimeout(() => setCancelSuccess(''), 3000)
-    } else {
-      setCancelError(data.error || 'Failed to cancel PINs.')
+  // Compute date range from mode
+  const getDateRange = () => {
+    const today = new Date()
+    const fmt   = (d: Date) => d.toISOString().slice(0, 10)
+    switch (dateMode) {
+      case 'today':
+        return { from: fmt(today), to: fmt(today) }
+      case 'yesterday': {
+        const y = new Date(today); y.setDate(y.getDate() - 1)
+        return { from: fmt(y), to: fmt(y) }
+      }
+      case 'week': {
+        const w = new Date(today); w.setDate(w.getDate() - 7)
+        return { from: fmt(w), to: fmt(today) }
+      }
+      case 'month': {
+        const m = new Date(today); m.setDate(1)
+        return { from: fmt(m), to: fmt(today) }
+      }
+      case 'custom':
+        return { from: dateFrom, to: dateTo }
+      default:
+        return { from: fmt(today), to: fmt(today) }
     }
   }
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    )
-  }
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/admin/packages?pageSize=100&active=true').then(r => r.json()),
+      fetch('/api/admin/distributors?pageSize=200&level=city').then(r => r.json()),
+    ]).then(([pd, dd]) => {
+      setPackages(pd.packages || [])
+      const list = (dd.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city')
+      setCityDists([{ id: dd.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin' }, ...list])
+    })
+  }, [])
 
-  const fetchData = useCallback(() => {
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  useEffect(() => { setPage(1) }, [search, statusFilter, dateMode, dateFrom, dateTo])
+
+  const fetchPins = useCallback(() => {
     setLoading(true)
+    const { from, to } = getDateRange()
     const params = new URLSearchParams({
       page: String(page), pageSize: '15',
       ...(statusFilter !== 'all' && { status: statusFilter }),
       ...(search && { search }),
+      from, to,
     })
     fetch(`/api/admin/pins?${params}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setPins(data.pins || [])
-        if (data.meta)    setMeta(data.meta)
-        if (data.summary) setSummary(data.summary)
-        setLoading(false)
+      .then(r => r.json())
+      .then(d => {
+        setPins(d.pins || [])
+        setMeta(d.meta || { total: 0, page: 1, pageSize: 15, totalPages: 1 })
+        setSummary(d.summary || { total: 0, unused: 0, used: 0, cancelled: 0 })
       })
-  }, [page, statusFilter, search])
+      .finally(() => setLoading(false))
+  }, [page, statusFilter, search, dateMode, dateFrom, dateTo])
 
-  useEffect(() => { fetchData() }, [fetchData])
-
-  useEffect(() => {
-    const handler = () => fetchData()
-    window.addEventListener('pins-refresh', handler)
-    return () => window.removeEventListener('pins-refresh', handler)
-  }, [fetchData])
-
-  const filtered = pins
-
+  useEffect(() => { fetchPins() }, [fetchPins])
 
   const handleGenerate = async () => {
     if (!form.package_id || !form.city_dist_id || !form.quantity) {
-      setFormError('All fields are required.')
-      return
+      setFormError('All fields are required.'); return
     }
-    const qty = parseInt(form.quantity)
-    if (qty < 1 || qty > 50) {
-      setFormError('Quantity must be between 1 and 50.')
-      return
-    }
-
-    setFormLoading(true)
-    setFormError('')
-    setFormSuccess('')
-    setGeneratedPins([])
-
-    const res = await fetch('/api/admin/pins', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        package_id: form.package_id,
-        city_dist_id: form.city_dist_id,
-        quantity: qty,
-      }),
-    })
+    setFormLoading(true); setFormError(''); setFormSuccess('')
+    const res  = await fetch('/api/admin/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package_id: form.package_id, city_dist_id: form.city_dist_id, quantity: parseInt(form.quantity) }) })
     const data = await res.json()
-
-    if (!res.ok) {
-      setFormError(data.error || 'Failed to generate PINs.')
-    } else {
-      setFormSuccess(`${qty} PIN${qty > 1 ? 's' : ''} generated successfully!`)
-      setGeneratedPins(data.pins || [])
-      fetchData()
-    }
+    if (!res.ok) { setFormError(data.error || 'Failed'); setFormLoading(false); return }
+    setGeneratedPins(data.pin_codes || [])
     setFormLoading(false)
+    fetchPins()
+    setShowForm(false)
+    setForm({ package_id: '', city_dist_id: '', quantity: '1' })
+    setShowSuccessModal(true)
   }
 
-  const copyAll = () => {
-    navigator.clipboard.writeText(generatedPins.join('\n'))
+  const handleBulkCancel = async () => {
+    if (!selectedIds.length) return
+    setCancelling(true)
+    await fetch('/api/admin/pins', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin_ids: selectedIds, action: 'cancel' }) })
+    setSelectedIds([]); setShowConfirm(false); setCancelling(false)
+    fetchPins()
   }
+
+  const exportCSV = () => {
+    const headers = ['PIN Code', 'Package', 'Distributor', 'Used By', 'Status', 'Created At']
+    const rows    = pins.map(p => [p.pin_code, p.package?.name || '', p.city_distributor?.full_name || '', p.used_by_user?.full_name || '', p.status, new Date(p.created_at).toLocaleString('en-PH')])
+    const csv     = [headers, ...rows].map(r => r.join(',')).join('\n')
+    const a       = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `pins-${todayStr}.csv`; a.click()
+  }
+
+  const { from: displayFrom } = getDateRange()
+  const displayDate = dateMode === 'today' ? 'Today' : dateMode === 'yesterday' ? 'Yesterday' : dateMode === 'week' ? 'This Week' : dateMode === 'month' ? 'This Month' : `${dateFrom} — ${dateTo}`
 
   return (
-    <div className="max-w-7xl mx-auto">
-
+    <div className="w-full space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#0D1B3E]">PIN Manager</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            Generate and track all reseller PINs
-          </p>
+          <h1 className="text-xl font-bold text-[#0D1B3E]">PIN Manager</h1>
+          <p className="text-xs text-gray-400 mt-0.5">Generate and track all impulse PINs.</p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true)
-            setFormError('')
-            setFormSuccess('')
-            setGeneratedPins([])
-          }}
-          className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors"
-        >
+        <button onClick={() => { setShowForm(true); setFormError(''); setFormSuccess(''); setGeneratedPins([]); setShowDistDrop(false); setDistSearch('') }}
+          className="flex items-center gap-2 bg-[#C9A84C] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#b8963e] transition-colors">
           + Generate PINs
         </button>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total PINs', value: summary.total,   accent: '#0D1B3E' },
-          { label: 'Unused',     value: summary.unused,  accent: '#C9A84C' },
-          { label: 'Used',       value: summary.used,    accent: '#1a7a4a' },
-          { label: 'Expired',    value: summary.expired, accent: '#e05252' },
-        ].map((s) => (
-          <div
-            key={s.label}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}
-          >
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>
-              {s.value}
-            </p>
+          { label: 'TOTAL PINS', value: summary.total, color: '#2563eb', icon: '📋', sub: 'View details below' },
+          { label: 'UNUSED',     value: summary.unused,    color: '#C9A84C', icon: '🔒', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'USED',       value: summary.used,      color: '#1a7a4a', icon: '✅', sub: `${summary.total > 0 ? ((summary.used / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'CANCELLED',  value: summary.cancelled,   color: '#64748b', icon: '🚫', sub: `${summary.total > 0 ? ((summary.cancelled / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+        ].map(s => (
+          <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold">{s.label} <span className="text-gray-300">({displayDate})</span></p>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: s.color + '15' }}>{s.icon}</div>
+            </div>
+            <p className="text-3xl font-bold" style={{ color: s.color }}>{s.value}</p>
+            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
           </div>
         ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+      {/* Date Range + Quick Filters + Search */}
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Date picker (custom) */}
+          <div className="flex items-center gap-2 border border-[#0D1B3E]/10 rounded-xl px-3 py-2 bg-[#f8f9fc]">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-gray-400">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span className="text-xs text-[#0D1B3E] font-medium">{displayDate}</span>
+          </div>
 
-        {/* Search & Filter */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by PIN code or username..."
-            className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
-          />
+          {/* Quick filter tabs */}
           <div className="flex gap-1">
-            {(['all', 'unused', 'used', 'expired', 'cancelled'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setStatusFilter(f)}
-                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  statusFilter === f
-                    ? 'bg-[#0D1B3E] text-white'
-                    : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
-                }`}
-              >
-                {f}
+            {(['today','yesterday','week','month','custom'] as const).map(m => (
+              <button key={m} onClick={() => setDateMode(m)}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors capitalize ${dateMode === m ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                {m === 'today' ? 'Today' : m === 'yesterday' ? 'Yesterday' : m === 'week' ? 'This Week' : m === 'month' ? 'This Month' : 'Custom'}
               </button>
             ))}
           </div>
+
+          {/* Custom date range */}
+          {dateMode === 'custom' && (
+            <div className="flex items-center gap-2 border border-[#0D1B3E]/10 rounded-xl px-3 py-2 bg-[#f8f9fc]">
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-xs text-[#0D1B3E] outline-none bg-transparent" />
+              <span className="text-gray-300 text-xs">—</span>
+              <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="text-xs text-[#0D1B3E] outline-none bg-transparent" />
+            </div>
+          )}
+
+          {/* Search */}
+          <div className="flex items-center gap-2 flex-1 min-w-[200px] bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-xl px-3 py-2 ml-auto">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-gray-300">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+              placeholder="Search by PIN code or username..."
+              className="flex-1 bg-transparent text-xs text-[#0D1B3E] outline-none placeholder:text-gray-300" />
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
+        {/* Status tabs + Export */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#0D1B3E]/8">
+          <div className="flex gap-1">
+            {([
+              { key: 'all',       label: `All (${summary.total})` },
+              { key: 'unused',    label: `Unused (${summary.unused})` },
+              { key: 'used',      label: `Used (${summary.used})` },
+              { key: 'cancelled', label: `Cancelled (${summary.cancelled})` },
+            ] as const).map(f => (
+              <button key={f.key} onClick={() => setStatusFilter(f.key)}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${statusFilter === f.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedIds.length > 0 && (
+              <button onClick={() => setShowConfirm(true)}
+                className="text-xs bg-[#fdecea] text-[#e05252] px-3 py-1.5 rounded-lg font-medium hover:bg-[#e05252] hover:text-white transition-colors">
+                Cancel {selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}
+              </button>
+            )}
+            <button onClick={exportCSV}
+              className="flex items-center gap-1.5 text-xs border border-[#0D1B3E]/15 text-[#0D1B3E] px-3 py-1.5 rounded-lg hover:bg-[#f8f9fc] transition-colors">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export
+            </button>
+          </div>
         </div>
 
-        {/* Bulk cancel bar */}
-        {selectedIds.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-2 bg-[#fef9ee] border-b border-[#C9A84C]/20">
-            <p className="text-xs text-[#9a6f1e]">{selectedIds.length} PIN(s) selected</p>
-            <div className="flex gap-2">
-              <button onClick={() => setSelectedIds([])}
-                className="text-xs text-gray-400 hover:text-[#0D1B3E] px-2 py-1">
-                Clear
-              </button>
-              <button onClick={handleBulkCancel} disabled={cancelling}
-                className="text-xs bg-[#fdecea] text-[#a03030] px-3 py-1.5 rounded-lg hover:bg-[#fcd9d9] disabled:opacity-50 font-medium">
-                {cancelling ? 'Cancelling...' : `✕ Cancel ${selectedIds.length} PIN(s)`}
-              </button>
-            </div>
-          </div>
-        )}
-        {cancelSuccess && (
-          <div className="px-4 py-2 bg-[#e8f7ef] text-[#1a7a4a] text-xs border-b border-[#1a7a4a]/10">
-            ✓ {cancelSuccess}
-          </div>
-        )}
-
-        {/* Table Header */}
-        <div className="grid px-4 py-2 bg-[#F0F2F8]" style={{ gridTemplateColumns: "32px 2fr 1fr 2fr 2fr 1fr 1fr" }}>
-          <div className="flex items-center">
+        {/* Column headers */}
+        <div className="grid grid-cols-6 px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
+          <div className="flex items-center gap-3">
             <input type="checkbox"
-              checked={selectedIds.length > 0 && pins.filter((p) => p.status === 'unused').length > 0 && pins.filter((p) => p.status === 'unused').every((p) => selectedIds.includes(p.id))}
-              onChange={(e) => {
-                const unusedIds = pins.filter((p) => p.status === 'unused').map((p) => p.id)
+              checked={selectedIds.length > 0 && pins.filter(p => p.status === 'unused').every(p => selectedIds.includes(p.id))}
+              onChange={e => {
+                const unusedIds = pins.filter(p => p.status === 'unused').map(p => p.id)
                 setSelectedIds(e.target.checked ? unusedIds : [])
               }}
-              className="w-3.5 h-3.5 accent-[#C9A84C]"
-            />
+              className="rounded" />
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">PIN Code</p>
           </div>
-          {['PIN Code', 'Package', 'City Distributor', 'Used By', 'Status', 'Created'].map((h) => (
-            <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
+          {['Package', 'Distributor', 'Used By', 'Status', 'Created At'].map(h => (
+            <p key={h} className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{h}</p>
           ))}
         </div>
 
-        {/* Rows */}
         {loading ? (
-          <div className="px-4 py-12 text-center">
-            <div className="w-6 h-6 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-gray-400 text-sm">Loading...</p>
+          <div className="flex flex-col items-center py-16">
+            <div className="w-6 h-6 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin mb-3" />
+            <p className="text-gray-400 text-sm">Loading PINs...</p>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="px-4 py-12 text-center text-gray-400 text-sm">
-            No PINs found
+        ) : pins.length === 0 ? (
+          <div className="flex flex-col items-center py-16">
+            <span className="text-4xl mb-3">🔑</span>
+            <p className="text-gray-400 text-sm">No PINs found for this period</p>
           </div>
-        ) : (
-          filtered.map((pin) => (
-            <div
-              key={pin.id}
-              className="grid px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center" style={{ gridTemplateColumns: "32px 2fr 1fr 2fr 2fr 1fr 1fr" }}
-            >
-              {/* Col 1: Checkbox */}
-              <div className="flex items-center">
-                {pin.status === 'unused' && (
-                  <input type="checkbox"
-                    checked={selectedIds.includes(pin.id)}
-                    onChange={() => toggleSelect(pin.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-3.5 h-3.5 accent-[#C9A84C] flex-shrink-0"
-                  />
-                )}
-              </div>
-              {/* Col 2: PIN Code */}
-              <p className="text-xs font-mono font-medium text-[#0D1B3E] truncate pr-2">
-                {pin.pin_code}
-              </p>
-              <span>
-                <span className="text-xs bg-[#fef6e4] text-[#9a6f1e] px-2 py-0.5 rounded-full">
-                  {pin.package?.name || '—'}
-                </span>
-              </span>
-              <div>
-                <p className="text-xs font-medium text-[#0D1B3E]">
-                  {pin.city_distributor?.full_name || '—'}
-                </p>
-                <p className="text-xs text-gray-400">
-                  @{pin.city_distributor?.username || '—'}
-                </p>
-              </div>
-              <div>
-                {pin.used_by_user ? (
-                  <>
-                    <p className="text-xs font-medium text-[#0D1B3E]">
-                      {pin.used_by_user.full_name}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {pin.used_at
-                        ? new Date(pin.used_at).toLocaleDateString('en-PH')
-                        : ''}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-xs text-gray-400">—</p>
-                )}
-              </div>
-              <span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  pin.status === 'unused'
-                    ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                    : pin.status === 'used'
-                    ? 'bg-[#eef0f8] text-[#0D1B3E]'
-                    : 'bg-[#fdecea] text-[#a03030]'
-                }`}>
-                  {pin.status}
-                </span>
-              </span>
-              {/* Created date */}
-              <p className="text-[10px] text-gray-400">
-                {new Date(pin.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </p>
+        ) : pins.map(pin => (
+          <div key={pin.id} className="grid grid-cols-6 px-5 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
+            <div className="flex items-center gap-3">
+              {pin.status === 'unused' && (
+                <input type="checkbox" checked={selectedIds.includes(pin.id)}
+                  onChange={e => setSelectedIds(prev => e.target.checked ? [...prev, pin.id] : prev.filter(id => id !== pin.id))}
+                  className="rounded" />
+              )}
+              {pin.status !== 'unused' && <div className="w-4" />}
+              <p className="text-xs font-mono font-semibold text-[#0D1B3E]">{pin.pin_code}</p>
             </div>
-          ))
-        )}
-        <Pagination meta={meta} onPageChange={setPage} />
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold w-fit" style={{ background: '#C9A84C18', color: '#C9A84C' }}>
+              {pin.package?.name || '—'}
+            </span>
+            <div>
+              <p className="text-xs font-medium text-[#0D1B3E]">{pin.city_distributor?.full_name || '—'}</p>
+              <p className="text-[10px] text-gray-400">@{pin.city_distributor?.username || ''}</p>
+            </div>
+            <div>
+              {pin.used_by_user ? (
+                <>
+                  <p className="text-xs font-medium text-[#0D1B3E]">{pin.used_by_user.full_name}</p>
+                  <p className="text-[10px] text-gray-400">@{pin.used_by_user.username}</p>
+                </>
+              ) : <p className="text-xs text-gray-300">—</p>}
+            </div>
+            <span className={`text-[10px] px-2.5 py-1 rounded-full font-semibold w-fit ${STATUS_STYLES[pin.status] || 'bg-gray-100 text-gray-400'}`}>
+              {pin.status}
+            </span>
+            <div>
+              <p className="text-xs text-gray-500">{new Date(pin.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+              <p className="text-[10px] text-gray-400">{new Date(pin.created_at).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</p>
+            </div>
+          </div>
+        ))}
+
+        <div className="px-5 py-3 border-t border-[#0D1B3E]/5 flex items-center justify-between">
+          <p className="text-xs text-gray-400">Showing {Math.min((page-1)*15+1, meta.total)} to {Math.min(page*15, meta.total)} of {meta.total} entries</p>
+          <Pagination meta={meta} onPageChange={setPage} />
+        </div>
       </div>
 
       {/* Generate PIN Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-white font-semibold text-sm">Generate PINs</h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-white/50 hover:text-white text-lg cursor-pointer"
-              >
-                ✕
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 w-[480px] mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#0D1B3E]/8 bg-[#f8f9fc] rounded-t-2xl">
+              <p className="text-sm font-bold text-[#0D1B3E]">Generate PINs</p>
+              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-[#0D1B3E]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
-
-            <div className="p-6 flex flex-col gap-4">
-
+            <div className="p-6 space-y-4">
+              {/* Package */}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Package <span className="text-[#C9A84C]">*</span>
-                </label>
-                <select
-                  value={form.package_id}
-                  onChange={(e) => setForm({ ...form, package_id: e.target.value })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                >
-                  <option value="">Select a package</option>
-                  {packages.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} — ₱{Number(p.price).toLocaleString()}
-                    </option>
-                  ))}
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Package</label>
+                <select value={form.package_id} onChange={e => setForm({ ...form, package_id: e.target.value })}
+                  className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
+                  <option value="">Select package...</option>
+                  {packages.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
                 </select>
               </div>
-
+              {/* City Dist */}
               <div className="relative">
-                <label className="block text-xs text-gray-400 mb-1">
-                  City distributor <span className="text-[#C9A84C]">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={distSearch || (form.city_dist_id ? (cityDists.find((d) => d.id === form.city_dist_id)?.full_name || '') : '')}
-                    onChange={(e) => {
-                      setDistSearch(e.target.value)
-                      setShowDistDrop(true)
-                      if (!e.target.value) setForm({ ...form, city_dist_id: '' })
-                    }}
-                    onFocus={() => setShowDistDrop(true)}
-                    onBlur={() => setTimeout(() => setShowDistDrop(false), 150)}
-                    placeholder="Search city distributor..."
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
-                  />
-                  {form.city_dist_id && (
-                    <button
-                      onClick={() => { setForm({ ...form, city_dist_id: '' }); setDistSearch('') }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs"
-                    >✕</button>
-                  )}
-                </div>
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Assign to City Distributor</label>
+                <input
+                  value={distSearch !== '' ? distSearch : form.city_dist_id ? (cityDists.find(d => d.id === form.city_dist_id)?.full_name || '') : ''}
+                  onChange={e => {
+                    setDistSearch(e.target.value)
+                    setShowDistDrop(true)
+                    if (!e.target.value) setForm({ ...form, city_dist_id: '' })
+                  }}
+                  onFocus={() => { setShowDistDrop(true); setDistSearch('') }}
+                  onBlur={() => setTimeout(() => { setShowDistDrop(false); setDistSearch('') }, 200)}
+                  placeholder="Search distributor..."
+                  autoComplete="off"
+                  className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]" />
                 {showDistDrop && (
-                  <div className="absolute z-[200] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-36 overflow-y-auto">
-                    {cityDists
-                      .filter((d) =>
-                        !distSearch ||
-                        d.full_name.toLowerCase().includes(distSearch.toLowerCase()) ||
-                        d.username.toLowerCase().includes(distSearch.toLowerCase())
-                      )
-                      .map((d) => (
-                        <div
-                          key={d.id}
-                          onMouseDown={() => {
-                            setForm({ ...form, city_dist_id: d.id })
-                            setDistSearch('')
-                            setShowDistDrop(false)
-                          }}
-                          className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${
-                            form.city_dist_id === d.id ? 'bg-[#F0F2F8]' : ''
-                          }`}
-                        >
-                          <p className="text-xs font-medium text-[#0D1B3E]">{d.full_name}</p>
-                          <p className="text-[10px] text-gray-400">@{d.username}</p>
-                        </div>
-                      ))
-                    }
-                    {cityDists.filter((d) =>
-                      !distSearch ||
-                      d.full_name.toLowerCase().includes(distSearch.toLowerCase()) ||
-                      d.username.toLowerCase().includes(distSearch.toLowerCase())
-                    ).length === 0 && (
-                      <p className="text-xs text-gray-400 px-3 py-3 text-center">No distributor found</p>
-                    )}
+                  <div className="absolute top-full left-0 right-0 z-[9999] bg-white border border-[#0D1B3E]/10 rounded-xl shadow-xl mt-1 max-h-48 overflow-y-auto">
+                    {cityDists.filter(d => !distSearch || d.full_name.toLowerCase().includes(distSearch.toLowerCase()) || d.username.toLowerCase().includes(distSearch.toLowerCase())).map(d => (
+                      <button key={d.id} onClick={() => { setForm({ ...form, city_dist_id: d.id }); setDistSearch(''); setShowDistDrop(false) }}
+                        className={`w-full text-left px-4 py-2.5 hover:bg-[#f8f9fc] text-sm transition-colors ${form.city_dist_id === d.id ? 'bg-[#f0f2f8]' : ''}`}>
+                        <p className="font-medium text-[#0D1B3E]">{d.full_name}</p>
+                        <p className="text-[10px] text-gray-400">@{d.username}</p>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-
+              {/* Quantity */}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Quantity (max 50) <span className="text-[#C9A84C]">*</span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={form.quantity}
-                  onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                />
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Quantity</label>
+                <input type="number" min="1" max="100" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })}
+                  className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]" />
               </div>
 
-              {formError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                  <p className="text-red-500 text-xs">{formError}</p>
-                </div>
-              )}
+              {formError && <p className="text-xs text-[#e05252] bg-[#fdecea] px-3 py-2 rounded-lg">{formError}</p>}
 
-              {formSuccess && (
-                <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-3 py-2">
-                  <p className="text-[#1a7a4a] text-xs font-medium">{formSuccess}</p>
-                </div>
-              )}
-
-              {/* Generated PINs display */}
-              {generatedPins.length > 0 && (
-                <div className="bg-[#F0F2F8] rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-medium text-[#0D1B3E]">Generated PINs</p>
-                    <button
-                      onClick={copyAll}
-                      className="text-xs text-[#C9A84C] hover:underline font-medium"
-                    >
-                      Copy all
-                    </button>
-                  </div>
-                  <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
-                    {generatedPins.map((pin) => (
-                      <p key={pin} className="text-xs font-mono text-[#0D1B3E] bg-white rounded px-2 py-1 border border-[#0D1B3E]/10">
-                        {pin}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors"
-                >
+                <button onClick={() => setShowForm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
                   Close
                 </button>
-                <button
-                  onClick={handleGenerate}
-                  disabled={formLoading}
-                  className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60"
-                >
-                  {formLoading ? '⏳ Generating...' : 'Generate PINs'}
+                <button onClick={handleGenerate} disabled={formLoading}
+                  className="flex-1 py-2.5 rounded-xl bg-[#C9A84C] text-white text-xs font-bold hover:bg-[#b8963e] transition-colors disabled:opacity-50">
+                  {formLoading ? 'Generating...' : 'Generate PINs'}
                 </button>
               </div>
             </div>
@@ -536,46 +403,83 @@ export default function PinsPage() {
         </div>
       )}
 
-      {/* ── Cancel Confirmation Modal ── */}
+      {/* Success Modal - Generated PINs */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 w-[520px] mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#0D1B3E]/8 bg-[#e8f7ef] rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#1a7a4a]/20 flex items-center justify-center text-xl">✅</div>
+                <div>
+                  <p className="text-sm font-bold text-[#1a7a4a]">{generatedPins.length} PINs Generated Successfully!</p>
+                  <p className="text-[10px] text-[#1a7a4a]/70">PINs are ready to be assigned to resellers</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowSuccessModal(false); setGeneratedPins([]) }}
+                className="text-gray-400 hover:text-[#0D1B3E]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Generated PIN Codes</p>
+              <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                {generatedPins.map((pin, i) => (
+                  <div key={pin} className="flex items-center justify-between bg-[#f8f9fc] border border-[#0D1B3E]/8 rounded-xl px-3 py-2">
+                    <p className="text-[11px] font-mono font-semibold text-[#0D1B3E]">{pin}</p>
+                    <button onClick={() => navigator.clipboard.writeText(pin)}
+                      className="text-gray-300 hover:text-[#C9A84C] transition-colors ml-1">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button onClick={() => { setShowSuccessModal(false); setGeneratedPins([]) }}
+                  className="flex-1 py-2.5 rounded-xl bg-[#0D1B3E] text-white text-xs font-bold hover:bg-[#1A2F5E] transition-colors">
+                  Done
+                </button>
+                <button onClick={() => {
+                  const text = generatedPins.join('\n')
+                  navigator.clipboard.writeText(text)
+                }} className="py-2.5 px-4 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
+                  Copy All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel confirm modal */}
       {showConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
-            <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-              <h2 className="text-sm font-semibold text-[#0D1B3E]">Cancel PIN{selectedIds.length > 1 ? 's' : ''}</h2>
-              <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 p-6 w-80 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#fdecea] flex items-center justify-center flex-shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e05252" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#0D1B3E]">Cancel {selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}?</p>
+                <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
+              </div>
             </div>
-            <div className="px-5 py-4 space-y-3">
-              <div className="flex items-start gap-3 bg-[#fdecea] rounded-xl p-3">
-                <span className="text-lg">⚠️</span>
-                <p className="text-xs text-[#a03030]">
-                  You are about to cancel <span className="font-semibold">{selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}</span>.
-                  Cancelled PINs cannot be used for reseller registration.
-                </p>
-              </div>
-              {cancelError && (
-                <p className="text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{cancelError}</p>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={() => { setShowConfirm(false); setCancelError('') }}
-                  disabled={cancelling}
-                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors disabled:opacity-50"
-                >
-                  Keep PINs
-                </button>
-                <button
-                  onClick={confirmCancel}
-                  disabled={cancelling}
-                  className="flex-1 bg-[#fdecea] text-[#a03030] text-sm rounded-lg py-2.5 hover:bg-[#fcd9d9] transition-colors disabled:opacity-50 font-medium"
-                >
-                  {cancelling ? 'Cancelling...' : `✕ Cancel ${selectedIds.length} PIN${selectedIds.length > 1 ? 's' : ''}`}
-                </button>
-              </div>
+            {cancelError && <p className="text-xs text-[#e05252] mb-3">{cancelError}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => setShowConfirm(false)}
+                className="flex-1 py-2 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
+                Keep PINs
+              </button>
+              <button onClick={handleBulkCancel} disabled={cancelling}
+                className="flex-1 py-2 rounded-xl bg-[#e05252] text-white text-xs font-bold hover:bg-[#c03030] transition-colors disabled:opacity-50">
+                {cancelling ? 'Cancelling...' : 'Yes, Cancel'}
+              </button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   )
 }

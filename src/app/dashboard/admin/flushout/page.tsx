@@ -142,7 +142,7 @@ export default function AdminFlushoutPage() {
     const rows = records.map(r => [
       new Date(r.date).toLocaleDateString('en-PH'),
       new Date(r.date).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }),
-      r.member, r.member_id, r.package, r.exceeded_pairs, r.pair_value, r.flushout_value, r.remarks,
+      r.member, r.member_id, r.package, r.flushout_value, r.remarks,
     ])
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -179,7 +179,7 @@ export default function AdminFlushoutPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Total Flushout (Period)', value: (summary.total_pairs_today || 0).toLocaleString(), sub: 'Pairs · Exceeded daily limit', icon: '⚡', color: '#6366f1', badge: 'Pairs' },
-          { label: 'Total Flushout Value', value: fmtS(summary.total_value_today || 0), sub: 'From all packages', icon: '💼', color: '#1a7a4a' },
+          { label: 'Total Flushout Value', value: fmt(summary.total_value_today || 0), sub: 'From all packages', icon: '💼', color: '#1a7a4a' },
           { label: 'Affected Members', value: (summary.affected_members ?? 0).toLocaleString(), sub: 'Members', icon: '👥', color: '#8b5cf6' },
           { label: 'Average Flushout per Member', value: Number(summary.avg_flushout ?? 0).toFixed(2), sub: 'Pairs', icon: '📊', color: '#f59e0b' },
         ].map(s => (
@@ -295,8 +295,8 @@ export default function AdminFlushoutPage() {
         </div>
 
         {/* Table headers */}
-        <div className="grid grid-cols-9 px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
-          {['Date','Time','Member','Member ID','Package','Exceeded Pairs','Pair Value','Flushout Value','Remarks'].map(h => (
+        <div className="grid grid-cols-7 px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
+          {['Date','Time','Member','Member ID','Package','Points','Pair Value','Flushout Value','Remarks'].map(h => (
             <p key={h} className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{h}</p>
           ))}
         </div>
@@ -315,7 +315,7 @@ export default function AdminFlushoutPage() {
         ) : records.map(r => {
           const color = getColor(r.package, pkgNames.indexOf(r.package))
           return (
-            <div key={r.id} className="grid grid-cols-9 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
+            <div key={r.id} className="grid grid-cols-7 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
               <p className="text-xs text-gray-600">{new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
               <p className="text-xs text-gray-600">{new Date(r.date).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</p>
               <div>
@@ -326,8 +326,6 @@ export default function AdminFlushoutPage() {
               <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold w-fit" style={{ background: color + '18', color }}>
                 {r.package}
               </span>
-              <p className="text-xs font-bold text-[#e05252]">{r.exceeded_pairs}</p>
-              <p className="text-xs font-semibold text-[#0D1B3E]">{fmt(Number(r.pair_value) || 0)}</p>
               <p className="text-xs font-bold text-[#6366f1]">{fmt(Number(r.flushout_value) || 0)}</p>
               <p className="text-xs text-gray-400">{r.remarks}</p>
             </div>

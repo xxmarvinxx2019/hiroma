@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
@@ -25,8 +26,14 @@ export async function GET(req: NextRequest) {
     const page          = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize      = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
     const cityDistId    = searchParams.get('city_dist_id')  || ''
+    const dateFrom      = searchParams.get('from')          || ''
+    const dateTo        = searchParams.get('to')            || ''
+
+    const fromDate = dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0, 0, 0, 0))
+    const toDate   = dateTo   ? new Date(dateTo + 'T23:59:59') : new Date(new Date().setHours(23, 59, 59, 999))
 
     const where: any = {
+      created_at: { gte: fromDate, lte: toDate },
       ...(status !== 'all' && { status }),
       ...(cityDistId && { city_dist_id: cityDistId }),
       ...(search && {
@@ -57,18 +64,18 @@ export async function GET(req: NextRequest) {
       }),
 
       prisma.pin.groupBy({
-        by: ['status'],
+        by:    ['status'],
+        where,
         _count: { status: true },
       }),
     ])
 
-    const summary = { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 }
+    const summary = { total: 0, unused: 0, used: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       summary.total += row._count.status
       const s = row.status as string
       if (s === 'unused')    summary.unused    = row._count.status
       if (s === 'used')      summary.used      = row._count.status
-      if (s === 'expired')   summary.expired   = row._count.status
       if (s === 'cancelled') summary.cancelled = row._count.status
     }
 
@@ -164,7 +171,20 @@ export async function POST(req: NextRequest) {
 
     })
 
-    return NextResponse.json({
+        // Audit log
+    createAuditLog({
+      user_id:       user.id,
+      user_name:     user.full_name || user.username,
+      user_role:     user.role,
+      member_id:     formatMemberId(user.id, user.role),
+      activity_type: 'pin_generated',
+      category:      'pin',
+      description:   `Generated ${pinCodes.length} PIN(s) for ${pkg.name} package`,
+      metadata:      { quantity: pinCodes.length, package: pkg.name, city_dist_id },
+      risk_level:    'low',
+      status:        'normal',
+    })
+return NextResponse.json({
       success: true,
       pins: pinCodes,
       message: `${quantity} PIN${quantity > 1 ? 's' : ''} generated and sold to city distributor.`,

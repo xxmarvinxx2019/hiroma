@@ -103,7 +103,7 @@ function RankedCard({ title, items, valueKey, nameKey, subKey, subKey2, href }: 
             </p>
           </div>
           <div className="text-right flex-shrink-0">
-            <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(item[valueKey])}</p>
+            <p className="text-xs font-bold text-[#1a7a4a]">{fmt(item[valueKey])}</p>
           </div>
         </div>
       ))}
@@ -185,7 +185,7 @@ export default function RegionalDashboardPage() {
         <>
           {/* Today's KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <StatCard label="Today's Sales"     value={fmtS(stats.salesRevenueToday)}   color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmtS(stats.salesRevenueYesterday)}`} />
+            <StatCard label="Today's Sales"     value={fmt(stats.salesRevenueToday)}   color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmt(stats.salesRevenueYesterday)}`} />
             <StatCard label="Units Sold Today"  value={stats.unitsSoldToday}             color="#2563eb" icon="📦" sub="To provincials" />
             <StatCard label="Provincial Dists"  value={stats.provincialCount}            color="#C9A84C" icon="🏛️" sub={`+${stats.newProvincialThisMonth} this month`} />
             <StatCard label="City Dists"        value={stats.cityCount}                  color="#8b5cf6" icon="🏢" sub="Across all provincials" />
@@ -195,8 +195,8 @@ export default function RegionalDashboardPage() {
           {/* Network summary */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Resellers" value={stats.totalResellers.toLocaleString()} color="#0D1B3E" icon="👥" sub="In this region" />
-            <StatCard label="Total Revenue"   value={fmtS(stats.totalRevenue)}               color="#1a7a4a" icon="📈" sub="All-time" />
-            <StatCard label="Total Profit"    value={fmtS(stats.totalProfit)}                color="#2563eb" icon="💎" sub="Revenue minus cost" />
+            <StatCard label="Total Revenue"   value={fmt(stats.totalRevenue)}               color="#1a7a4a" icon="📈" sub="All-time" />
+            <StatCard label="Total Profit"    value={fmt(stats.totalProfit)}                color="#2563eb" icon="💎" sub="Revenue minus cost" />
             <StatCard label="Low/Out Stock"   value={stats.lowStockItems + stats.outOfStockItems} color="#e05252" icon="⚠️" sub="Items needing attention" badge={stats.lowStockItems + stats.outOfStockItems > 0 ? 'Restock!' : undefined} />
           </div>
 
@@ -214,15 +214,15 @@ export default function RegionalDashboardPage() {
                       <div className="w-full rounded-t-md" style={{ height: h, background: i === stats.monthlyRevenue.length - 1 ? '#0D1B3E' : '#bfdbfe' }} />
                       <p className="text-[9px] text-gray-400">{m.month}</p>
                       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 z-10">
-                        {fmtS(m.revenue)}
+                        {fmt(m.revenue)}
                       </div>
                     </div>
                   )
                 })}
               </div>
               <div className="border-t border-[#0D1B3E]/5 mt-3 pt-3 space-y-1 text-xs">
-                <div className="flex justify-between"><span className="text-gray-400">YTD Revenue</span><span className="font-bold text-[#0D1B3E]">{fmtS(stats.totalRevenue)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">YTD Profit</span><span className="font-bold text-[#1a7a4a]">{fmtS(stats.totalProfit)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">YTD Revenue</span><span className="font-bold text-[#0D1B3E]">{fmt(stats.totalRevenue)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">YTD Profit</span><span className="font-bold text-[#1a7a4a]">{fmt(stats.totalProfit)}</span></div>
               </div>
             </div>
 
@@ -316,7 +316,7 @@ export default function RegionalDashboardPage() {
                   </div>
                   <p className="text-[10px] text-gray-400 truncate">{p.province}</p>
                   <p className="text-xs font-semibold text-[#2563eb]">{p.cities}</p>
-                  <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(p.revenue)}</p>
+                  <p className="text-xs font-bold text-[#1a7a4a]">{fmt(p.revenue)}</p>
                 </div>
               ))}
             </div>
@@ -338,7 +338,7 @@ export default function RegionalDashboardPage() {
                   </div>
                   <p className="text-[10px] text-gray-400 truncate">{c.city}</p>
                   <p className="text-xs font-semibold text-[#C9A84C]">{c.resellers}</p>
-                  <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(c.revenue)}</p>
+                  <p className="text-xs font-bold text-[#1a7a4a]">{fmt(c.revenue)}</p>
                 </div>
               ))}
             </div>
@@ -359,7 +359,7 @@ export default function RegionalDashboardPage() {
                     <p className="text-xs font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
                     <p className="text-[10px] text-gray-400">{r.package_name}</p>
                   </div>
-                  <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(r.total_earned)}</p>
+                  <p className="text-xs font-bold text-[#1a7a4a]">{fmt(r.total_earned)}</p>
                 </div>
               ))}
             </div>
@@ -371,9 +371,9 @@ export default function RegionalDashboardPage() {
       {tab === 'sales' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Revenue"  value={fmtS(stats.totalRevenue)}              color="#1a7a4a" icon="💰" />
-            <StatCard label="Total Cost"     value={fmtS(stats.totalCost)}                 color="#e05252" icon="🏷️" />
-            <StatCard label="Total Profit"   value={fmtS(stats.totalProfit)}               color="#2563eb" icon="📈" sub={`${stats.totalRevenue > 0 ? Math.round((stats.totalProfit/stats.totalRevenue)*100) : 0}% margin`} />
+            <StatCard label="Total Revenue"  value={fmt(stats.totalRevenue)}              color="#1a7a4a" icon="💰" />
+            <StatCard label="Total Cost"     value={fmt(stats.totalCost)}                 color="#e05252" icon="🏷️" />
+            <StatCard label="Total Profit"   value={fmt(stats.totalProfit)}               color="#2563eb" icon="📈" sub={`${stats.totalRevenue > 0 ? Math.round((stats.totalProfit/stats.totalRevenue)*100) : 0}% margin`} />
             <StatCard label="Units Sold"     value={stats.totalUnitsSold.toLocaleString()} color="#C9A84C" icon="📦" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
@@ -386,7 +386,7 @@ export default function RegionalDashboardPage() {
             {stats.monthlyRevenue.map((m, i) => (
               <div key={i} className="grid grid-cols-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
                 <p className="text-xs font-semibold text-[#0D1B3E]">{m.month}</p>
-                <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(m.revenue)}</p>
+                <p className="text-xs font-bold text-[#1a7a4a]">{fmt(m.revenue)}</p>
                 <div className="flex items-center gap-2">
                   <p className="text-xs font-semibold text-[#2563eb]">{m.orders}</p>
                   <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
@@ -423,7 +423,7 @@ export default function RegionalDashboardPage() {
                   <p className="text-xs font-semibold text-[#0D1B3E] truncate">{p.name}</p>
                 </div>
                 <p className="text-xs font-bold text-[#0D1B3E]">{p.qty.toLocaleString()}</p>
-                <p className="text-xs font-bold text-[#2563eb]">{fmtS(p.revenue)}</p>
+                <p className="text-xs font-bold text-[#2563eb]">{fmt(p.revenue)}</p>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
                     <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />

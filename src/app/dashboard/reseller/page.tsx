@@ -243,7 +243,7 @@ export default function ResellerDashboardPage() {
       {/* ── Top Stat Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total Earned',   value: fmtShort(walletEarned),              sub: 'Lifetime earnings',    color: '#1a7a4a', icon: '💰', href: '/dashboard/reseller/wallet' },
+          { label: 'Total Earned',   value: fmt(walletEarned),              sub: 'Lifetime earnings',    color: '#1a7a4a', icon: '💰', href: '/dashboard/reseller/wallet' },
           { label: 'Total Points',   value: totalPoints.toLocaleString(),        sub: `≈ ${fmt(pointsValue)}`, color: '#C9A84C', icon: '⭐', href: '/dashboard/reseller/points' },
           { label: 'Left Leg',       value: leftCount.toLocaleString(),          sub: 'Downline members',     color: '#2563eb', icon: '👥', href: '/dashboard/reseller/tree' },
           { label: 'Right Leg',      value: rightCount.toLocaleString(),         sub: 'Downline members',     color: '#9a6f1e', icon: '👥', href: '/dashboard/reseller/tree' },

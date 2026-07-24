@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getRanksForPackage, getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 import prisma from '@/app/lib/prisma'
+import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 // ============================================================
 // HELPER — resolve who the city distributor buys from
 // ============================================================
@@ -277,6 +278,18 @@ export async function POST(req: NextRequest) {
         seller: { select: { full_name: true, username: true } },
       },
     })
+    createAuditLog({
+  user_id:       user.id,
+  user_name:     user.full_name || user.username,
+  user_role:     user.role,
+  member_id:     formatMemberId(user.id, user.role),
+  activity_type: 'order_created',
+  category:      'order',
+  description:   `New order created — ₱${Number(order.total_amount).toFixed(2)}`,
+  metadata:      { order_id: order.id, amount: order.total_amount },
+  risk_level:    'low',
+  status:        'normal',
+})
     return NextResponse.json({
       success: true,
       message: `Order placed to ${supplier.level} — ${supplier.full_name}.`,
