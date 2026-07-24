@@ -187,10 +187,10 @@ export default function AdminDashboardPage() {
 
       {/* Row 1 — Today's KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Today's Sales"      value={fmtS(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`PIN + Product · vs Yesterday: ${fmtS(stats?.totalRevenueYesterday || 0)}`} />
-        <StatCard label="Today's PIN Sales"  value={fmtS(stats?.pinRevenueToday || 0)}      color="#C9A84C" icon="🔑" sub={`vs Yesterday: ${fmtS(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
-        <StatCard label="Today's Product Sales" value={fmtS(stats?.orderRevenueToday || 0)} color="#2563eb" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
-        <StatCard label="Today's Net Profit" value={fmtS(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Revenue minus cost" />
+        <StatCard label="Today's Sales"      value={fmt(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`PIN + Product · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
+        <StatCard label="Today's PIN Sales"  value={fmt(stats?.pinRevenueToday || 0)}      color="#C9A84C" icon="🔑" sub={`vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
+        <StatCard label="Today's Product Sales" value={fmt(stats?.orderRevenueToday || 0)} color="#2563eb" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
+        <StatCard label="Today's Net Profit" value={fmt(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Revenue minus cost" />
         <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#8b5cf6" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
       </div>
 
@@ -264,7 +264,7 @@ export default function AdminDashboardPage() {
                     style={{ height: h, background: isLast ? '#0D1B3E' : '#bfdbfe' }} />
                   <p className="text-[7px] text-gray-400">{m.month}</p>
                   <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    {fmtS(m.revenue)}
+                    {fmt(m.revenue)}
                   </div>
                 </div>
               )
@@ -273,7 +273,7 @@ export default function AdminDashboardPage() {
           <div className="border-t border-[#0D1B3E]/5 mt-2 pt-2 flex justify-between">
             <div>
               <p className="text-[10px] text-gray-400">Total Revenue (YTD)</p>
-              <p className="text-sm font-bold text-[#0D1B3E]">{fmtS((stats?.monthlyRevenue || []).reduce((s, m) => s + m.revenue, 0))}</p>
+              <p className="text-sm font-bold text-[#0D1B3E]">{fmt((stats?.monthlyRevenue || []).reduce((s, m) => s + m.revenue, 0))}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-gray-400">vs Last Month</p>
@@ -376,7 +376,7 @@ export default function AdminDashboardPage() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-xs font-bold text-[#0D1B3E]">{p.total_sold} units</p>
-                  <p className="text-[10px] text-gray-400">{fmtS(p.revenue)}</p>
+                  <p className="text-[10px] text-gray-400">{fmt(p.revenue)}</p>
                 </div>
               </div>
             ))}
@@ -406,7 +406,7 @@ export default function AdminDashboardPage() {
                       <span>{s.icon}</span>
                       <p className="text-xs text-gray-400">{s.label}</p>
                     </div>
-                    <p className="text-sm font-bold" style={{ color: s.color }}>{fmtS(s.value)}</p>
+                    <p className="text-sm font-bold" style={{ color: s.color }}>{fmt(s.value)}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
@@ -426,7 +426,7 @@ export default function AdminDashboardPage() {
               ].map(s => (
                 <div key={s.label} className="flex justify-between text-xs">
                   <span className="text-gray-400">{s.label}</span>
-                  <span className="font-semibold" style={{ color: s.color }}>{fmtS(s.value)}</span>
+                  <span className="font-semibold" style={{ color: s.color }}>{fmt(s.value)}</span>
                 </div>
               ))}
             </div>
@@ -550,7 +550,7 @@ export default function AdminDashboardPage() {
                   <p className="text-xs font-semibold text-[#0D1B3E] truncate">{d.full_name}</p>
                   <p className="text-[10px] text-gray-400">{d.pin_orders} PIN · {d.prod_orders} product orders</p>
                 </div>
-                <p className="text-xs font-bold text-[#C9A84C]">{fmtS(d.revenue)}</p>
+                <p className="text-xs font-bold text-[#C9A84C]">{fmt(d.revenue)}</p>
               </div>
             ))}
           </div>
@@ -572,7 +572,7 @@ export default function AdminDashboardPage() {
                   <p className="text-xs font-semibold text-[#0D1B3E]">{p.package?.name || '—'}</p>
                   <p className="text-[10px] text-gray-400">{p._count.id} PINs sold</p>
                 </div>
-                <p className="text-xs font-bold text-[#C9A84C]">{fmtS(Number(p.package?.price || 0))} each</p>
+                <p className="text-xs font-bold text-[#C9A84C]">{fmt(Number(p.package?.price || 0))} each</p>
               </div>
             ))}
           </div>
@@ -607,7 +607,7 @@ export default function AdminDashboardPage() {
                           <p className="text-xs font-semibold text-[#0D1B3E] truncate max-w-[120px]">{r[nameKey]}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-xs font-bold text-[#0D1B3E]">{fmtS(r.total)}</p>
+                          <p className="text-xs font-bold text-[#0D1B3E]">{fmt(r.total)}</p>
                           <p className="text-[9px] text-gray-400">{r.count} dist.</p>
                         </div>
                       </div>

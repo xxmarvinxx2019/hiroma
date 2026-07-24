@@ -137,7 +137,7 @@ export default function ProvincialDashboardPage() {
         <>
           {/* Today's KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Today's Sales"     value={fmtS(stats.salesRevenueToday)}   color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmtS(stats.salesRevenueYesterday)}`} />
+            <StatCard label="Today's Sales"     value={fmt(stats.salesRevenueToday)}   color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmt(stats.salesRevenueYesterday)}`} />
             <StatCard label="Units Sold Today"  value={stats.unitsSoldToday}             color="#2563eb" icon="📦" sub="To city distributors" />
             <StatCard label="City Distributors" value={stats.cityDistCount}              color="#C9A84C" icon="🏢" sub={`+${stats.newCityDistsThisMonth} this month`} />
             <StatCard label="Pending Orders"    value={stats.pendingOrders}              color="#f59e0b" icon="🕐" sub={`${stats.totalOrders} total`} badge={stats.pendingOrders > 0 ? 'Action needed' : undefined} />
@@ -145,9 +145,9 @@ export default function ProvincialDashboardPage() {
 
           {/* Running totals */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Revenue"  value={fmtS(stats.totalRevenue)}                color="#0D1B3E" icon="📈" sub="All-time sales" />
-            <StatCard label="Total Cost"     value={fmtS(stats.totalCost)}                   color="#e05252" icon="🏷️" sub="Cost of goods" />
-            <StatCard label="Total Profit"   value={fmtS(stats.totalProfit)}                 color="#1a7a4a" icon="💎" sub="Revenue minus cost" />
+            <StatCard label="Total Revenue"  value={fmt(stats.totalRevenue)}                color="#0D1B3E" icon="📈" sub="All-time sales" />
+            <StatCard label="Total Cost"     value={fmt(stats.totalCost)}                   color="#e05252" icon="🏷️" sub="Cost of goods" />
+            <StatCard label="Total Profit"   value={fmt(stats.totalProfit)}                 color="#1a7a4a" icon="💎" sub="Revenue minus cost" />
             <StatCard label="Units Sold"     value={stats.totalUnitsSold.toLocaleString()}   color="#8b5cf6" icon="📦" sub="All-time" />
           </div>
 
@@ -166,7 +166,7 @@ export default function ProvincialDashboardPage() {
                       <div className="w-full rounded-t-md" style={{ height: h, background: i === stats.monthlyRevenue.length - 1 ? '#0D1B3E' : '#bfdbfe' }} />
                       <p className="text-[9px] text-gray-400">{m.month}</p>
                       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 z-10">
-                        {fmtS(m.revenue)}
+                        {fmt(m.revenue)}
                       </div>
                     </div>
                   )
@@ -174,7 +174,7 @@ export default function ProvincialDashboardPage() {
               </div>
               <div className="border-t border-[#0D1B3E]/5 mt-3 pt-3 flex justify-between text-xs">
                 <span className="text-gray-400">YTD Revenue</span>
-                <span className="font-bold text-[#0D1B3E]">{fmtS(stats.totalRevenue)}</span>
+                <span className="font-bold text-[#0D1B3E]">{fmt(stats.totalRevenue)}</span>
               </div>
             </div>
 
@@ -200,7 +200,7 @@ export default function ProvincialDashboardPage() {
                     <p className="text-[10px] text-gray-400">{c.city} · {c.resellers} resellers</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(c.revenue)}</p>
+                    <p className="text-xs font-bold text-[#1a7a4a]">{fmt(c.revenue)}</p>
                     <p className="text-[9px] text-gray-400">{c.orders} orders</p>
                   </div>
                 </div>
@@ -280,7 +280,7 @@ export default function ProvincialDashboardPage() {
                   <p className="text-[10px] text-gray-400">@{r.username} · {r.package_name}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(r.total_earned)}</p>
+                  <p className="text-xs font-bold text-[#1a7a4a]">{fmt(r.total_earned)}</p>
                   <p className="text-[9px] text-gray-400">total earned</p>
                 </div>
               </div>
@@ -299,7 +299,7 @@ export default function ProvincialDashboardPage() {
                   <span className="text-xl">{s.icon}</span>
                   <p className="text-sm font-bold text-[#0D1B3E]">{s.label}</p>
                 </div>
-                <p className="text-2xl font-bold" style={{ color: s.color }}>{fmtS(s.value)}</p>
+                <p className="text-2xl font-bold" style={{ color: s.color }}>{fmt(s.value)}</p>
                 <p className="text-xs text-gray-400 mt-1">{s.sub}</p>
               </div>
             ))}
@@ -311,9 +311,9 @@ export default function ProvincialDashboardPage() {
       {tab === 'sales' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Revenue"  value={fmtS(stats.totalRevenue)}              color="#1a7a4a" icon="💰" />
-            <StatCard label="Total Cost"     value={fmtS(stats.totalCost)}                 color="#e05252" icon="🏷️" />
-            <StatCard label="Total Profit"   value={fmtS(stats.totalProfit)}               color="#2563eb" icon="📈" />
+            <StatCard label="Total Revenue"  value={fmt(stats.totalRevenue)}              color="#1a7a4a" icon="💰" />
+            <StatCard label="Total Cost"     value={fmt(stats.totalCost)}                 color="#e05252" icon="🏷️" />
+            <StatCard label="Total Profit"   value={fmt(stats.totalProfit)}               color="#2563eb" icon="📈" />
             <StatCard label="Units Sold"     value={stats.totalUnitsSold.toLocaleString()} color="#C9A84C" icon="📦" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
@@ -326,7 +326,7 @@ export default function ProvincialDashboardPage() {
             {stats.monthlyRevenue.map((m, i) => (
               <div key={i} className="grid grid-cols-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
                 <p className="text-xs font-semibold text-[#0D1B3E]">{m.month}</p>
-                <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(m.revenue)}</p>
+                <p className="text-xs font-bold text-[#1a7a4a]">{fmt(m.revenue)}</p>
                 <div className="flex items-center gap-2">
                   <p className="text-xs font-semibold text-[#2563eb]">{m.orders}</p>
                   <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
@@ -359,7 +359,7 @@ export default function ProvincialDashboardPage() {
                   </div>
                 </div>
                 <p className="text-xs text-gray-500">{c.city}</p>
-                <p className="text-xs font-bold text-[#1a7a4a]">{fmtS(c.revenue)}</p>
+                <p className="text-xs font-bold text-[#1a7a4a]">{fmt(c.revenue)}</p>
                 <p className="text-xs font-semibold text-[#C9A84C]">{c.resellers}</p>
                 <p className="text-xs font-semibold text-[#2563eb]">{c.orders}</p>
               </div>
@@ -392,7 +392,7 @@ export default function ProvincialDashboardPage() {
                     <p className="text-xs font-semibold text-[#0D1B3E] truncate">{p.name}</p>
                   </div>
                   <p className="text-xs font-bold text-[#0D1B3E]">{p.qty.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-[#2563eb]">{fmtS(p.revenue)}</p>
+                  <p className="text-xs font-bold text-[#2563eb]">{fmt(p.revenue)}</p>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
                       <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />

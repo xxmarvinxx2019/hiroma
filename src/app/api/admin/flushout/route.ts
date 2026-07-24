@@ -57,10 +57,10 @@ export async function GET(req: NextRequest) {
         skip:    (page - 1) * pageSize,
         take:    pageSize,
         select:  {
-          id: true, amount: true, points: true, created_at: true,
+          id: true, amount: true, points: true, created_at: true, type: true, overflow_to: true,
           source_user_id: true,
           // source_user = the reseller who triggered the overflow
-          source_user: { select: { id: true, full_name: true, username: true } },
+          source_user: { select: { id: true, full_name: true, username: true, status: true } },
           // user = Hiroma (receives overflow value)
           user: { select: { id: true, full_name: true, username: true } },
         },
@@ -86,6 +86,24 @@ export async function GET(req: NextRequest) {
         const profile  = r.source_user_id ? profileMap.get(r.source_user_id) : null
         const pkgName  = profile?.package?.name || '—'
         const pairVal  = Number(profile?.package?.pairing_bonus_value || 0)
+        const pts      = Number(r.points || 0)
+        const amt      = Number(r.amount || 0)
+
+        // Check if source_user is deactivated
+        const sourceProfile = r.source_user_id ? profileMap.get(r.source_user_id) : null
+
+        // Determine reason based on actual context
+        let reason = 'Flushout to Hiroma'
+        if (r.type === 'direct_referral') {
+          reason = 'Direct referral package difference'
+        } else if (pts === 0) {
+          reason = 'Deactivated account — wallet balance flushed'
+        } else if (r.source_user?.status === 'inactive') {
+          reason = `Deactivated account — binary pairing flushed`
+        } else {
+          reason = 'Binary pair cap exceeded (daily limit)'
+        }
+
         return {
           id:             r.id,
           date:           r.created_at,
@@ -93,10 +111,10 @@ export async function GET(req: NextRequest) {
           username:       r.source_user?.username  || '—',
           member_id:      `MEM-${String(r.source_user_id || r.user.id).slice(0, 6).toUpperCase()}`,
           package:        pkgName,
-          exceeded_pairs: Number(r.points || 0),
+          exceeded_pairs: pts,
           pair_value:     pairVal,
-          flushout_value: Number(r.amount || 0),
-          remarks:        `Exceeded ${DAILY_PAIR_CAP} pairs`,
+          flushout_value: amt,
+          remarks:        reason,
         }
       })
       .filter(r => pkgFilter === 'all' || r.package === pkgFilter)
