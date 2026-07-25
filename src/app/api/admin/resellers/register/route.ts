@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
         // Referrer earns MIN(referrer bonus, referred bonus)
         const earned   = Math.min(referrerBonus, referredBonus)
         // Overflow = MAX(0, referrer bonus - referred bonus) → Hiroma
-        const overflow = Math.abs(referrerBonus - referredBonus)
+        const overflow = Math.max(0, referredBonus - referrerBonus)
 
         const hiromaUser = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
 

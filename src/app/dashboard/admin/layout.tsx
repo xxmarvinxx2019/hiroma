@@ -30,9 +30,9 @@ const navItems = [
     section: 'Finance',
     items: [
       { label: 'Orders', href: '/dashboard/admin/orders', icon: '🛒' },
-      { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸', badge: true },
+      { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸' },
       { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
-      { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑', badge: 'pinRequests' },
+      { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑' },
       { label: 'Commissions',       href: '/dashboard/admin/commissions', icon: '💰' },
       { label: 'Reports',            href: '/dashboard/admin/reports',     icon: '📈' },
       { label: 'Flushout/Overflow',  href: '/dashboard/admin/flushout',    icon: '⚡' },
@@ -48,15 +48,11 @@ const navItems = [
 
 function Sidebar({
   user,
-  pendingPayouts,
-  pendingPinRequests,
   pathname,
   onClose,
   onLogout,
 }: {
   user: { id: string; full_name: string; username: string } | null
-  pendingPayouts: number
-  pendingPinRequests: number
   pathname: string
   onClose: () => void
   onLogout: () => void
@@ -119,16 +115,6 @@ function Sidebar({
               >
                 <span className="text-base">{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
-                {item.badge === true && pendingPayouts > 0 && (
-                  <span className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                    {pendingPayouts}
-                  </span>
-                )}
-                {item.badge === 'pinRequests' && pendingPinRequests > 0 && (
-                  <span className="bg-[#e05252] text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                    {pendingPinRequests}
-                  </span>
-                )}
               </Link>
             ))}
           </div>
@@ -178,8 +164,6 @@ export default function AdminLayout({
   const [sidebarOpen, setSidebarOpen]   = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [user, setUser] = useState<{ id: string; full_name: string; username: string } | null>(null)
-  const [pendingPayouts, setPendingPayouts]         = useState(0)
-  const [pendingPinRequests, setPendingPinRequests] = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -189,15 +173,6 @@ export default function AdminLayout({
   }, [router])
 
   useEffect(() => {
-    fetch('/api/admin/payouts/pending-count')
-      .then((res) => res.json())
-      .then((data) => setPendingPayouts(data.count || 0))
-      .catch(() => {})
-
-    fetch('/api/pin-requests?status=pending&pageSize=1')
-      .then((res) => res.json())
-      .then((data) => setPendingPinRequests(data.summary?.pending || 0))
-      .catch(() => {})
   }, [])
 
   const handleLogout = async () => {
@@ -239,8 +214,6 @@ export default function AdminLayout({
       <div className="hidden md:block flex-shrink-0">
         <Sidebar
           user={user}
-          pendingPayouts={pendingPayouts}
-          pendingPinRequests={pendingPinRequests}
           pathname={pathname}
           onClose={() => {}}
           onLogout={handleLogout}
@@ -257,9 +230,7 @@ export default function AdminLayout({
           <div className="fixed top-0 left-0 z-30 md:hidden">
             <Sidebar
               user={user}
-              pendingPayouts={pendingPayouts}
-          pendingPinRequests={pendingPinRequests}
-              pathname={pathname}
+                  pathname={pathname}
               onClose={() => setSidebarOpen(false)}
               onLogout={handleLogout}
             />
@@ -295,15 +266,7 @@ export default function AdminLayout({
           </div>
 
           <div className="flex items-center gap-3">
-            {pendingPayouts > 0 && (
-              <Link
-                href="/dashboard/admin/payouts"
-                className="flex items-center gap-1.5 bg-[#C9A84C]/15 border border-[#C9A84C]/30 text-[#C9A84C] text-xs px-3 py-1.5 rounded-full hover:bg-[#C9A84C]/25 transition-colors"
-              >
-                <span>💸</span>
-                <span>{pendingPayouts} pending</span>
-              </Link>
-            )}
+
             <NotificationBell userId={user?.id} role="admin" />
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               ADMIN
