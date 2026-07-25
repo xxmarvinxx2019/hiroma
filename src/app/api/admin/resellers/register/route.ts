@@ -13,12 +13,16 @@ export async function POST(req: NextRequest) {
 
     const {
       full_name, username, email, mobile, password, address,
+      birthday, birthplace,
       pin_id, referrer_username, actual_parent_node_id, actual_position,
     } = await req.json()
 
     if (!full_name || !username || !mobile || !password || !pin_id ||
         !referrer_username || !actual_parent_node_id || !actual_position) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
+    }
+    if (!birthday || !birthplace) {
+      return NextResponse.json({ error: 'Date of birth and place of birth are required.' }, { status: 400 })
     }
 
     if (!['left', 'right'].includes(actual_position)) {
@@ -73,9 +77,23 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedName = full_name.trim().toLowerCase()
-    const nameCap = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
-    if (nameCap && nameCap.count >= nameCap.max_allowed) {
-      return NextResponse.json({ error: `Maximum accounts (${nameCap.max_allowed}) reached for "${full_name}".` }, { status: 400 })
+
+    // Check birthday + birthplace — same person counts toward 7-account limit
+    const birthdayStr    = new Date(birthday).toISOString().slice(0, 10)
+    const birthInfoRaw   = await prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(*)::int AS count FROM users
+      WHERE birthday::text = ${birthdayStr}
+        AND LOWER(TRIM(birthplace)) = ${birthplace.trim().toLowerCase()}
+        AND role = 'reseller'
+        AND status != 'inactive'
+    `
+    const birthInfoCount  = Number(birthInfoRaw[0]?.count || 0)
+    const nameCap         = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
+    const effectiveCount  = Math.max(nameCap?.count || 0, birthInfoCount)
+    const maxAllowed      = nameCap?.max_allowed || 7
+
+    if (effectiveCount >= maxAllowed) {
+      return NextResponse.json({ error: `Maximum accounts (${maxAllowed}) reached for this person.` }, { status: 400 })
     }
 
     const isHiromaNode   = referrer.username === 'hiroma'

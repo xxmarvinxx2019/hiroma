@@ -21,6 +21,7 @@ export async function PUT(
       pairing_bonus_value,
       point_php_value,
       point_reset_days,
+      daily_product_pairing_cap,
       products,
     } = await req.json()
 
@@ -54,6 +55,12 @@ export async function PUT(
 
       return updated
     })
+
+    // Update daily_product_pairing_cap via raw SQL (not in Prisma schema)
+    await prisma.$executeRaw`
+      UPDATE packages SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50}
+      WHERE id::text = ${id}
+    `
 
     return NextResponse.json({ success: true, package: pkg })
   } catch (error) {

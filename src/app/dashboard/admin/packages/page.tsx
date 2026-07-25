@@ -18,7 +18,7 @@ interface Product {
 interface PackageProduct {
   product_id: string
   quantity: number
-  product: { name: string; price: number; reseller_price: number }  // price = SRP
+  product: { name: string; price: number; reseller_price: number }
 }
 
 interface Package {
@@ -29,6 +29,7 @@ interface Package {
   pairing_bonus_value: number
   point_php_value: number
   point_reset_days: number
+  daily_product_pairing_cap: number
   is_active: boolean
   created_at: string
   products: PackageProduct[]
@@ -45,23 +46,24 @@ export default function PackagesPage() {
   const [meta, setMeta]           = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch]       = useState('')
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [editPkg, setEditPkg] = useState<Package | null>(null)
+  const [products, setProducts]   = useState<Product[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [showForm, setShowForm]   = useState(false)
+  const [editPkg, setEditPkg]     = useState<Package | null>(null)
   const [form, setForm] = useState({
-    name: '',
-    price: '',
-    direct_referral_bonus: '',
-    pairing_bonus_value: '',
-    point_php_value: '',
-    point_reset_days: '30',
+    name:                      '',
+    price:                     '',
+    direct_referral_bonus:     '',
+    pairing_bonus_value:       '',
+    point_php_value:           '',
+    point_reset_days:          '30',
+    daily_product_pairing_cap: '50',
   })
   const [selectedProducts, setSelectedProducts] = useState<
     { product_id: string; quantity: number }[]
   >([])
   const [formLoading, setFormLoading] = useState(false)
-  const [formError, setFormError] = useState('')
+  const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
 
   const fetchData = () => {
@@ -83,18 +85,18 @@ export default function PackagesPage() {
   }, [searchInput])
 
   useEffect(() => { setPage(1) }, [search])
-
   useEffect(() => { fetchData() }, [])
 
   const openCreate = () => {
     setEditPkg(null)
     setForm({
-      name: '',
-      price: '',
-      direct_referral_bonus: '',
-      pairing_bonus_value: '',
-      point_php_value: '',
-      point_reset_days: '30',
+      name:                      '',
+      price:                     '',
+      direct_referral_bonus:     '',
+      pairing_bonus_value:       '',
+      point_php_value:           '',
+      point_reset_days:          '30',
+      daily_product_pairing_cap: '50',
     })
     setSelectedProducts([])
     setFormError('')
@@ -105,17 +107,18 @@ export default function PackagesPage() {
   const openEdit = (pkg: Package) => {
     setEditPkg(pkg)
     setForm({
-      name: pkg.name,
-      price: String(pkg.price),
-      direct_referral_bonus: String(pkg.direct_referral_bonus),
-      pairing_bonus_value: String(pkg.pairing_bonus_value),
-      point_php_value: String(pkg.point_php_value),
-      point_reset_days: String(pkg.point_reset_days),
+      name:                      pkg.name,
+      price:                     String(pkg.price),
+      direct_referral_bonus:     String(pkg.direct_referral_bonus),
+      pairing_bonus_value:       String(pkg.pairing_bonus_value),
+      point_php_value:           String(pkg.point_php_value),
+      point_reset_days:          String(pkg.point_reset_days),
+      daily_product_pairing_cap: String(pkg.daily_product_pairing_cap || 50),
     })
     setSelectedProducts(
       pkg.products.map((p) => ({
         product_id: p.product_id,
-        quantity: p.quantity,
+        quantity:   p.quantity,
       }))
     )
     setFormError('')
@@ -123,18 +126,12 @@ export default function PackagesPage() {
     setShowForm(true)
   }
 
-  const addProduct = () => {
-    setSelectedProducts([...selectedProducts, { product_id: '', quantity: 1 }])
-  }
-
+  const addProduct    = () => setSelectedProducts([...selectedProducts, { product_id: '', quantity: 1 }])
+  const removeProduct = (index: number) => setSelectedProducts(selectedProducts.filter((_, i) => i !== index))
   const updateProduct = (index: number, field: string, value: string | number) => {
     const updated = [...selectedProducts]
     updated[index] = { ...updated[index], [field]: value }
     setSelectedProducts(updated)
-  }
-
-  const removeProduct = (index: number) => {
-    setSelectedProducts(selectedProducts.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async () => {
@@ -148,25 +145,25 @@ export default function PackagesPage() {
     setFormError('')
     setFormSuccess('')
 
-    const url = editPkg ? `/api/admin/packages/${editPkg.id}` : '/api/admin/packages'
+    const url    = editPkg ? `/api/admin/packages/${editPkg.id}` : '/api/admin/packages'
     const method = editPkg ? 'PUT' : 'POST'
 
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: form.name.trim(),
-        price: parseFloat(form.price),
-        direct_referral_bonus: parseFloat(form.direct_referral_bonus),
-        pairing_bonus_value: parseFloat(form.pairing_bonus_value),
-        point_php_value: parseFloat(form.point_php_value),
-        point_reset_days: parseInt(form.point_reset_days),
-        products: selectedProducts.filter((p) => p.product_id),
+        name:                      form.name.trim(),
+        price:                     parseFloat(form.price),
+        direct_referral_bonus:     parseFloat(form.direct_referral_bonus),
+        pairing_bonus_value:       parseFloat(form.pairing_bonus_value),
+        point_php_value:           parseFloat(form.point_php_value),
+        point_reset_days:          parseInt(form.point_reset_days),
+        daily_product_pairing_cap: parseInt(form.daily_product_pairing_cap),
+        products:                  selectedProducts.filter((p) => p.product_id),
       }),
     })
 
     const data = await res.json()
-
     if (!res.ok) {
       setFormError(data.error || 'Failed to save package.')
     } else {
@@ -179,9 +176,9 @@ export default function PackagesPage() {
 
   const handleToggle = async (id: string, current: boolean) => {
     await fetch(`/api/admin/packages/${id}`, {
-      method: 'PATCH',
+      method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !current }),
+      body:    JSON.stringify({ is_active: !current }),
     })
     fetchData()
   }
@@ -213,20 +210,14 @@ export default function PackagesPage() {
       ) : packages.length === 0 ? (
         <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-12 text-center">
           <p className="text-gray-400 text-sm mb-2">No packages yet</p>
-          <button
-            onClick={openCreate}
-            className="text-xs text-[#C9A84C] hover:underline"
-          >
+          <button onClick={openCreate} className="text-xs text-[#C9A84C] hover:underline">
             Create your first package →
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           {packages.map((pkg) => (
-            <div
-              key={pkg.id}
-              className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden hover:shadow-md transition-shadow"
-            >
+            <div key={pkg.id} className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden hover:shadow-md transition-shadow">
               {/* Card Header */}
               <div className="bg-[#0D1B3E] px-4 py-3 flex items-center justify-between">
                 <div>
@@ -240,26 +231,21 @@ export default function PackagesPage() {
                     </p>
                   )}
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  pkg.is_active
-                    ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                    : 'bg-[#fdecea] text-[#a03030]'
-                }`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${pkg.is_active ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'}`}>
                   {pkg.is_active ? 'Active' : 'Inactive'}
                 </span>
               </div>
 
               {/* Bonus Values */}
               <div className="p-4">
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">
-                  Bonus values
-                </p>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Bonus values</p>
                 <div className="flex flex-col gap-1.5 mb-4">
                   {[
-                    { label: 'Direct referral bonus', value: `₱${Number(pkg.direct_referral_bonus).toLocaleString()}` },
-                    { label: 'Binary Points', value: `${Number(pkg.pairing_bonus_value).toLocaleString()} pts` },
-                    { label: 'Product Binary Point Value', value: `${Number(pkg.point_php_value).toLocaleString()} pts` },
-                    { label: 'Point reset period', value: `Every ${pkg.point_reset_days} days` },
+                    { label: 'Direct referral bonus',       value: `₱${Number(pkg.direct_referral_bonus).toLocaleString()}` },
+                    { label: 'Binary Points',               value: `${Number(pkg.pairing_bonus_value).toLocaleString()} pts` },
+                    { label: 'Product Binary Point Value',  value: `${Number(pkg.point_php_value).toLocaleString()} pts` },
+                    { label: 'Point reset period',          value: `Every ${pkg.point_reset_days} days` },
+                    { label: 'Daily Product Pairing Cap',   value: `${pkg.daily_product_pairing_cap || 50} pairs/day` },
                   ].map((item) => (
                     <div key={item.label} className="flex justify-between py-1 border-b border-[#0D1B3E]/5">
                       <span className="text-xs text-gray-400">{item.label}</span>
@@ -271,9 +257,7 @@ export default function PackagesPage() {
                 {/* Products */}
                 {pkg.products.length > 0 && (
                   <>
-                    <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">
-                      Included products
-                    </p>
+                    <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Included products</p>
                     <div className="flex flex-col gap-1 mb-4">
                       {pkg.products.map((p) => (
                         <div key={p.product_id} className="flex justify-between">
@@ -287,18 +271,11 @@ export default function PackagesPage() {
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-2 border-t border-[#0D1B3E]/5">
-                  <button
-                    onClick={() => openEdit(pkg)}
-                    className="flex-1 text-xs text-[#C9A84C] font-medium hover:underline"
-                  >
+                  <button onClick={() => openEdit(pkg)} className="flex-1 text-xs text-[#C9A84C] font-medium hover:underline">
                     Edit
                   </button>
-                  <button
-                    onClick={() => handleToggle(pkg.id, pkg.is_active)}
-                    className={`flex-1 text-xs font-medium hover:underline ${
-                      pkg.is_active ? 'text-red-400' : 'text-[#1a7a4a]'
-                    }`}
-                  >
+                  <button onClick={() => handleToggle(pkg.id, pkg.is_active)}
+                    className={`flex-1 text-xs font-medium hover:underline ${pkg.is_active ? 'text-red-400' : 'text-[#1a7a4a]'}`}>
                     {pkg.is_active ? 'Deactivate' : 'Activate'}
                   </button>
                 </div>
@@ -325,33 +302,25 @@ export default function PackagesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Package name <span className="text-[#C9A84C]">*</span></label>
-                  <input
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                     placeholder="e.g. Gold, Silver"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                  />
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">PIN Price (PHP) <span className="text-[#C9A84C]">*</span></label>
-                  <input
-                    type="number"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })}
                     placeholder="e.g. 2500"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                  />
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
                 </div>
               </div>
 
               {/* Bonus Values */}
               <div className="bg-[#F0F2F8] rounded-lg p-3 space-y-2">
                 <p className="text-xs font-medium text-[#0D1B3E] mb-1">Bonus values</p>
-
                 {[
                   {
                     label: 'Direct Referral Bonus',
-                    hint:  'Fixed ₱ paid to sponsor on join',
+                    hint:  'Fixed ₱ paid to referrer on join',
                     required: true,
                     input: <input type="number" value={form.direct_referral_bonus}
                       onChange={(e) => setForm({ ...form, direct_referral_bonus: e.target.value })}
@@ -361,7 +330,7 @@ export default function PackagesPage() {
                   {
                     label: 'Binary Points Value',
                     hint: form.pairing_bonus_value && form.point_php_value
-                      ? `1 pair (${form.pairing_bonus_value}pts) = ₱${(Number(form.pairing_bonus_value) * Number(0.50)).toFixed(2)}`
+                      ? `1 pair (${form.pairing_bonus_value}pts) = ₱${(Number(form.pairing_bonus_value) * 0.50).toFixed(2)}`
                       : 'Points added to upline on join',
                     required: true,
                     input: <input type="number" value={form.pairing_bonus_value}
@@ -371,9 +340,9 @@ export default function PackagesPage() {
                   },
                   {
                     label: 'Product Points Value',
-                    hint:  form.pairing_bonus_value && form.point_php_value
-                      ? `1 pair (${form.point_php_value}pts) = ₱${(Number(form.point_php_value) * Number(0.50)).toFixed(2)}`
-                      : 'Points added to upline on join',
+                    hint: form.point_php_value
+                      ? `1 pair (${form.point_php_value}pts) = ₱${(Number(form.point_php_value) * 0.50).toFixed(2)}`
+                      : 'Points added to upline on reorder',
                     required: true,
                     input: <input type="number" step="0.01" value={form.point_php_value}
                       onChange={(e) => setForm({ ...form, point_php_value: e.target.value })}
@@ -387,6 +356,15 @@ export default function PackagesPage() {
                     input: <input type="number" value={form.point_reset_days}
                       onChange={(e) => setForm({ ...form, point_reset_days: e.target.value })}
                       placeholder="e.g. 30"
+                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                  },
+                  {
+                    label: 'Daily Product Pairing Cap',
+                    hint:  'Max product binary pairs per day',
+                    required: false,
+                    input: <input type="number" value={form.daily_product_pairing_cap}
+                      onChange={(e) => setForm({ ...form, daily_product_pairing_cap: e.target.value })}
+                      placeholder="e.g. 50"
                       className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
                   },
                 ].map((row) => (
@@ -414,7 +392,6 @@ export default function PackagesPage() {
                         return sum + (Number(prod?.price || prod?.reseller_price || 0) * Number(sp.quantity))
                       }, 0)
                       const pinPrice = parseFloat(form.price) || 0
-                      const margin   = pinPrice - productTotal
                       return (
                         <div className="text-right">
                           <p className="text-[10px] text-gray-400">
@@ -429,10 +406,7 @@ export default function PackagesPage() {
                       )
                     })()}
                   </div>
-                  <button
-                    onClick={addProduct}
-                    className="text-xs text-[#C9A84C] hover:underline font-medium"
-                  >
+                  <button onClick={addProduct} className="text-xs text-[#C9A84C] hover:underline font-medium">
                     + Add product
                   </button>
                 </div>
@@ -442,11 +416,8 @@ export default function PackagesPage() {
                   <div className="flex flex-col gap-2">
                     {selectedProducts.map((sp, index) => (
                       <div key={index} className="flex items-center gap-2">
-                        <select
-                          value={sp.product_id}
-                          onChange={(e) => updateProduct(index, 'product_id', e.target.value)}
-                          className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
-                        >
+                        <select value={sp.product_id} onChange={(e) => updateProduct(index, 'product_id', e.target.value)}
+                          className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]">
                           <option value="">Select product</option>
                           {products.map((p) => (
                             <option key={p.id} value={p.id}>
@@ -454,19 +425,10 @@ export default function PackagesPage() {
                             </option>
                           ))}
                         </select>
-                        <input
-                          type="number"
-                          min="1"
-                          value={sp.quantity}
+                        <input type="number" min="1" value={sp.quantity}
                           onChange={(e) => updateProduct(index, 'quantity', parseInt(e.target.value))}
-                          className="w-16 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-2 text-sm outline-none focus:border-[#C9A84C] text-center"
-                        />
-                        <button
-                          onClick={() => removeProduct(index)}
-                          className="text-red-400 hover:text-red-600 text-sm"
-                        >
-                          ✕
-                        </button>
+                          className="w-16 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-2 text-sm outline-none focus:border-[#C9A84C] text-center" />
+                        <button onClick={() => removeProduct(index)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
                       </div>
                     ))}
                   </div>
@@ -485,17 +447,12 @@ export default function PackagesPage() {
               )}
 
               <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors"
-                >
+                <button onClick={() => setShowForm(false)}
+                  className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0] transition-colors">
                   Cancel
                 </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={formLoading}
-                  className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60"
-                >
+                <button onClick={handleSubmit} disabled={formLoading}
+                  className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60">
                   {formLoading ? 'Saving...' : editPkg ? 'Update package' : 'Create package'}
                 </button>
               </div>
