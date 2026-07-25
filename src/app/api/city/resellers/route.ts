@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
-import prisma from '@/app/lib/prisma'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
+import prisma from '@/app/lib/prisma'
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 // ============================================================
@@ -239,16 +239,13 @@ async function firePointsPairingBonus(
     if (currentLeg === 'left')  leftPts  += newUserPts
     else                        rightPts += newUserPts
 
-    // A pair fires when BOTH sides have any points
-    // pointsPerPair = MIN(ancestor pkg, new reseller pkg) — used for earnings calculation
-    const pointsPerPair = Math.min(ancestorPkgPts, newUserPts)
-
-    // Pair fires as long as both sides > 0
-    // Use smaller side as the matchable amount
+    // Pair fires when BOTH sides have points
+    // pointsPerPair = MIN(ancestor's package, left leg, right leg) — always gets the lowest
     const matchable     = Math.min(leftPts, rightPts)
-    const possiblePairs = matchable > 0 ? 1 : 0
+    const pointsPerPair = matchable > 0 ? Math.min(ancestorPkgPts, matchable) : 0
+    const possiblePairs = pointsPerPair > 0 ? 1 : 0
 
-    console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ppp:${pointsPerPair} | matchable:${matchable} | pairs:${possiblePairs}`)
+    console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ancestorPkg:${ancestorPkgPts} | ppp:${pointsPerPair} | pairs:${possiblePairs}`)
 
     if (possiblePairs > 0) {
       const usedToday = isToday ? Number(profile.daily_pairing_count || 0) : 0  // resets count on new day
@@ -257,24 +254,23 @@ async function firePointsPairingBonus(
       const paidPairs     = Math.min(possiblePairs, remaining)
       const overflowPairs = possiblePairs - paidPairs
 
-      // earnings based on matchable points (smaller side)
-      const paidEarnings     = paidPairs     * matchable * BINARY_POINT_TO_PESO
-      const overflowEarnings = overflowPairs * matchable * BINARY_POINT_TO_PESO
+      // earnings based on ancestor's OWN package points (not matchable)
+      const paidEarnings     = paidPairs     * pointsPerPair * BINARY_POINT_TO_PESO
+      const overflowEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
 
-      // deduct matchable from both sides
-      const deduct = matchable
+      // deduct ancestor's package points from both sides (not matchable)
+      const deduct = pointsPerPair * paidPairs
       leftPts  -= deduct
       rightPts -= deduct
 
-      // Cap exceeded → flush carry over to HIROMA
+      // Cap exceeded → flush overflow earnings to Hiroma
       if (overflowPairs > 0) {
-        const remainingPts  = Math.min(leftPts, rightPts)
-        const flushEarnings = remainingPts * BINARY_POINT_TO_PESO
+        const flushEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
         if (flushEarnings > 0 && hiromaUser) {
           await prisma.commission.create({
             data: {
               user_id: hiromaUser.id, type: 'binary_pairing',
-              amount: flushEarnings, points: remainingPts,
+              amount: flushEarnings, points: overflowPairs * pointsPerPair,
               source_user_id: newUserId, overflow_to: hiromaUser.id, is_pair_overflow: true,
             },
           })
@@ -284,8 +280,8 @@ async function firePointsPairingBonus(
             create: { user_id: hiromaUser.id, balance: flushEarnings, total_earned: flushEarnings, total_withdrawn: 0 },
           })
         }
-        leftPts  = 0
-        rightPts = 0
+        leftPts  -= overflowPairs * pointsPerPair
+        rightPts -= overflowPairs * pointsPerPair
       }
 
       console.log(`[BINARY] ✅ ${ancestor.user_id} | paid:${paidPairs} overflow:${overflowPairs} | ₱${paidEarnings}`)
