@@ -87,11 +87,13 @@ export default function AdminRegisterResellerPage() {
   // Step 4 — Details
   const [form, setForm] = useState({
     full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '',
+    birthday: '', birthplace: '',
   })
   const [nameCapInfo, setNameCapInfo]             = useState<{ count: number; max: number; remaining: number } | null>(null)
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
   const [usernameEdited, setUsernameEdited]       = useState(false)
   const [formLoading, setFormLoading]             = useState(false)
+  const [agreedToTerms, setAgreedToTerms]         = useState(false)
   const [formError, setFormError]                 = useState('')
   const [successData, setSuccessData]             = useState<{ full_name: string; username: string; package: any } | null>(null)
   const [adminId, setAdminId]                       = useState<string>('')
@@ -175,7 +177,8 @@ export default function AdminRegisterResellerPage() {
     setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '' })
     setReferralInput(''); setReferralData(null); setReferralError('')
     setAvailableSlots([]); setSlotSearch(''); setSelectedSlot(null)
-    setForm({ full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '' })
+    setForm({ full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '', birthday: '', birthplace: '' })
+    setAgreedToTerms(false)
     setNameCapInfo(null); setUsernameAvailable(null); setUsernameEdited(false)
     setFormError('')
   }, [])
@@ -236,6 +239,9 @@ export default function AdminRegisterResellerPage() {
     if (form.password.length < 6) { setFormError('Password must be at least 6 characters.'); return }
     if (nameCapInfo && nameCapInfo.remaining === 0) { setFormError(`Maximum accounts reached for "${form.full_name}".`); return }
     if (usernameAvailable === false) { setFormError('Username is already taken.'); return }
+    if (!form.birthday) { setFormError('Please enter date of birth.'); return }
+    if (!form.birthplace) { setFormError('Please enter place of birth.'); return }
+    if (!agreedToTerms) { setFormError('You must agree to the Terms and Conditions before registering.'); return }
     if (!selectedSlot) { setFormError('No placement slot selected.'); return }
     if (!location.city_muni_name) { setFormError('Please select a complete location.'); return }
 
@@ -247,6 +253,7 @@ export default function AdminRegisterResellerPage() {
         full_name: form.full_name, username: form.username.toLowerCase(),
         email: form.email, mobile: form.mobile, password: form.password,
         address: fullAddress,
+        birthday: form.birthday, birthplace: form.birthplace,
         pin_id: pinData?.id,
         referrer_username: referralData?.username,
         actual_parent_node_id: selectedSlot.parent_node_id,
@@ -583,6 +590,22 @@ export default function AdminRegisterResellerPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <label className="block text-xs text-gray-400 mb-1">Date of Birth <span className="text-[#C9A84C]">*</span></label>
+                <input type="date" value={form.birthday}
+                  onChange={(e) => setForm({ ...form, birthday: e.target.value })}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Place of Birth <span className="text-[#C9A84C]">*</span></label>
+                <input type="text" value={form.birthplace}
+                  onChange={(e) => setForm({ ...form, birthplace: e.target.value })}
+                  placeholder="e.g. Cebu City"
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
                 <label className="block text-xs text-gray-400 mb-1">Password <span className="text-[#C9A84C]">*</span></label>
                 <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder="Min. 6 characters"
@@ -595,6 +618,20 @@ export default function AdminRegisterResellerPage() {
                   className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`} />
                 {form.confirmPassword && form.password !== form.confirmPassword && <p className="text-xs text-red-500 mt-1">Passwords do not match</p>}
               </div>
+            </div>
+
+            {/* Terms & Conditions */}
+            <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg p-3">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 flex-shrink-0" />
+                <span className="text-xs text-gray-600 leading-relaxed">
+                  By clicking this, I confirm that all information provided is accurate and truthful.
+                  I understand that providing false information may result in account termination.
+                  I agree to the <span className="text-[#C9A84C] font-semibold">Terms and Conditions</span> of Hiroma.
+                </span>
+              </label>
             </div>
 
             {formError && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2"><p className="text-red-500 text-xs">{formError}</p></div>}

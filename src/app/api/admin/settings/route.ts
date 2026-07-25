@@ -104,6 +104,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       payout_cutoff_days: map['payout_cutoff_days'] || '15,31',
       payout_date_map:    map['payout_date_map']    || '{"15":"18","31":"3"}',
+      pu_reset_month:     map['pu_reset_month']     || '3',
+      pu_reset_day:       map['pu_reset_day']       || '1',
     })
   } catch (error) {
     console.error('[ADMIN SETTINGS GET ERROR]', error)
@@ -119,7 +121,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { payout_cutoff_days, payout_date_map } = await req.json()
+    const { payout_cutoff_days, payout_date_map, pu_reset_month, pu_reset_day } = await req.json()
 
     if (payout_cutoff_days !== undefined) {
       // Validate: must be comma-separated numbers between 1-31
@@ -143,7 +145,29 @@ export async function PATCH(req: NextRequest) {
       `
     }
 
-    return NextResponse.json({ success: true, message: 'Settings updated.' })
+    if (pu_reset_month !== undefined) {
+      const month = parseInt(String(pu_reset_month))
+      if (month >= 1 && month <= 12) {
+        await prisma.$executeRaw`
+          INSERT INTO system_settings (id, key, value, updated_at, updated_by)
+          VALUES (gen_random_uuid(), 'pu_reset_month', ${String(month)}, NOW(), ${user.id})
+          ON CONFLICT (key) DO UPDATE SET value = ${String(month)}, updated_at = NOW(), updated_by = ${user.id}
+        `
+      }
+    }
+
+    if (pu_reset_day !== undefined) {
+      const day = parseInt(String(pu_reset_day))
+      if (day >= 1 && day <= 31) {
+        await prisma.$executeRaw`
+          INSERT INTO system_settings (id, key, value, updated_at, updated_by)
+          VALUES (gen_random_uuid(), 'pu_reset_day', ${String(day)}, NOW(), ${user.id})
+          ON CONFLICT (key) DO UPDATE SET value = ${String(day)}, updated_at = NOW(), updated_by = ${user.id}
+        `
+      }
+    }
+
+        return NextResponse.json({ success: true, message: 'Settings updated.' })
   } catch (error) {
     console.error('[ADMIN SETTINGS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
