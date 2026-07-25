@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 // ============================================================
@@ -108,7 +109,7 @@ async function creditDirectReferralBonus(
   // Referrer earns MIN(referrer bonus, referred bonus)
   const earned   = Math.min(referrerBonus, referredBonus)
   // Overflow = MAX(0, referrer bonus - referred bonus) → goes to Hiroma
-  const overflow = Math.abs(referrerBonus - referredBonus)
+  const overflow = Math.max(0, referredBonus - referrerBonus)
 
   const hiromaUser = await prisma.user.findFirst({
     where:  { username: 'hiroma' },
@@ -647,18 +648,26 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // ── Send welcome SMS ──
-    /*try {
-      const smsMessage = smsWelcomeReseller({
-        full_name,
-        username:     username.trim().toLowerCase(),
-        password,
-        package_name: packageWithProducts?.name || 'Starter',
-      })*/
+    // ── Send welcome SMS ── (commented out to save SMS costs)
+    // try {
+    //   const smsMessage = smsWelcomeReseller({ full_name, username: username.trim().toLowerCase(), password, package_name: packageWithProducts?.name || 'Starter' })
     //   await sendSMS(mobile, smsMessage)
     // } catch (e) {
     //   console.error('[REGISTER] SMS error:', e)
     // }
+
+    createAuditLog({
+      user_id:       user.id,
+      user_name:     user.full_name || user.username,
+      user_role:     user.role,
+      member_id:     formatMemberId(user.id, user.role),
+      activity_type: 'reseller_registered',
+      category:      'reseller',
+      description:   `New reseller registered: ${full_name} (@${username.trim().toLowerCase()})`,
+      metadata:      { reseller_id: newUser.id },
+      risk_level:    'low',
+      status:        'normal',
+    })
 
     return NextResponse.json({
       success:  true,
