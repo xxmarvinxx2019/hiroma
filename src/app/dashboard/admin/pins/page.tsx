@@ -35,7 +35,7 @@ export default function PinsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'cancelled'>('all')
   const [page, setPage]               = useState(1)
   const [meta, setMeta]               = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, cancelled: 0 })
+  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, cancelled: 0})
   const [showForm, setShowForm]       = useState(false)
   const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1' })
   const [formLoading, setFormLoading] = useState(false)
@@ -129,12 +129,13 @@ export default function PinsPage() {
     const res  = await fetch('/api/admin/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package_id: form.package_id, city_dist_id: form.city_dist_id, quantity: parseInt(form.quantity) }) })
     const data = await res.json()
     if (!res.ok) { setFormError(data.error || 'Failed'); setFormLoading(false); return }
-    setGeneratedPins(data.pin_codes || [])
+    const pins = data.pins || data.pin_codes || []
+    setGeneratedPins(pins)
     setFormLoading(false)
-    fetchPins()
     setShowForm(false)
     setForm({ package_id: '', city_dist_id: '', quantity: '1' })
     setShowSuccessModal(true)
+    fetchPins() // fetch after modal is shown
   }
 
   const handleBulkCancel = async () => {

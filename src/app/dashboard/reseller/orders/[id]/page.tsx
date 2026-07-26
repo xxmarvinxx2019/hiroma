@@ -98,15 +98,114 @@ export default function OrderDetailPage() {
     </div>
   )
 
+
+  const handlePrint = () => {
+    if (!order) return
+    const printWindow = window.open('', '_blank', 'width=800,height=900')
+    if (!printWindow) return
+
+    const items = order.items.map((item: any) => `
+      <tr>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${item.product?.name || '—'}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">₱${Number(item.unit_price).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">₱${Number(item.subtotal).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+      </tr>
+    `).join('')
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Receipt - ${order.order_number || order.id}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #111; padding: 32px; }
+    .header { text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #0D1B3E; }
+    .header h1 { font-size: 24px; color: #0D1B3E; font-weight: bold; }
+    .header p { color: #666; font-size: 12px; margin-top: 4px; }
+    .order-no { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .label { font-size: 12px; color: #888; }
+    .value { font-weight: bold; color: #0D1B3E; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: bold;
+      background: #e8f7ef; color: #1a7a4a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #f8f9fc; padding: 8px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase; }
+    th:last-child, td:last-child { text-align: right; }
+    th:nth-child(2), td:nth-child(2) { text-align: center; }
+    .total-row td { padding: 10px 8px; font-weight: bold; font-size: 14px; border-top: 2px solid #0D1B3E; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .info-box { background: #f8f9fc; border-radius: 8px; padding: 12px; }
+    .info-box .title { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 6px; }
+    .info-box .name { font-weight: bold; color: #0D1B3E; margin-bottom: 2px; }
+    .info-box .sub { font-size: 11px; color: #666; }
+    .payment-box { background: #0D1B3E; color: white; border-radius: 8px; padding: 16px; }
+    .payment-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
+    .payment-row.total { font-size: 15px; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 8px; margin-top: 4px; }
+    .footer { text-align: center; margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>HIROMA</h1>
+    <p>Official Order Receipt</p>
+  </div>
+  <div class="order-no">
+    <div><div class="label">Order Number</div><div class="value">${order.order_number || '#' + order.id.slice(0,8).toUpperCase()}</div></div>
+    <div style="text-align:center;"><div class="label">Date</div><div class="value">${new Date(order.created_at).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</div></div>
+    <div style="text-align:right;"><span class="badge">${order.status.charAt(0).toUpperCase() + order.status.slice(1)}</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+    <tbody>${items}</tbody>
+    <tfoot><tr class="total-row"><td colspan="3">Total Amount</td><td>₱${Number(order.total_amount).toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr></tfoot>
+  </table>
+  <div class="info-grid">
+    <div class="info-box">
+      <div class="title">Buyer</div>
+      <div class="name">${order.buyer?.full_name || '—'}</div>
+      <div class="sub">@${order.buyer?.username || ''}</div>
+      <div class="sub">${order.buyer?.mobile || ''}</div>
+    </div>
+    <div class="info-box">
+      <div class="title">Seller</div>
+      <div class="name">${order.seller?.full_name || '—'}</div>
+      <div class="sub">@${order.seller?.username || ''}</div>
+      <div class="sub">${order.seller?.mobile || ''}</div>
+    </div>
+  </div>
+  <div class="payment-box">
+    <div class="payment-row"><span>Payment Method</span><span>${order.payment_method || 'Cash'}</span></div>
+    <div class="payment-row"><span>Payment Status</span><span>${order.payment_status || 'Pending'}</span></div>
+    ${order.payment_reference ? '<div class="payment-row"><span>Reference</span><span>' + order.payment_reference + '</span></div>' : ''}
+    <div class="payment-row total"><span>Total</span><span>₱${Number(order.total_amount).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></div>
+  </div>
+  <div class="footer"><p>Thank you for your business!</p><p style="margin-top:4px;">This is an official receipt from Hiroma.</p></div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`
+
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }
   return (
     <div className="max-w-5xl mx-auto">
 
       {/* Header */}
       <div className="mb-6">
-        <button onClick={() => router.push('/dashboard/reseller/orders')}
+        <div className="flex items-center justify-between">
+          <button onClick={() => router.push('/dashboard/reseller/orders')}
           className="text-xs text-gray-400 hover:text-[#0D1B3E] transition-colors mb-3 flex items-center gap-1">
           ← Back to Orders
         </button>
+          <button onClick={handlePrint}
+            className="flex items-center gap-2 text-xs bg-[#0D1B3E] text-white px-4 py-2 rounded-xl hover:bg-[#1A2F5E] transition-colors">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+              <rect x="6" y="14" width="12" height="8"/>
+            </svg>
+            Print Receipt
+          </button>
+        </div>
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-xl font-semibold text-[#0D1B3E]">

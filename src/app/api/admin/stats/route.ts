@@ -147,14 +147,16 @@ export async function GET(req: NextRequest) {
         GROUP BY p.id, p.name ORDER BY total_sold DESC LIMIT 5
       `,
       // Top city dists - PIN + product in ONE query
-      prisma.$queryRaw<{ id: string; full_name: string; username: string; pin_rev: number; prod_rev: number }[]>`
+      prisma.$queryRaw<{ id: string; full_name: string; username: string; pin_rev: number; prod_rev: number; pin_count: number; prod_count: number }[]>`
         SELECT * FROM (
           SELECT
             dp.user_id::text AS id,
             u.full_name,
             u.username,
             COALESCE(SUM(CASE WHEN o.notes LIKE 'PIN sale:%' THEN o.total_amount ELSE 0 END), 0)::float AS pin_rev,
-            COALESCE(SUM(CASE WHEN o.notes NOT LIKE 'PIN sale:%' AND o.status = 'delivered' THEN o.total_amount ELSE 0 END), 0)::float AS prod_rev
+            COALESCE(SUM(CASE WHEN o.notes NOT LIKE 'PIN sale:%' AND o.status = 'delivered' THEN o.total_amount ELSE 0 END), 0)::float AS prod_rev,
+            COUNT(CASE WHEN o.notes LIKE 'PIN sale:%' THEN 1 END)::int AS pin_count,
+            COUNT(CASE WHEN o.notes NOT LIKE 'PIN sale:%' AND o.status = 'delivered' THEN 1 END)::int AS prod_count
           FROM distributor_profiles dp
           JOIN users u ON u.id = dp.user_id
           LEFT JOIN orders o ON (o.buyer_id = dp.user_id OR o.seller_id = dp.user_id)
@@ -235,8 +237,8 @@ export async function GET(req: NextRequest) {
       full_name:   r.full_name,
       username:    r.username,
       revenue:     Number(r.pin_rev || 0) + Number(r.prod_rev || 0),
-      pin_orders:  0,
-      prod_orders: 0,
+      pin_orders:  Number(r.pin_count  || 0),
+      prod_orders: Number(r.prod_count || 0),
     }))
 
     return NextResponse.json({
