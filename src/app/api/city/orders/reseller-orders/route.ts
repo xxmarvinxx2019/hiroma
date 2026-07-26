@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ============================================================
 // PRODUCT BINARY POINTS — same logic as city orders route
@@ -195,7 +196,6 @@ export async function GET(req: NextRequest) {
       where: {
         role:       'reseller',
         status:     'active',
-        created_by: user.id,
         ...(search && {
           OR: [
             { full_name: { contains: search, mode: 'insensitive' } },
@@ -209,7 +209,7 @@ export async function GET(req: NextRequest) {
         username:  true,
       },
       orderBy: { full_name: 'asc' },
-      take: 50,
+      take: 30,
     })
 
     return NextResponse.json({ resellers })
@@ -227,22 +227,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { reseller_id, order_type, notes, items } = await req.json()
-
-    if (!reseller_id)
-      return NextResponse.json({ error: 'Please select a reseller.' }, { status: 400 })
+    const { reseller_id, customer_name, order_type, notes, items } = await req.json()
+    const isNonMemberSale = !reseller_id
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
     if (!['online', 'offline'].includes(order_type))
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
 
     // Validate reseller belongs to this city distributor
-    const reseller = await prisma.user.findFirst({
+    const reseller = reseller_id ? await prisma.user.findFirst({
       where: { id: reseller_id, role: 'reseller', status: 'active' },
       select: { id: true, full_name: true, username: true },
-    })
+    }) : null
 
-    if (!reseller)
+    if (reseller_id && !reseller)
       return NextResponse.json({ error: 'Reseller not found or inactive.' }, { status: 404 })
 
     // Validate products and check city dist inventory
@@ -260,7 +258,9 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = Number(product.reseller_price || product.price)
+      const unit_price = isNonMemberSale
+        ? Number(product.price)
+        : Number(product.reseller_price || product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
@@ -293,12 +293,14 @@ export async function POST(req: NextRequest) {
     const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
-          buyer_id:          reseller_id,
+          buyer_id:          reseller_id || user.id,
           seller_id:         user.id,
           order_type,
           status:            'delivered', // immediate — city dist is present
           total_amount,
           is_cross_purchase: false,
+          is_non_member_sale: isNonMemberSale,
+          customer_name:     isNonMemberSale ? String(customer_name || '').trim() || 'Walk-in Customer' : null,
           notes:             notes?.trim() || null,
           items:             { create: orderItems },
         },
@@ -310,21 +312,23 @@ export async function POST(req: NextRequest) {
 
       // Credit reseller inventory immediately
       for (const item of orderItems) {
-        await tx.inventory.upsert({
-          where: {
-            owner_id_product_id: {
-              owner_id:   reseller_id,
-              product_id: item.product_id,
+        if (!isNonMemberSale) {
+          await tx.inventory.upsert({
+            where: {
+              owner_id_product_id: {
+                owner_id:   reseller_id,
+                product_id: item.product_id,
+              },
             },
-          },
-          update: { quantity: { increment: item.quantity } },
-          create: {
-            owner_id:            reseller_id,
-            product_id:          item.product_id,
-            quantity:            item.quantity,
-            low_stock_threshold: 5,
-          },
-        })
+            update: { quantity: { increment: item.quantity } },
+            create: {
+              owner_id:            reseller_id,
+              product_id:          item.product_id,
+              quantity:            item.quantity,
+              low_stock_threshold: 5,
+            },
+          })
+        }
 
         // Deduct from city distributor inventory
         await tx.inventory.updateMany({
@@ -338,7 +342,7 @@ export async function POST(req: NextRequest) {
 
     // Trigger product binary points AFTER transaction completes
     // so the order is committed before we check quantities
-    try {
+    if (!isNonMemberSale) try {
       // Calculate PU from this order
       const puProducts = await prisma.$queryRaw<{ id: string; pu_value: number }[]>`
         SELECT id::text, COALESCE(pu_value, 0) as pu_value FROM products
@@ -381,15 +385,37 @@ export async function POST(req: NextRequest) {
 
     console.log('[WALK-IN ORDER] Created:', {
       order_id:    order.id,
-      buyer_id:    reseller_id,
+      buyer_id:    reseller_id || 'non-member',
       seller_id:   user.id,
       total:       order.total_amount,
       status:      order.status,
     })
 
+    const { ip_address, device } = getClientInfo(req)
+    createAuditLog({
+      user_id: user.actor_id || user.id,
+      user_name: user.full_name || user.username,
+      user_role: user.is_staff ? 'staff' : user.role,
+      member_id: formatMemberId(user.actor_id || user.id, user.is_staff ? 'staff' : user.role),
+      activity_type: 'walk_in_order_created',
+      category: 'order',
+      description: `${isNonMemberSale ? 'Non-member' : 'Reseller'} walk-in order created — ₱${Number(order.total_amount).toFixed(2)}`,
+      metadata: {
+        order_id: order.id,
+        buyer_id: reseller_id || null,
+        customer_name: reseller?.full_name || String(customer_name || '').trim() || 'Walk-in Customer',
+        pricing: isNonMemberSale ? 'srp' : 'reseller_price',
+        owner_id: user.id,
+        performed_by_staff: Boolean(user.is_staff),
+      },
+      ip_address,
+      device,
+      status: 'completed',
+    })
+
     return NextResponse.json({
       success: true,
-      message: `Order created for ${reseller.full_name} and marked as delivered.`,
+      message: `Order created for ${reseller?.full_name || String(customer_name || '').trim() || 'Walk-in Customer'} and marked as delivered.`,
       order,
     })
   } catch (error) {

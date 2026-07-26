@@ -12,12 +12,19 @@ export type UserRole =
   | 'provincial'
   | 'city'
   | 'reseller'
+  | 'staff'
 
 export interface JWTPayload {
   id: string
   username: string
   role: UserRole
   full_name: string
+  is_staff?: boolean
+  actor_id?: string
+  actor_username?: string
+  actor_name?: string
+  owner_id?: string
+  permissions?: string[]
 }
 
 // ============================================================
@@ -146,6 +153,8 @@ export function getDashboardRoute(role: UserRole): string {
     case 'provincial':
       return '/dashboard/provincial'
     case 'city':
+      return '/dashboard/city'
+    case 'staff':
       return '/dashboard/city'
     case 'reseller':
       return '/dashboard/reseller'

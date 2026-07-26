@@ -40,8 +40,25 @@ model User {
   wallet                Wallet?
   pairing_logs          PairingLog[]
   city_dist_pin_requests PinRequest[]       @relation("CityDistPinRequests")
+  staff_profile         StaffProfile?       @relation("StaffAccount")
+  staff_members         StaffProfile[]      @relation("StaffOwner")
 
   @@map("users")
+}
+
+model StaffProfile {
+  id          String   @id @default(uuid())
+  user_id     String   @unique
+  owner_id    String
+  permissions Json     @default("[]")
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  user        User     @relation("StaffAccount", fields: [user_id], references: [id], onDelete: Cascade)
+  owner       User     @relation("StaffOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+
+  @@index([owner_id])
+  @@map("staff_profiles")
 }
 
 model DistributorProfile {
@@ -158,6 +175,7 @@ model Product {
   regional_price   Decimal                 @default(0) @db.Decimal(10, 2)
   provincial_price Decimal                 @default(0) @db.Decimal(10, 2)
   city_price       Decimal                 @default(0) @db.Decimal(10, 2)
+  branch_price     Decimal                 @default(0) @db.Decimal(10, 2)
   reseller_price   Decimal                 @default(0) @db.Decimal(10, 2)
   pu_value         Int                     @default(0)
   binary_eligible  Boolean                 @default(true)
@@ -306,6 +324,8 @@ model Order {
   payment_method    String?     @db.VarChar  @default("cash")
   payment_reference String?     @db.VarChar
   payment_status    String?     @default("unpaid") @db.VarChar
+  is_non_member_sale Boolean    @default(false)
+  customer_name     String?
   notes             String?
   created_at        DateTime    @default(now())
   updated_at        DateTime    @default(now()) @updatedAt
@@ -400,6 +420,7 @@ enum Role {
   provincial
   city
   reseller
+  staff
 }
 
 enum UserStatus {
@@ -412,6 +433,7 @@ enum DistributorLevel {
   regional
   provincial
   city
+  branch
 }
 
 enum PinStatus {

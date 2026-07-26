@@ -144,6 +144,8 @@ export async function GET(req: NextRequest) {
           status:            true,
           total_amount:      true,
           created_at:        true,
+          is_non_member_sale: true,
+          customer_name:     true,
           notes:             true,
           payment_method:    true,
           payment_reference: true,
@@ -219,9 +221,14 @@ export async function POST(req: NextRequest) {
     }
 
     const productIds = items.map((i: { product_id: string }) => i.product_id)
+    const buyerProfile = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { dist_level: true },
+    })
+    const isBranch = buyerProfile?.dist_level === 'branch'
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, name: true, price: true, city_price: true },
+      select: { id: true, name: true, price: true, cost_price: true, city_price: true, branch_price: true },
     })
 
     if (products.length !== productIds.length) {
@@ -233,7 +240,10 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.city_price || product.price)
+      const configuredPrice = isBranch
+        ? Number(product.branch_price) || Number(product.cost_price)
+        : Number(product.city_price || product.price)
+      const unit_price = configuredPrice
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
@@ -279,14 +289,14 @@ export async function POST(req: NextRequest) {
       },
     })
     createAuditLog({
-  user_id:       user.id,
+  user_id:       user.actor_id || user.id,
   user_name:     user.full_name || user.username,
-  user_role:     user.role,
-  member_id:     formatMemberId(user.id, user.role),
+  user_role:     user.is_staff ? 'staff' : user.role,
+  member_id:     formatMemberId(user.actor_id || user.id, user.is_staff ? 'staff' : user.role),
   activity_type: 'order_created',
   category:      'order',
   description:   `New order created — ₱${Number(order.total_amount).toFixed(2)}`,
-  metadata:      { order_id: order.id, amount: order.total_amount },
+  metadata:      { order_id: order.id, amount: order.total_amount, owner_id: user.id, performed_by_staff: Boolean(user.is_staff) },
   risk_level:    'low',
   status:        'normal',
 })

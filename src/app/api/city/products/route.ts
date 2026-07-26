@@ -51,9 +51,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const profile = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { id: true, dist_level: true },
+    })
+    if (!profile) {
+      return NextResponse.json({ error: 'Distributor profile not found.' }, { status: 404 })
+    }
+    const isBranch = profile.dist_level === 'branch'
+
     const { searchParams } = req.nextUrl
     const forOrdering  = searchParams.get('for_ordering') === 'true'
     const forReseller  = searchParams.get('for_reseller') === 'true'
+    const priceMode    = searchParams.get('price_mode') === 'reseller' ? 'reseller' : 'srp'
 
     // ── For walk-in reseller orders: return city dist's own inventory ──
     if (forReseller) {
@@ -64,7 +74,7 @@ export async function GET(req: NextRequest) {
           product: {
             select: {
               id: true, name: true, type: true,
-              reseller_price: true, is_active: true,
+              price: true, reseller_price: true, is_active: true,
             },
           },
         },
@@ -76,7 +86,11 @@ export async function GET(req: NextRequest) {
           id:                 i.product.id,
           name:               i.product.name,
           type:               i.product.type,
-          price:              Number(i.product.reseller_price),
+          price:              priceMode === 'reseller'
+            ? Number(i.product.reseller_price || i.product.price)
+            : Number(i.product.price),
+          srp:                Number(i.product.price),
+          reseller_price:     Number(i.product.reseller_price || i.product.price),
           available_quantity: i.quantity,
         }))
 
@@ -95,7 +109,7 @@ export async function GET(req: NextRequest) {
           product: {
             select: {
               id: true, name: true, type: true,
-              city_price: true, is_active: true,
+              cost_price: true, city_price: true, branch_price: true, is_active: true,
             },
           },
         },
@@ -107,7 +121,9 @@ export async function GET(req: NextRequest) {
           id:                 i.product.id,
           name:               i.product.name,
           type:               i.product.type,
-          price:              Number(i.product.city_price),
+          price:              isBranch
+            ? Number(i.product.branch_price) || Number(i.product.cost_price)
+            : Number(i.product.city_price),
           available_quantity: i.quantity,
         }))
 
@@ -115,15 +131,6 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Default: return all active products visible to city dist (no stock check) ──
-    const profile = await prisma.distributorProfile.findUnique({
-      where: { user_id: user.id },
-      select: { id: true },
-    })
-
-    if (!profile) {
-      return NextResponse.json({ error: 'Distributor profile not found.' }, { status: 404 })
-    }
-
     const visibilityRules = await prisma.productAreaVisibility.findMany({
       where: { distributor_id: profile.id },
       select: { product_id: true, is_visible: true },
@@ -141,11 +148,14 @@ export async function GET(req: NextRequest) {
       orderBy: { name: 'asc' },
       select: {
         id: true, name: true, type: true,
-        city_price: true, description: true, image_url: true,
+        cost_price: true, city_price: true, branch_price: true, description: true, image_url: true,
       },
     })
 
-    const mapped = products.map((p: any) => ({ ...p, price: Number(p.city_price) }))
+    const mapped = products.map((p: any) => ({
+      ...p,
+      price: isBranch ? Number(p.branch_price) || Number(p.cost_price) : Number(p.city_price),
+    }))
     return NextResponse.json({ products: mapped })
   } catch (error) {
     console.error('[CITY PRODUCTS GET ERROR]', error)

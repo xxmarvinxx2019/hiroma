@@ -50,6 +50,7 @@ const levelColors: Record<string, string> = {
   regional: 'bg-[#eef0f8] text-[#0D1B3E]',
   provincial: 'bg-[#fef6e4] text-[#9a6f1e]',
   city: 'bg-[#e8f7ef] text-[#1a7a4a]',
+  branch: 'bg-[#f3e8ff] text-[#7e22ce]',
 }
 
 const levelIcons: Record<string, string> = {
@@ -64,9 +65,9 @@ const levelIcons: Record<string, string> = {
 
 export default function DistributorsPage() {
   const [distributors, setDistributors] = useState<Distributor[]>([])
-  const [totals, setTotals] = useState({ regional: 0, provincial: 0, city: 0 })
+  const [totals, setTotals] = useState({ regional: 0, provincial: 0, city: 0, branch: 0 })
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'regional' | 'provincial' | 'city'>('all')
+  const [filter, setFilter] = useState<'all' | 'regional' | 'provincial' | 'city' | 'branch'>('all')
   const [page, setPage] = useState(1)
   const [meta, setMeta] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
   const [assignTarget, setAssignTarget] = useState<AssignParentTarget | null>(null)
@@ -212,7 +213,7 @@ export default function DistributorsPage() {
 
     const adminOption = parentOptions.find((p) => p.is_admin)
 
-    if (form.dist_level === 'city' && form.province_code) {
+    if (['city', 'branch'].includes(form.dist_level) && form.province_code) {
       const match = parentOptions.find(
         (p) => p.dist_level === 'provincial' && p.province_code === form.province_code
       )
@@ -239,7 +240,7 @@ export default function DistributorsPage() {
     setAssignSuccess('')
     // Load eligible parents
     const level = dist.distributor_profile?.dist_level
-    const parentLevel = level === 'provincial' ? 'regional' : level === 'city' ? 'provincial,regional' : ''
+    const parentLevel = level === 'provincial' ? 'regional' : ['city', 'branch'].includes(level || '') ? 'provincial,regional' : ''
     if (!parentLevel) return
     fetch(`/api/admin/distributors?parent_level=${parentLevel}`)
       .then((r) => r.json())
@@ -391,7 +392,7 @@ export default function DistributorsPage() {
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Distributors</h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            Manage all regional, provincial and city distributors
+            Manage regional, provincial, city distributors and Hiroma branches
           </p>
         </div>
         <button
@@ -403,8 +404,8 @@ export default function DistributorsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        {(['regional', 'provincial', 'city'] as const).map((level) => {
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {(['regional', 'provincial', 'city', 'branch'] as const).map((level) => {
           const count = totals[level]
           return (
             <div
@@ -414,11 +415,11 @@ export default function DistributorsPage() {
               style={{ borderTop: filter === level ? '2px solid #C9A84C' : undefined }}
             >
               <div className="flex items-center gap-2 mb-2">
-                <span>{levelIcons[level]}</span>
-                <span className="text-xs text-gray-400 capitalize">{level}</span>
+                <span>{level === 'branch' ? 'B' : levelIcons[level]}</span>
+                <span className="text-xs text-gray-400 capitalize">{level === 'branch' ? 'Hiroma Branch' : level}</span>
               </div>
               <p className="text-2xl font-semibold text-[#0D1B3E]">{count}</p>
-              <p className="text-xs text-gray-400 mt-0.5">distributors</p>
+              <p className="text-xs text-gray-400 mt-0.5">{level === 'branch' ? 'branches' : 'distributors'}</p>
             </div>
           )
         })}
@@ -434,7 +435,7 @@ export default function DistributorsPage() {
             className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">
-            {(['all', 'regional', 'provincial', 'city'] as const).map((f) => (
+            {(['all', 'regional', 'provincial', 'city', 'branch'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -482,7 +483,7 @@ export default function DistributorsPage() {
               </div>
               <span>
                 <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${levelColors[dist.distributor_profile?.dist_level || 'city']}`}>
-                  {levelIcons[dist.distributor_profile?.dist_level || 'city']} {dist.distributor_profile?.dist_level}
+                  {dist.distributor_profile?.dist_level === 'branch' ? 'B' : levelIcons[dist.distributor_profile?.dist_level || 'city']} {dist.distributor_profile?.dist_level === 'branch' ? 'Hiroma Branch' : dist.distributor_profile?.dist_level}
                 </span>
               </span>
               <p className="text-xs text-gray-500">
@@ -646,6 +647,7 @@ export default function DistributorsPage() {
                     <option value="regional">Regional</option>
                     <option value="provincial">Provincial</option>
                     <option value="city">City</option>
+                    <option value="branch">Hiroma Branch</option>
                   </select>
                 </div>
                 {/* Region */}
@@ -668,7 +670,7 @@ export default function DistributorsPage() {
                 </div>
 
                 {/* Province — shown for provincial and city */}
-                {(form.dist_level === 'provincial' || form.dist_level === 'city') && (
+                {(['provincial', 'city', 'branch'].includes(form.dist_level)) && (
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Province <span className="text-[#C9A84C]">*</span></label>
                     <select
@@ -689,7 +691,7 @@ export default function DistributorsPage() {
                 )}
 
                 {/* City/Municipality — shown for city only */}
-                {form.dist_level === 'city' && (
+                {['city', 'branch'].includes(form.dist_level) && (
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">City / Municipality <span className="text-[#C9A84C]">*</span></label>
                     <select

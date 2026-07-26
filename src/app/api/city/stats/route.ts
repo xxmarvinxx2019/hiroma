@@ -8,6 +8,13 @@ export async function GET() {
     if (!user || user.role !== 'city') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    const profile = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { dist_level: true },
+    })
+    const isBranch = profile?.dist_level === 'branch'
+    const inventoryCost = (product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) =>
+      isBranch ? Number(product.branch_price) || Number(product.cost_price) : Number(product.city_price)
 
     const now       = new Date()
     const today     = new Date(); today.setHours(0, 0, 0, 0)
@@ -81,13 +88,13 @@ export async function GET() {
         items: {
           select: {
             quantity: true, subtotal: true,
-            product: { select: { city_price: true, name: true } },
+            product: { select: { cost_price: true, city_price: true, branch_price: true, name: true } },
           },
         },
       },
     })
     const orderRevenue   = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
-    const orderCost      = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price || 0) * i.quantity, 0), 0)
+    const orderCost      = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + inventoryCost(i.product) * i.quantity, 0), 0)
     const orderUnitsSold = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
 
     // ── Product movement (top products sold) ──
@@ -112,7 +119,7 @@ export async function GET() {
             products: {
               select: {
                 quantity: true,
-                product: { select: { price: true, city_price: true } },
+                product: { select: { price: true, cost_price: true, city_price: true, branch_price: true } },
               },
             },
           },
@@ -131,7 +138,7 @@ export async function GET() {
       packageBreakdown[pname].revenue += Number(pin.package.price || 0)
       for (const pp of pin.package.products) {
         packageRevenue   += Number(pp.product.price      || 0) * pp.quantity
-        packageCost      += Number(pp.product.city_price || 0) * pp.quantity
+        packageCost      += inventoryCost(pp.product) * pp.quantity
         packageUnitsSold += pp.quantity
       }
     }
@@ -189,6 +196,9 @@ export async function GET() {
 
     return NextResponse.json({
       stats: {
+        accountType: profile?.dist_level || 'city',
+        isStaff: Boolean(user.is_staff),
+        staffPermissions: user.permissions || [],
         // Today
         salesRevenueToday,
         salesRevenueYesterday,

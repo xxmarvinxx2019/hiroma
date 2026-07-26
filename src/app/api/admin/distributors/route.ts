@@ -17,18 +17,19 @@ export async function GET(req: NextRequest) {
     const page        = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize    = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
-    const validLevels = ['regional', 'provincial', 'city']
+    const validLevels = ['regional', 'provincial', 'city', 'branch']
 
     const levels = parentLevel
-      ? parentLevel.split(',').filter((l) => validLevels.includes(l))
+      ? parentLevel.split(',').filter((item) => validLevels.includes(item))
       : level !== 'all' && validLevels.includes(level)
         ? [level]
         : validLevels
 
     const safeLevels = levels.length > 0 ? levels : validLevels
+    const roles = [...new Set(safeLevels.map((item) => item === 'branch' ? 'city' : item))]
 
     const where: any = {
-      role: { in: safeLevels },
+      role: { in: roles },
       distributor_profile: { dist_level: { in: safeLevels as any } },
       ...(search && {
         OR: [
@@ -85,10 +86,11 @@ export async function GET(req: NextRequest) {
     })
 
     // Overall totals — NOT affected by filter
-    const [totalRegional, totalProvincial, totalCity] = await Promise.all([
+    const [totalRegional, totalProvincial, totalCity, totalBranch] = await Promise.all([
       prisma.user.count({ where: { role: 'regional' } }),
       prisma.user.count({ where: { role: 'provincial' } }),
-      prisma.user.count({ where: { role: 'city' } }),
+      prisma.distributorProfile.count({ where: { dist_level: 'city' } }),
+      prisma.distributorProfile.count({ where: { dist_level: 'branch' } }),
     ])
 
     // Fetch sales total per distributor via raw SQL
@@ -117,7 +119,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       distributors: distributorsWithSales,
       adminUser,
-      totals: { regional: totalRegional, provincial: totalProvincial, city: totalCity },
+      totals: { regional: totalRegional, provincial: totalProvincial, city: totalCity, branch: totalBranch },
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
@@ -161,8 +163,8 @@ export async function POST(req: NextRequest) {
     if (dist_level === 'provincial' && (!province_code || !province_name)) {
       return NextResponse.json({ error: 'Province is required for provincial distributors.' }, { status: 400 })
     }
-    if (dist_level === 'city' && (!city_muni_code || !city_muni_name)) {
-      return NextResponse.json({ error: 'City/Municipality is required for city distributors.' }, { status: 400 })
+    if (['city', 'branch'].includes(dist_level) && (!city_muni_code || !city_muni_name)) {
+      return NextResponse.json({ error: 'City/Municipality is required for city distributors and branches.' }, { status: 400 })
     }
 
     // Auto-generate coverage_area display label
@@ -205,8 +207,8 @@ export async function POST(req: NextRequest) {
       if (dist_level === 'provincial' && parentProfile.dist_level !== 'regional') {
         return NextResponse.json({ error: 'Provincial must be assigned under a regional distributor.' }, { status: 400 })
       }
-      if (dist_level === 'city' && !['provincial', 'regional'].includes(parentProfile.dist_level)) {
-        return NextResponse.json({ error: 'City must be assigned under a provincial or regional distributor.' }, { status: 400 })
+      if (['city', 'branch'].includes(dist_level) && !['provincial', 'regional'].includes(parentProfile.dist_level)) {
+        return NextResponse.json({ error: 'City distributors and branches must be assigned under a provincial or regional distributor.' }, { status: 400 })
       }
     }
 
@@ -214,6 +216,7 @@ export async function POST(req: NextRequest) {
       regional: 'regional',
       provincial: 'provincial',
       city: 'city',
+      branch: 'city',
     }
     const role = roleMap[dist_level]
     if (!role) {
@@ -351,8 +354,8 @@ export async function PATCH(req: NextRequest) {
     if (parentProfile.user_id === distributor_id) return NextResponse.json({ error: 'Cannot assign as own parent.' }, { status: 400 })
     if (profile.dist_level === 'provincial' && parentProfile.dist_level !== 'regional')
       return NextResponse.json({ error: 'Provincial must be under a regional distributor.' }, { status: 400 })
-    if (profile.dist_level === 'city' && !['provincial', 'regional'].includes(parentProfile.dist_level))
-      return NextResponse.json({ error: 'City must be under a provincial or regional distributor.' }, { status: 400 })
+    if (['city', 'branch'].includes(profile.dist_level) && !['provincial', 'regional'].includes(parentProfile.dist_level))
+      return NextResponse.json({ error: 'City distributors and branches must be under a provincial or regional distributor.' }, { status: 400 })
     if (profile.dist_level === 'regional')
       return NextResponse.json({ error: 'Regional distributors cannot have a parent.' }, { status: 400 })
 

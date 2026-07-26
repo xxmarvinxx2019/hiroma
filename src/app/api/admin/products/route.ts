@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     const {
       name, description, type, image_url,
       srp, cost_price,
-      regional_price, provincial_price, city_price, reseller_price,
+      regional_price, provincial_price, city_price, branch_price, reseller_price,
       pu_value, binary_eligible,
     } = await req.json()
 
@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
         regional_price:   parseFloat(regional_price   || 0),
         provincial_price: parseFloat(provincial_price || 0),
         city_price:       parseFloat(city_price       || 0),
+        branch_price:     parseFloat(branch_price     || cost_price || 0),
         reseller_price:   parseFloat(reseller_price),
         image_url:        image_url?.trim() || null,
         is_active:        true,
@@ -140,7 +141,7 @@ export async function PATCH(req: NextRequest) {
     const {
       id, name, description, type, image_url, is_active,
       srp, cost_price,
-      regional_price, provincial_price, city_price, reseller_price,
+      regional_price, provincial_price, city_price, branch_price, reseller_price,
       pu_value, binary_eligible,
     } = await req.json()
 
@@ -159,6 +160,7 @@ export async function PATCH(req: NextRequest) {
         ...(regional_price   != null && { regional_price:   parseFloat(regional_price) }),
         ...(provincial_price != null && { provincial_price: parseFloat(provincial_price) }),
         ...(city_price       != null && { city_price:       parseFloat(city_price) }),
+        ...(branch_price     != null && { branch_price:     parseFloat(branch_price) }),
         ...(reseller_price   != null && { reseller_price:   parseFloat(reseller_price) }),
         ...(image_url        != null && { image_url:        image_url?.trim() || null }),
         ...(is_active        != null && { is_active }),

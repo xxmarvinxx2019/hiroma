@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
 interface Stats {
+  accountType: string
+  isStaff: boolean
+  staffPermissions: string[]
   salesRevenueToday: number
   salesRevenueYesterday: number
   unitsSoldToday: number
@@ -112,18 +115,24 @@ export default function CityDashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-[#0D1B3E]">City Dashboard</h1>
+          <h1 className="text-xl font-bold text-[#0D1B3E]">
+            {stats.accountType === 'branch' ? 'Branch Dashboard' : 'City Dashboard'}
+          </h1>
           <p className="text-xs text-gray-400 mt-0.5">{today}</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/dashboard/city/resellers/new"
+          {!stats.isStaff && <Link href="/dashboard/city/staff"
+            className="bg-white border border-[#C9A84C] text-[#9a6f1e] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#fef9ee] transition-colors">
+            + Register Staff
+          </Link>}
+          {(!stats.isStaff || stats.staffPermissions.includes('register_reseller')) && <Link href="/dashboard/city/resellers/new"
             className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#E8C96A] transition-colors">
             + Register Reseller
-          </Link>
-          <Link href="/dashboard/city/orders"
+          </Link>}
+          {(!stats.isStaff || stats.staffPermissions.includes('orders')) && <Link href="/dashboard/city/orders"
             className="bg-[#0D1B3E] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
             🛒 Walk-in Sale
-          </Link>
+          </Link>}
         </div>
       </div>
 

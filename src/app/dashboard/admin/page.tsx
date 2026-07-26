@@ -41,7 +41,11 @@ interface Stats {
   recentOrders: {
     id: string; order_number: string | null; status: string
     total_amount: number; created_at: string
-    buyer: { full_name: string; role: string }
+    buyer: {
+      full_name: string
+      role: string
+      distributor_profile?: { dist_level: string } | null
+    }
   }[]
   ordersByStatus: { status: string; _count: { status: number } }[]
   regionalSales:  { region_name: string; total: number; count: number }[]
@@ -338,7 +342,10 @@ export default function AdminDashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-[#0D1B3E] truncate">{order.buyer.full_name}</p>
                   <p className="text-[10px] text-gray-400">
-                    {order.order_number || order.id.slice(0, 8)} · <span className="capitalize">{order.buyer.role}</span>
+                    {order.order_number || order.id.slice(0, 8)} ·{' '}
+                    <span className="capitalize">
+                      {order.buyer.distributor_profile?.dist_level === 'branch' ? 'Branch' : order.buyer.role}
+                    </span>
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
