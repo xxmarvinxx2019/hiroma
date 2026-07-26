@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
             products: {
               select: {
                 quantity: true,
-                product:  { select: { id: true, name: true } },
+                product:  { select: { id: true, name: true, price: true, reseller_price: true } },
               },
             },
           },
@@ -70,7 +71,16 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    return NextResponse.json({ pin })
+    const economics = calculatePackageEconomics(pin.package.products)
+    return NextResponse.json({
+      pin: {
+        ...pin,
+        package: {
+          ...pin.package,
+          price: pin.package.products.length > 0 ? economics.pinAllocation : Number(pin.package.price),
+        },
+      },
+    })
   } catch (error) {
     console.error('[VERIFY PIN ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

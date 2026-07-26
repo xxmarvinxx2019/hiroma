@@ -33,6 +33,8 @@ interface Stats {
   orderUnitsSold: number
   packageRevenue: number
   packageCost: number
+  packagePinRemittance: number
+  packageCustomerPayments: number
   packageUnitsSold: number
   topProducts: { name: string; qty: number; revenue: number }[]
   packageBreakdown: { name: string; count: number; revenue: number }[]
@@ -125,11 +127,11 @@ export default function CityDashboardPage() {
             className="bg-white border border-[#C9A84C] text-[#9a6f1e] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#fef9ee] transition-colors">
             + Register Staff
           </Link>}
-          {(!stats.isStaff || stats.staffPermissions.includes('register_reseller')) && <Link href="/dashboard/city/resellers/new"
+          {(!stats.isStaff || stats.staffPermissions.includes('register_reseller')) && <Link href="/dashboard/city/resellers/register"
             className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#E8C96A] transition-colors">
             + Register Reseller
           </Link>}
-          {(!stats.isStaff || stats.staffPermissions.includes('orders')) && <Link href="/dashboard/city/orders"
+          {(!stats.isStaff || stats.staffPermissions.includes('orders')) && <Link href="/dashboard/city/orders?action=walk-in"
             className="bg-[#0D1B3E] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
             🛒 Walk-in Sale
           </Link>}
@@ -225,11 +227,11 @@ export default function CityDashboardPage() {
               ))}
             </div>
 
-            {/* Top Earners */}
+            {/* Top Performing Resellers */}
             <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#0D1B3E]/8">
-                <p className="text-sm font-bold text-[#0D1B3E]">Top Earners</p>
-                <Link href="/dashboard/city/resellers" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
+                <p className="text-sm font-bold text-[#0D1B3E]">Top Performing Resellers</p>
+                <Link href="/dashboard/city/top-performers" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
               </div>
               {stats.topEarners.length === 0 ? (
                 <div className="px-5 py-8 text-center text-gray-400 text-sm">No resellers yet</div>
@@ -287,7 +289,7 @@ export default function CityDashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               { label: 'Walk-in Sales Revenue', value: stats.orderRevenue,   cost: stats.orderCost,   units: stats.orderUnitsSold,   icon: '🛒', color: '#2563eb' },
-              { label: 'Package Sales Revenue', value: stats.packageRevenue, cost: stats.packageCost, units: stats.packageUnitsSold, icon: '🎁', color: '#C9A84C' },
+              { label: 'Registration Product Sales', value: stats.packageRevenue, cost: stats.packageCost, units: stats.packageUnitsSold, icon: '🎁', color: '#C9A84C', extra: `PIN remittance: ${fmt(stats.packagePinRemittance)}` },
               { label: 'Total Profit',          value: stats.totalProfit,    cost: stats.totalCost,   units: stats.totalUnitsSold,   icon: '📈', color: '#1a7a4a' },
             ].map(s => (
               <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
@@ -299,6 +301,7 @@ export default function CityDashboardPage() {
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between"><span className="text-gray-400">Cost</span><span className="text-[#e05252] font-medium">{fmt(s.cost)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Units</span><span className="font-medium text-[#0D1B3E]">{s.units.toLocaleString()}</span></div>
+                  {'extra' in s && s.extra && <div className="text-[10px] text-[#9a6f1e] pt-1">{s.extra}</div>}
                 </div>
               </div>
             ))}

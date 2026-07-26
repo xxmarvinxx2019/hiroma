@@ -266,6 +266,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   const [orderType, setOrderType]           = useState<'online' | 'offline'>('offline')
   const [notes, setNotes]                   = useState('')
   const [customerName, setCustomerName]     = useState('')
+  const [cashReceived, setCashReceived]     = useState('')
   const [search, setSearch]                 = useState('')
   const [submitting, setSubmitting]         = useState(false)
   const [error, setError]                   = useState('')
@@ -306,13 +307,32 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   }
 
   const total = cart.reduce((s, c) => s + c.product.price * c.quantity, 0)
+  const cashAmount = Number(cashReceived)
+  const hasSufficientPayment =
+    cashReceived.trim() !== '' &&
+    Number.isFinite(cashAmount) &&
+    Math.round(cashAmount * 100) >= Math.round(total * 100)
+  const changeAmount = hasSufficientPayment
+    ? Math.max(0, Math.round((cashAmount - total) * 100) / 100)
+    : 0
 
   const handleSubmit = async () => {
     if (cart.length === 0)   { setError('Add at least one item.'); return }
+    if (!hasSufficientPayment) {
+      setError('Enter cash received equal to or greater than the order total.')
+      return
+    }
     setSubmitting(true); setError('')
     const res = await fetch('/api/city/orders/reseller-orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reseller_id: selectedResellerId || null, customer_name: customerName, order_type: orderType, notes, items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })) }),
+      body: JSON.stringify({
+        reseller_id: selectedResellerId || null,
+        customer_name: customerName,
+        order_type: orderType,
+        notes,
+        cash_received: cashAmount,
+        items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
+      }),
     })
     const data = await res.json()
     setSubmitting(false)
@@ -440,6 +460,32 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
             </div>
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
               <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]"><span>Total</span><span>₱{total.toLocaleString()}</span></div>
+              <div>
+                <label className="block text-[10px] font-medium text-[#0D1B3E] mb-1">Cash received *</label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">₱</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={cashReceived}
+                    onChange={(event) => {
+                      setCashReceived(event.target.value)
+                      setError('')
+                    }}
+                    placeholder="0.00"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg pl-6 pr-2 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                  />
+                </div>
+                {cashReceived.trim() !== '' && Number.isFinite(cashAmount) && (
+                  <p className={`text-[10px] mt-1 ${hasSufficientPayment ? 'text-[#1a7a4a]' : 'text-[#a03030]'}`}>
+                    {hasSufficientPayment
+                      ? `Change: ₱${changeAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : `Insufficient by ₱${Math.max(0, total - cashAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  </p>
+                )}
+              </div>
               <div className="flex gap-1">
                 {(['online', 'offline'] as const).map((t) => (
                   <button key={t} onClick={() => setOrderType(t)}
@@ -449,7 +495,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" rows={2}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C] resize-none placeholder:text-gray-400" />
               {error && <p className="text-xs text-[#a03030]">{error}</p>}
-              <button onClick={handleSubmit} disabled={submitting || cart.length === 0}
+              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || !hasSufficientPayment}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
                 {submitting ? 'Creating...' : 'Create & Deliver'}
               </button>
@@ -468,7 +514,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
 // ============================================================
 
 export default function CityOrdersPage() {
-  const [tab, setTab]                       = useState<'my_orders' | 'reseller_orders'>('my_orders')
+  const [tab, setTab]                       = useState<'my_orders' | 'reseller_orders'>('reseller_orders')
   const [orders, setOrders]                 = useState<Order[]>([])
   const [meta, setMeta]                     = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]               = useState(true)
@@ -484,6 +530,21 @@ export default function CityOrdersPage() {
   const [showCreate, setShowCreate]         = useState(false)
   const [showResellerOrder, setShowResellerOrder] = useState(false)
   const [summary, setSummary]               = useState({ total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0 })
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('action') !== 'walk-in') return
+
+    setTab('reseller_orders')
+    setShowResellerOrder(true)
+    params.delete('action')
+    const remainingQuery = params.toString()
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${remainingQuery ? `?${remainingQuery}` : ''}`
+    )
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 400)
@@ -570,8 +631,8 @@ export default function CityOrdersPage() {
 
       <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         {([
-          { key: 'my_orders',       label: 'My Orders',       desc: 'To supplier' },
           { key: 'reseller_orders', label: 'Reseller Orders', desc: 'From resellers' },
+          { key: 'my_orders',       label: 'My Orders',       desc: 'To supplier' },
         ] as const).map((t) => (
           <button key={t.key}
             onClick={() => { setTab(t.key); setStatusFilter('all'); setTypeFilter('all'); setSearch(''); setSearchInput('') }}

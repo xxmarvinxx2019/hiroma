@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
+import { createAuditLog, getClientInfo } from '@/app/lib/auditLog'
 
 // ── Product Binary Pairing for reseller inventory assignments ──
 async function triggerProductBinaryPairing(buyerUserId: string, currentOrderPU: number) {
@@ -183,7 +184,7 @@ export async function GET(req: NextRequest) {
             select: {
               id: true, name: true, type: true,
               cost_price: true, regional_price: true, provincial_price: true, city_price: true,
-              branch_price: true,
+              branch_price: true, reseller_price: true, price: true,
             },
           },
         },
@@ -236,6 +237,71 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
+    const movementRows = items.length > 0
+      ? await prisma.inventoryMovement.findMany({
+          where: {
+            OR: items.map((item) => ({
+              recipient_id: item.owner.id,
+              product_id: item.product.id,
+            })),
+          },
+          orderBy: { created_at: 'desc' },
+        }).catch((error) => {
+          console.warn('[ADMIN INVENTORY] Movement ledger unavailable; showing legacy inventory data.', error)
+          return []
+        })
+      : []
+    const latestMovementMap = new Map<string, (typeof movementRows)[number]>()
+    for (const movement of movementRows) {
+      const key = `${movement.recipient_id}:${movement.product_id}`
+      if (!latestMovementMap.has(key)) latestMovementMap.set(key, movement)
+    }
+    const itemsWithMovement = items.map((item) => {
+      const movement = latestMovementMap.get(`${item.owner.id}:${item.product.id}`)
+      const ownerLevel = item.owner.distributor_profile?.dist_level || item.owner.role
+      const unitPrice = ownerLevel === 'branch'
+        ? Number(item.product.branch_price) || Number(item.product.cost_price)
+        : ownerLevel === 'regional'
+          ? Number(item.product.regional_price)
+          : ownerLevel === 'provincial'
+            ? Number(item.product.provincial_price)
+            : ownerLevel === 'reseller'
+              ? Number(item.product.reseller_price)
+              : Number(item.product.city_price)
+      const currentReferenceValue = unitPrice * item.quantity
+      const currentSaleValue = ownerLevel === 'branch' ? 0 : currentReferenceValue
+      const currentCost = Number(item.product.cost_price) * item.quantity
+
+      return {
+        ...item,
+        movement: movement ? {
+          quantity:                movement.quantity,
+          reference_value:         Number(movement.reference_value),
+          sale_value:              Number(movement.sale_value),
+          admin_profit:            Number(movement.admin_profit),
+          is_sale:                 movement.is_sale,
+          admin_stock_before:      movement.admin_stock_before,
+          admin_stock_after:       movement.admin_stock_after,
+          recipient_stock_before:  movement.recipient_stock_before,
+          recipient_stock_after:   movement.recipient_stock_after,
+          created_at:              movement.created_at,
+          is_legacy:               false,
+        } : {
+          quantity:                null,
+          reference_value:         currentReferenceValue,
+          sale_value:              currentSaleValue,
+          admin_profit:            ownerLevel === 'branch' ? 0 : currentSaleValue - currentCost,
+          is_sale:                 ownerLevel !== 'branch',
+          admin_stock_before:      null,
+          admin_stock_after:       null,
+          recipient_stock_before:  null,
+          recipient_stock_after:   item.quantity,
+          created_at:              null,
+          is_legacy:               true,
+        },
+      }
+    })
+
     const allInventory = await prisma.inventory.findMany({
       where:  { owner: { role: { in: ['regional', 'provincial', 'city', 'reseller'] } } },
       select: {
@@ -263,7 +329,7 @@ export async function GET(req: NextRequest) {
         where:   stockWhere,
         select: {
           id: true, name: true, type: true,
-          cost_price: true, regional_price: true, provincial_price: true,
+          price: true, cost_price: true, regional_price: true, provincial_price: true,
           city_price: true, branch_price: true, reseller_price: true,
         },
         orderBy: { name: 'asc' },
@@ -290,7 +356,7 @@ export async function GET(req: NextRequest) {
     }))
 
     return NextResponse.json({
-      items,
+      items: itemsWithMovement,
       distributors,
       recipients:    recipientList,
       recipientMeta: { total: recipientTotal, totalPages: Math.max(1, Math.ceil(recipientTotal / recipient_size)) },
@@ -319,6 +385,23 @@ export async function POST(req: NextRequest) {
     if (!owner_id || !items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'owner_id and items are required.' }, { status: 400 })
 
+    const normalizedItems = items.map((item: { product_id?: unknown; quantity?: unknown }) => ({
+      product_id: typeof item.product_id === 'string' ? item.product_id : '',
+      quantity: Number(item.quantity),
+    }))
+    const productIds = normalizedItems.map((item) => item.product_id)
+    if (
+      normalizedItems.some((item) =>
+        !item.product_id || !Number.isSafeInteger(item.quantity) || item.quantity <= 0
+      ) ||
+      new Set(productIds).size !== productIds.length
+    ) {
+      return NextResponse.json(
+        { error: 'Each product must appear once with a positive whole-number quantity.' },
+        { status: 400 }
+      )
+    }
+
     const owner = await prisma.user.findFirst({
       where:  { id: owner_id, role: { in: ['regional', 'provincial', 'city', 'reseller'] }, status: 'active' },
       select: {
@@ -328,9 +411,9 @@ export async function POST(req: NextRequest) {
     })
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
 
-    const priceLevel = owner.distributor_profile?.dist_level === 'branch' ? 'branch' : owner.role
+    const isBranchTransfer = owner.distributor_profile?.dist_level === 'branch'
+    const priceLevel = isBranchTransfer ? 'branch' : owner.role
     const priceField = PRICE_FIELD[priceLevel] || 'reseller_price'
-    const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
       select: {
@@ -348,8 +431,8 @@ export async function POST(req: NextRequest) {
     })
     const adminStockMap = new Map(adminStock.map((i) => [i.product_id, i.quantity]))
 
-    const stockErrors = items
-      .map((item: { product_id: string; quantity: number }) => {
+    const stockErrors = normalizedItems
+      .map((item) => {
         const available = adminStockMap.get(item.product_id) ?? 0
         const product   = products.find((p) => p.id === item.product_id)
         return available < item.quantity
@@ -367,7 +450,7 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
     let   totalAmount = 0
 
-    const orderItems = items.map((item: { product_id: string; quantity: number }) => {
+    const orderItems = normalizedItems.map((item) => {
       const product   = productMap.get(item.product_id)!
       const configuredPrice = Number(product[priceField] || product.reseller_price || 0)
       const unitPrice = priceLevel === 'branch' && configuredPrice <= 0
@@ -378,22 +461,56 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price: unitPrice, subtotal }
     })
 
-    const order = await prisma.$transaction(async (tx) => {
-      const newOrder = await tx.order.create({
-        data: {
-          buyer_id:          owner_id,
-          seller_id:         user.id,
-          order_type:        'offline',
-          status:            'delivered',
-          total_amount:      totalAmount,
-          is_cross_purchase: false,
-          notes:             notes?.trim() || `Stock assigned to ${owner.full_name}`,
-          items:             { create: orderItems },
-        },
-        select: { id: true, total_amount: true, created_at: true },
-      })
+    const invalidPriceItem = orderItems.find((item) => !Number.isFinite(item.unit_price) || item.unit_price <= 0)
+    if (invalidPriceItem) {
+      const product = productMap.get(invalidPriceItem.product_id)
+      return NextResponse.json(
+        { error: `A valid ${priceLevel} price is required for "${product?.name || 'this product'}".` },
+        { status: 400 }
+      )
+    }
 
+    const order = await prisma.$transaction(async (tx) => {
+      const newOrder = isBranchTransfer
+        ? null
+        : await tx.order.create({
+            data: {
+              buyer_id:          owner_id,
+              seller_id:         user.id,
+              order_type:        'offline',
+              status:            'delivered',
+              total_amount:      totalAmount,
+              is_cross_purchase: false,
+              notes:             notes?.trim() || `Stock assigned to ${owner.full_name}`,
+              items:             { create: orderItems },
+            },
+            select: { id: true, total_amount: true, created_at: true },
+          })
+
+      const movements: Parameters<typeof tx.inventoryMovement.createMany>[0]['data'] = []
       for (const item of orderItems) {
+        const adminInventory = await tx.inventory.findUnique({
+          where: { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } },
+          select: { id: true, quantity: true },
+        })
+        const recipientInventory = await tx.inventory.findUnique({
+          where: { owner_id_product_id: { owner_id, product_id: item.product_id } },
+          select: { quantity: true },
+        })
+        const adminStockBefore = adminInventory?.quantity ?? 0
+        const recipientStockBefore = recipientInventory?.quantity ?? 0
+
+        const deducted = adminInventory
+          ? await tx.inventory.updateMany({
+              where: { id: adminInventory.id, quantity: { gte: item.quantity } },
+              data:  { quantity: { decrement: item.quantity } },
+            })
+          : { count: 0 }
+        if (deducted.count !== 1) {
+          const product = productMap.get(item.product_id)
+          throw new Error(`INSUFFICIENT_STOCK:${product?.name || item.product_id}`)
+        }
+
         await tx.inventory.upsert({
           where:  { owner_id_product_id: { owner_id, product_id: item.product_id } },
           update: { quantity: { increment: item.quantity } },
@@ -405,14 +522,52 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        await tx.inventory.updateMany({
-          where: { owner_id: user.id, product_id: item.product_id },
-          data:  { quantity: { decrement: item.quantity } },
+        const product = productMap.get(item.product_id)!
+        const unitCost = Number(product.cost_price)
+        const referenceValue = item.subtotal
+        const saleValue = isBranchTransfer ? 0 : referenceValue
+        movements.push({
+          admin_id:               user.id,
+          recipient_id:           owner_id,
+          product_id:             item.product_id,
+          order_id:               newOrder?.id || null,
+          quantity:               item.quantity,
+          unit_cost:              unitCost,
+          unit_price:             item.unit_price,
+          reference_value:        referenceValue,
+          sale_value:             saleValue,
+          admin_profit:           isBranchTransfer ? 0 : saleValue - (unitCost * item.quantity),
+          is_sale:                !isBranchTransfer,
+          admin_stock_before:     adminStockBefore,
+          admin_stock_after:      adminStockBefore - item.quantity,
+          recipient_stock_before: recipientStockBefore,
+          recipient_stock_after:  recipientStockBefore + item.quantity,
+          notes:                  notes?.trim() || null,
         })
       }
 
+      await tx.inventoryMovement.createMany({ data: movements })
       return newOrder
     })
+
+    if (isBranchTransfer) {
+      createAuditLog({
+        user_id:       user.id,
+        user_name:     user.full_name,
+        user_role:     user.role,
+        activity_type: 'branch_stock_transfer',
+        category:      'distributor',
+        description:   `Transferred stock from Admin to Hiroma Branch ${owner.full_name} without recording a sale.`,
+        metadata: {
+          recipient_id:    owner.id,
+          recipient_name:  owner.full_name,
+          reference_value: totalAmount,
+          items:            orderItems,
+          notes:            notes?.trim() || null,
+        },
+        ...getClientInfo(req),
+      })
+    }
 
     // Fire product binary pairing if owner is reseller
     if (owner.role === 'reseller') {
@@ -422,7 +577,7 @@ export async function POST(req: NextRequest) {
           WHERE id::text = ANY(${productIds}::text[]) AND COALESCE(binary_eligible, true) = true AND COALESCE(pu_value, 0) > 0
         `.catch(() => [] as { id: string; pu_value: number }[])
         const puMap = new Map(puProducts.map((p: any) => [p.id, Number(p.pu_value)]))
-        const currentOrderPU = items.reduce((sum: number, i: any) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
+        const currentOrderPU = normalizedItems.reduce((sum, i) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
         if (currentOrderPU > 0) {
           await triggerProductBinaryPairing(owner_id, currentOrderPU)
         }
@@ -431,12 +586,22 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success:      true,
-      message:      `Stock assigned to ${owner.full_name}. ₱${totalAmount.toLocaleString()} recorded.`,
+      message:      isBranchTransfer
+        ? `Stock transferred to ${owner.full_name}. No sale or Admin revenue was recorded.`
+        : `Stock assigned to ${owner.full_name}. ₱${totalAmount.toLocaleString()} recorded.`,
+      transaction_type: isBranchTransfer ? 'internal_transfer' : 'sale',
       order,
-      total_amount: totalAmount,
+      total_amount: isBranchTransfer ? 0 : totalAmount,
+      reference_value: totalAmount,
     })
   } catch (error) {
     console.error('[ADMIN INVENTORY POST ERROR]', error)
+    if (error instanceof Error && error.message.startsWith('INSUFFICIENT_STOCK:')) {
+      return NextResponse.json(
+        { error: `Insufficient admin stock for "${error.message.slice('INSUFFICIENT_STOCK:'.length)}". Please refresh and retry.` },
+        { status: 409 }
+      )
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
@@ -481,7 +646,23 @@ export async function PUT(req: NextRequest) {
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'items are required.' }, { status: 400 })
 
-    const productIds = items.map((i: { product_id: string }) => i.product_id)
+    const normalizedItems = items.map((item: { product_id?: unknown; quantity?: unknown }) => ({
+      product_id: typeof item.product_id === 'string' ? item.product_id : '',
+      quantity: Number(item.quantity),
+    }))
+    const productIds = normalizedItems.map((item) => item.product_id)
+    if (
+      normalizedItems.some((item) =>
+        !item.product_id || !Number.isSafeInteger(item.quantity) || item.quantity <= 0
+      ) ||
+      new Set(productIds).size !== productIds.length
+    ) {
+      return NextResponse.json(
+        { error: 'Each product must appear once with a positive whole-number quantity.' },
+        { status: 400 }
+      )
+    }
+
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
       select: { id: true, name: true },
@@ -490,22 +671,24 @@ export async function PUT(req: NextRequest) {
     if (products.length !== productIds.length)
       return NextResponse.json({ error: 'One or more products not found.' }, { status: 400 })
 
-    for (const item of items) {
-      await prisma.inventory.upsert({
-        where:  { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } },
-        update: { quantity: { increment: item.quantity } },
-        create: {
-          owner_id:            user.id,
-          product_id:          item.product_id,
-          quantity:            item.quantity,
-          low_stock_threshold: 10,
-        },
-      })
-    }
+    await prisma.$transaction(
+      normalizedItems.map((item) =>
+        prisma.inventory.upsert({
+          where:  { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } },
+          update: { quantity: { increment: item.quantity } },
+          create: {
+            owner_id:            user.id,
+            product_id:          item.product_id,
+            quantity:            item.quantity,
+            low_stock_threshold: 10,
+          },
+        })
+      )
+    )
 
     return NextResponse.json({
       success: true,
-      message: `Stock updated for ${items.length} product(s). Notes: ${notes || 'N/A'}`,
+      message: `Stock updated for ${normalizedItems.length} product(s). Notes: ${notes || 'N/A'}`,
     })
   } catch (error) {
     console.error('[ADMIN INVENTORY PUT ERROR]', error)

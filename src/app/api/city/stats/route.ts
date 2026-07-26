@@ -110,37 +110,103 @@ export async function GET() {
     const topProducts = Object.values(productMovement).sort((a, b) => b.qty - a.qty).slice(0, 10)
 
     // ── Package (PIN) sales from reseller registrations ──
-    const usedPinPackages = await prisma.pin.findMany({
-      where:  { city_dist_id: user.id, status: 'used' },
+    const registrationSnapshots = await prisma.registrationFinancial.findMany({
+      where: { city_dist_id: user.id },
       select: {
-        package: {
-          select: {
-            name: true, price: true,
-            products: {
-              select: {
-                quantity: true,
-                product: { select: { price: true, cost_price: true, city_price: true, branch_price: true } },
+        package_id: true,
+        customer_payment: true,
+        product_acquisition_cost: true,
+        reseller_value: true,
+        pin_allocation: true,
+      },
+    }).catch((error) => {
+      console.warn('[CITY STATS] Registration ledger unavailable; using legacy PIN calculations.', error)
+      return []
+    })
+    const registrationRows = registrationSnapshots.map((row) => ({
+      package_id: row.package_id,
+      customer_payment: Number(row.customer_payment),
+      product_acquisition_cost: Number(row.product_acquisition_cost),
+      reseller_value: Number(row.reseller_value),
+      pin_allocation: Number(row.pin_allocation),
+    }))
+    if (registrationRows.length === 0) {
+      const legacyRegistrations = await prisma.pin.findMany({
+        where: { city_dist_id: user.id, status: 'used' },
+        select: {
+          package_id: true,
+          package: {
+            select: {
+              products: {
+                select: {
+                  quantity: true,
+                  product: {
+                    select: {
+                      price: true,
+                      reseller_price: true,
+                      cost_price: true,
+                      city_price: true,
+                      branch_price: true,
+                    },
+                  },
+                },
               },
             },
           },
         },
+      })
+      for (const pin of legacyRegistrations) {
+        const customerPayment = pin.package.products.reduce(
+          (sum, item) => sum + Number(item.product.price || 0) * item.quantity,
+          0
+        )
+        const resellerValue = pin.package.products.reduce(
+          (sum, item) => sum + (Number(item.product.reseller_price) || Number(item.product.price)) * item.quantity,
+          0
+        )
+        const productAcquisitionCost = pin.package.products.reduce(
+          (sum, item) => sum + inventoryCost(item.product) * item.quantity,
+          0
+        )
+        registrationRows.push({
+          package_id: pin.package_id,
+          customer_payment: customerPayment,
+          product_acquisition_cost: productAcquisitionCost,
+          reseller_value: resellerValue,
+          pin_allocation: Math.max(0, customerPayment - resellerValue),
+        })
+      }
+    }
+    const registrationPackageIds = [...new Set(registrationRows.map((row) => row.package_id))]
+    const registrationPackages = await prisma.package.findMany({
+      where: { id: { in: registrationPackageIds } },
+      select: {
+        id: true,
+        name: true,
+        products: { select: { quantity: true } },
       },
     })
+    const registrationPackageMap = new Map(registrationPackages.map((pkg) => [pkg.id, pkg]))
 
     // Package breakdown
     const packageBreakdown: Record<string, { name: string; count: number; revenue: number }> = {}
-    let packageRevenue = 0, packageCost = 0, packageUnitsSold = 0
-    for (const pin of usedPinPackages) {
-      if (!pin.package) continue
-      const pname = pin.package.name
+    let packageRevenue = 0
+    let packageCost = 0
+    let packagePinRemittance = 0
+    let packageCustomerPayments = 0
+    let packageUnitsSold = 0
+    for (const registration of registrationRows) {
+      const pkg = registrationPackageMap.get(registration.package_id)
+      const pname = pkg?.name || 'Package'
       if (!packageBreakdown[pname]) packageBreakdown[pname] = { name: pname, count: 0, revenue: 0 }
       packageBreakdown[pname].count++
-      packageBreakdown[pname].revenue += Number(pin.package.price || 0)
-      for (const pp of pin.package.products) {
-        packageRevenue   += Number(pp.product.price      || 0) * pp.quantity
-        packageCost      += inventoryCost(pp.product) * pp.quantity
-        packageUnitsSold += pp.quantity
-      }
+      const resellerValue = Number(registration.reseller_value)
+      packageBreakdown[pname].revenue += resellerValue
+      packageCustomerPayments += Number(registration.customer_payment)
+      packageRevenue += resellerValue
+      packageCost += Number(registration.product_acquisition_cost)
+      packagePinRemittance += Number(registration.pin_allocation)
+      packageUnitsSold += (pkg?.products || []).reduce((sum, item) => sum + item.quantity, 0)
     }
 
     // ── Monthly revenue (last 6 months) ──
@@ -183,16 +249,22 @@ export async function GET() {
     const totalUnitsSold = orderUnitsSold + packageUnitsSold
 
     // ── Top earners among resellers ──
-    const topEarners = await prisma.user.findMany({
-      where:   { role: 'reseller', created_by: user.id },
-      select:  {
-        id: true, full_name: true, username: true,
-        wallet:           { select: { total_earned: true, balance: true } },
-        reseller_profile: { select: { package: { select: { name: true } } } },
+    const topEarners = (await prisma.resellerProfile.findMany({
+      where: { city_dist_id: user.id, user: { status: 'active' } },
+      select: {
+        user: {
+          select: {
+            id: true,
+            full_name: true,
+            username: true,
+            wallet: { select: { total_earned: true, balance: true } },
+          },
+        },
+        package: { select: { name: true } },
       },
-      orderBy: { wallet: { total_earned: 'desc' } },
-      take:    5,
-    })
+    }))
+      .sort((a, b) => Number(b.user.wallet?.total_earned || 0) - Number(a.user.wallet?.total_earned || 0))
+      .slice(0, 5)
 
     return NextResponse.json({
       stats: {
@@ -228,6 +300,8 @@ export async function GET() {
         orderUnitsSold,
         packageRevenue,
         packageCost,
+        packagePinRemittance,
+        packageCustomerPayments,
         packageUnitsSold,
         // Lists
         topProducts,
@@ -236,12 +310,12 @@ export async function GET() {
         recentResellers,
         recentOrders,
         topEarners: topEarners.map(r => ({
-          id: r.id,
-          full_name: r.full_name,
-          username: r.username,
-          total_earned: Number(r.wallet?.total_earned || 0),
-          balance: Number(r.wallet?.balance || 0),
-          package_name: r.reseller_profile?.package?.name || '—',
+          id: r.user.id,
+          full_name: r.user.full_name,
+          username: r.user.username,
+          total_earned: Number(r.user.wallet?.total_earned || 0),
+          balance: Number(r.user.wallet?.balance || 0),
+          package_name: r.package?.name || '—',
         })),
         inventoryItems: inventory.map(i => ({ name: (i.product as any).name, quantity: i.quantity, low: i.low_stock_threshold })),
       },

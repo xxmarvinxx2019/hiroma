@@ -491,14 +491,31 @@ export async function POST(req: NextRequest) {
       overflowToHiroma = dailyCount >= 10
     }
 
-    const [packageProducts, otherSideExists] = await Promise.all([
+    const [packageProducts, otherSideExists, registrationOwnerProfile] = await Promise.all([
       prisma.packageProduct.findMany({
         where:  { package_id: pin.package_id },
-        select: { product_id: true, quantity: true, product: { select: { name: true } } },
+        select: {
+          product_id: true,
+          quantity: true,
+          product: {
+            select: {
+              name: true,
+              price: true,
+              cost_price: true,
+              city_price: true,
+              branch_price: true,
+              reseller_price: true,
+            },
+          },
+        },
       }),
       prisma.binaryTreeNode.findFirst({
         where:  { parent_id: actual_parent_node_id, position: actual_position === 'left' ? 'right' : 'left' },
         select: { id: true },
+      }),
+      prisma.distributorProfile.findUnique({
+        where: { user_id: user.id },
+        select: { dist_level: true },
       }),
     ])
 
@@ -518,6 +535,25 @@ export async function POST(req: NextRequest) {
         error: `Insufficient inventory to complete registration:\n${stockErrors.join('\n')}`,
       }, { status: 400 })
     }
+
+    const isBranchRegistration = registrationOwnerProfile?.dist_level === 'branch'
+    const registrationEconomics = packageProducts.reduce((totals, item) => {
+      const srp = Number(item.product.price || 0)
+      const resellerPrice = Number(item.product.reseller_price) || srp
+      const acquisitionPrice = isBranchRegistration
+        ? Number(item.product.branch_price) || Number(item.product.cost_price)
+        : Number(item.product.city_price) || Number(item.product.cost_price)
+      totals.customerPayment += srp * item.quantity
+      totals.resellerValue += resellerPrice * item.quantity
+      totals.acquisitionCost += acquisitionPrice * item.quantity
+      return totals
+    }, { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 })
+    const registrationPinAllocation = Math.max(
+      0,
+      registrationEconomics.customerPayment - registrationEconomics.resellerValue
+    )
+    const registrationProfit =
+      registrationEconomics.resellerValue - registrationEconomics.acquisitionCost
 
     const hashedPassword = await hashPassword(password)
 
@@ -579,6 +615,32 @@ export async function POST(req: NextRequest) {
         data:  { status: 'used', used_by: created.id, used_at: new Date() },
       })
 
+      await tx.registrationFinancial.create({
+        data: {
+          pin_id: pin.id,
+          city_dist_id: user.id,
+          reseller_id: created.id,
+          package_id: pin.package_id,
+          customer_payment: registrationEconomics.customerPayment,
+          product_acquisition_cost: registrationEconomics.acquisitionCost,
+          reseller_value: registrationEconomics.resellerValue,
+          pin_allocation: registrationPinAllocation,
+          registration_profit: registrationProfit,
+        },
+      })
+
+      for (const item of packageProducts) {
+        await tx.inventory.update({
+          where: {
+            owner_id_product_id: {
+              owner_id: user.id,
+              product_id: item.product_id,
+            },
+          },
+          data: { quantity: { decrement: item.quantity } },
+        })
+      }
+
       await tx.nameCapRegistry.upsert({
         where:  { normalized_name: normalizedName },
         update: { count: { increment: 1 } },
@@ -589,19 +651,6 @@ export async function POST(req: NextRequest) {
     })
 
     // ── POST-TRANSACTION ──
-
-    try {
-      await Promise.all(
-        packageProducts.map((pp) =>
-          prisma.inventory.updateMany({
-            where: { owner_id: user.id, product_id: pp.product_id },
-            data:  { quantity: { decrement: pp.quantity } },
-          })
-        )
-      )
-    } catch (e) {
-      console.error('[REGISTER] Inventory deduct error:', e)
-    }
 
     try {
       await updateAncestorCounts(actual_parent_node_id, actual_position as 'left' | 'right')
@@ -684,7 +733,17 @@ export async function POST(req: NextRequest) {
         products: {
           select: {
             quantity: true,
-            product: { select: { name: true, type: true, price: true, reseller_price: true } },
+            product: {
+              select: {
+                name: true,
+                type: true,
+                price: true,
+                cost_price: true,
+                city_price: true,
+                branch_price: true,
+                reseller_price: true,
+              },
+            },
           },
         },
       },
@@ -716,15 +775,31 @@ export async function POST(req: NextRequest) {
       message:  `${full_name} has been registered successfully.`,
       reseller: { full_name, username: username.trim().toLowerCase() },
       package:  packageWithProducts ? (() => {
-        const pinPrice      = Number(packageWithProducts.price)
-        const productsTotal = packageWithProducts.products.reduce((sum, p) => {
-          return sum + (Number(p.product.price || 0) * p.quantity)
+        const isBranch = registrationOwnerProfile?.dist_level === 'branch'
+        const productsTotal = packageWithProducts.products.reduce(
+          (sum, p) => sum + Number(p.product.price || 0) * p.quantity,
+          0
+        )
+        const resellerValue = packageWithProducts.products.reduce(
+          (sum, p) => sum + (Number(p.product.reseller_price) || Number(p.product.price)) * p.quantity,
+          0
+        )
+        const acquisitionCost = packageWithProducts.products.reduce((sum, p) => {
+          const unitCost = isBranch
+            ? Number(p.product.branch_price) || Number(p.product.cost_price)
+            : Number(p.product.city_price) || Number(p.product.cost_price)
+          return sum + unitCost * p.quantity
         }, 0)
+        const pinPrice = Math.max(0, productsTotal - resellerValue)
         return {
           name:           packageWithProducts.name,
           pin_price:      pinPrice,
+          configured_pin_price: Number(packageWithProducts.price),
           products_total: productsTotal,
-          total_price:    pinPrice + productsTotal,
+          reseller_value: resellerValue,
+          acquisition_cost: acquisitionCost,
+          registration_profit: resellerValue - acquisitionCost,
+          total_price:    productsTotal,
           products:       packageWithProducts.products.map((p) => ({
             name:     p.product.name,
             type:     p.product.type,

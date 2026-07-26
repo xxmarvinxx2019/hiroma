@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 // ── Generate unique PIN code ──
 function generatePinCode(packageName: string): string {
@@ -114,7 +115,17 @@ export async function POST(req: NextRequest) {
     // ── Get package details ──
     const pkg = await prisma.package.findUnique({
       where:  { id: package_id },
-      select: { name: true, price: true, is_active: true },
+      select: {
+        name: true,
+        price: true,
+        is_active: true,
+        products: {
+          select: {
+            quantity: true,
+            product: { select: { price: true, reseller_price: true } },
+          },
+        },
+      },
     })
 
     if (!pkg) {
@@ -139,7 +150,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const totalAmount = Number(pkg.price) * quantity
+    const unitPinPrice = pkg.products.length > 0
+      ? calculatePackageEconomics(pkg.products).pinAllocation
+      : Number(pkg.price)
+    const totalAmount = unitPinPrice * quantity
 
     // ── Create PINs + record as a sale order ──
     await prisma.$transaction(async (tx) => {
@@ -165,7 +179,7 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           total_amount: totalAmount,
           is_cross_purchase: false,
-          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${Number(pkg.price).toLocaleString()} each`,
+          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${unitPinPrice.toLocaleString()} each`,
         },
       })
 

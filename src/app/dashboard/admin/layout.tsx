@@ -14,6 +14,7 @@ const navItems = [
       { label: 'Dashboard', href: '/dashboard/admin', icon: '📊' },
       { label: 'Distributors', href: '/dashboard/admin/distributors', icon: '🗺️' },
       { label: 'Resellers',        href: '/dashboard/admin/resellers',          icon: '👥' },
+      { label: 'Top Performers',   href: '/dashboard/admin/top-performers',     icon: '🏆' },
     ],
   },
   {

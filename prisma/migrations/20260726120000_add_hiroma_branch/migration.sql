@@ -1,0 +1,3 @@
+-- The Hiroma Branch schema was introduced before this migration history was
+-- formalized and is already present in the shared database. This no-op file
+-- keeps Prisma migration history complete without recreating existing data.

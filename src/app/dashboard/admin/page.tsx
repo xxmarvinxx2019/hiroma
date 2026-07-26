@@ -9,6 +9,10 @@ interface Stats {
   netProfitToday: number
   pinRevenueToday: number
   pinRevenueYesterday: number
+  digitalCommissionExpenseToday: number
+  digitalCommissionExpenseYesterday: number
+  digitalNetToday: number
+  distributionGrossProfitToday: number
   orderRevenueToday: number
   totalUnitsSoldToday: number
   newResellersToday: number
@@ -23,9 +27,12 @@ interface Stats {
   totalPinsSold: number
   pinsSoldToday: number
   pinRevenue: number
+  digitalCommissionExpense: number
+  digitalNet: number
   orderRevenue: number
   orderCost: number
   orderProfit: number
+  distributionGrossProfit: number
   chainRevenue: number
   totalRevenue: number
   overallNetProfit: number
@@ -51,6 +58,7 @@ interface Stats {
   regionalSales:  { region_name: string; total: number; count: number }[]
   provinceSales:  { province_name: string; total: number; count: number }[]
   citySales:      { city_muni_name: string; total: number; count: number }[]
+  resellerSales:  { full_name: string; total: number; count: number }[]
 }
 
 interface RecentReseller {
@@ -191,10 +199,10 @@ export default function AdminDashboardPage() {
 
       {/* Row 1 — Today's KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Today's Sales"      value={fmt(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`PIN + Product · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
-        <StatCard label="Today's PIN Sales"  value={fmt(stats?.pinRevenueToday || 0)}      color="#C9A84C" icon="🔑" sub={`vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
+        <StatCard label="Today's Revenue"      value={fmt(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`Distribution + activated PIN · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
+        <StatCard label="Today's PIN Revenue"  value={fmt(stats?.pinRevenueToday || 0)}      color="#C9A84C" icon="🔑" sub={`Recognized on reseller activation · vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
         <StatCard label="Today's Product Sales" value={fmt(stats?.orderRevenueToday || 0)} color="#2563eb" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
-        <StatCard label="Today's Net Profit" value={fmt(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Revenue minus cost" />
+        <StatCard label="Overall Contribution" value={fmt(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Distribution gross profit + digital net" />
         <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#8b5cf6" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
       </div>
 
@@ -399,9 +407,10 @@ export default function AdminDashboardPage() {
           <p className="text-sm font-bold text-[#0D1B3E] mb-4">Today's Revenue Breakdown</p>
           <div className="space-y-3">
             {[
-              { label: 'PIN Sales',     value: stats?.pinRevenueToday || 0,   color: '#C9A84C', icon: '🔑' },
-              { label: 'Product Sales', value: stats?.orderRevenueToday || 0, color: '#2563eb', icon: '🧴' },
-              { label: 'Net Profit',    value: stats?.netProfitToday || 0,    color: '#1a7a4a', icon: '📈' },
+              { label: 'PIN Revenue', value: stats?.pinRevenueToday || 0, color: '#C9A84C', icon: '🔑' },
+              { label: 'MLM Commission Expense', value: stats?.digitalCommissionExpenseToday || 0, color: '#e05252', icon: '💸' },
+              { label: 'Digital Net', value: stats?.digitalNetToday || 0, color: '#1a7a4a', icon: '📈' },
+              { label: 'Distribution Gross Profit', value: stats?.distributionGrossProfitToday || 0, color: '#2563eb', icon: '🧴' },
             ].map(s => {
               const total = stats?.totalRevenueToday || 0
               const pct   = total > 0 ? Math.round((s.value / total) * 100) : 0
@@ -541,9 +550,12 @@ export default function AdminDashboardPage() {
 
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-              <p className="text-sm font-bold text-[#0D1B3E]">Top City Distributors</p>
-              <p className="text-xs text-gray-400 mt-0.5">By total sales (PIN + Products)</p>
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#0D1B3E]">Top City Distributors</p>
+                <p className="text-xs text-gray-400 mt-0.5">By completed sales made (PIN + Products)</p>
+              </div>
+              <Link href="/dashboard/admin/top-performers?type=city" className="text-[11px] text-[#C9A84C] hover:underline whitespace-nowrap">View All →</Link>
             </div>
             {(stats?.topCityDistsOverall || []).length === 0 ? (
               <div className="px-5 py-6 text-center text-gray-400 text-sm">No data yet</div>
@@ -587,16 +599,17 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Row 6 — Geographic */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {[
-          { title: 'Sales by Region',   items: stats?.regionalSales || [],  nameKey: 'region_name',   },
-          { title: 'Sales by Province', items: stats?.provinceSales || [],  nameKey: 'province_name', },
-          { title: 'Sales by City',     items: stats?.citySales || [],      nameKey: 'city_muni_name' },
-        ].map(({ title, items, nameKey }) => (
+          { title: 'Sales by Region',   items: stats?.regionalSales || [],  nameKey: 'region_name',   type: 'regional',   countLabel: 'dist.' },
+          { title: 'Sales by Province', items: stats?.provinceSales || [],  nameKey: 'province_name', type: 'provincial', countLabel: 'dist.' },
+          { title: 'Sales by City',     items: stats?.citySales || [],      nameKey: 'city_muni_name', type: 'city',       countLabel: 'dist.' },
+          { title: 'Reseller Income',   items: stats?.resellerSales || [],  nameKey: 'full_name',      type: 'reseller',   countLabel: 'commissions' },
+        ].map(({ title, items, nameKey, type, countLabel }) => (
           <div key={title} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-bold text-[#0D1B3E]">{title}</p>
-              <Link href="/dashboard/admin/distributors" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
+              <Link href={`/dashboard/admin/top-performers?type=${type}`} className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
             </div>
             {items.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">No data yet</p>
@@ -615,7 +628,7 @@ export default function AdminDashboardPage() {
                         </div>
                         <div className="text-right">
                           <p className="text-xs font-bold text-[#0D1B3E]">{fmt(r.total)}</p>
-                          <p className="text-[9px] text-gray-400">{r.count} dist.</p>
+                          <p className="text-[9px] text-gray-400">{r.count} {countLabel}</p>
                         </div>
                       </div>
                       <div className="w-full h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
