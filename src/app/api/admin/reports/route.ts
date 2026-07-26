@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
 
       // PIN sales breakdown
       pinSalesByPackage,
+      digitalCommissionExpense,
 
       // Product sales breakdown (period)
       productSalesItems,
@@ -129,7 +130,7 @@ export async function GET(req: NextRequest) {
       // Top products
       prisma.orderItem.groupBy({
         by:    ['product_id'],
-        where: { order: { status: 'delivered', created_at: periodFilter } },
+        where: { order: { status: 'delivered', seller_id: user.id, created_at: periodFilter } },
         _sum:  { quantity: true, subtotal: true },
         orderBy: { _sum: { quantity: 'desc' } },
         take: 10,
@@ -150,10 +151,58 @@ export async function GET(req: NextRequest) {
       }),
 
       // PIN sales breakdown by package (period)
-      prisma.pin.groupBy({
+      prisma.registrationFinancial.groupBy({
         by:    ['package_id'],
-        where: { status: { in: ['unused', 'used', 'expired'] }, created_at: periodFilter },
+        where: { created_at: periodFilter },
         _count: { id: true },
+        _sum: { pin_allocation: true, customer_payment: true },
+      }).catch(async (error) => {
+        console.warn('[ADMIN REPORTS] Registration ledger unavailable; using legacy PIN calculations.', error)
+        const pins = await prisma.pin.findMany({
+          where: { status: 'used', used_at: periodFilter },
+          select: {
+            package_id: true,
+            package: {
+              select: {
+                products: {
+                  select: {
+                    quantity: true,
+                    product: { select: { price: true, reseller_price: true } },
+                  },
+                },
+              },
+            },
+          },
+        })
+        const grouped = new Map<string, { count: number; pin: number; customer: number }>()
+        for (const pin of pins) {
+          const customer = pin.package.products.reduce(
+            (sum, item) => sum + Number(item.product.price || 0) * item.quantity,
+            0
+          )
+          const reseller = pin.package.products.reduce(
+            (sum, item) => sum + (Number(item.product.reseller_price) || Number(item.product.price)) * item.quantity,
+            0
+          )
+          const current = grouped.get(pin.package_id) || { count: 0, pin: 0, customer: 0 }
+          current.count += 1
+          current.pin += Math.max(0, customer - reseller)
+          current.customer += customer
+          grouped.set(pin.package_id, current)
+        }
+        return [...grouped.entries()].map(([package_id, row]) => ({
+          package_id,
+          _count: { id: row.count },
+          _sum: { pin_allocation: row.pin, customer_payment: row.customer },
+        }))
+      }),
+      prisma.commission.aggregate({
+        where: {
+          type: { in: ['direct_referral', 'binary_pairing', 'multilevel'] },
+          is_pair_overflow: false,
+          created_at: periodFilter,
+        },
+        _sum: { amount: true },
       }),
 
       // Product sales breakdown (period) — distributor orders
@@ -248,7 +297,7 @@ export async function GET(req: NextRequest) {
     const packageDetails = await prisma.package.findMany({
       where:  { id: { in: pinPackageIds } },
       select: {
-        id: true, name: true, price: true,
+        id: true, name: true,
         products: {
           select: {
             quantity: true,
@@ -262,12 +311,14 @@ export async function GET(req: NextRequest) {
     const pinSalesBreakdown = pinSalesByPackage.map((item) => {
       const pkg        = packageMap.get(item.package_id)
       const count      = Number(item._count.id || 0)
-      const pinPrice   = Number(pkg?.price || 0)
+      const revenue    = Number(item._sum.pin_allocation || 0)
+      const pinPrice   = count > 0 ? revenue / count : 0
       const productsValue = (pkg?.products || []).reduce((s: number, pp: any) => {
         return s + Number(pp.product?.price || 0) * pp.quantity
       }, 0)
-      const packageValue = pinPrice + productsValue  // total value per package sold
-      const revenue      = count * pinPrice              // PIN sales revenue = PIN price only
+      const packageValue = count > 0
+        ? Number(item._sum.customer_payment || 0) / count
+        : productsValue
       return {
         package_id:      item.package_id,
         package_name:    pkg?.name || 'Unknown',
@@ -281,13 +332,15 @@ export async function GET(req: NextRequest) {
 
     const totalPinRevenue     = pinSalesBreakdown.reduce((s, p) => s + p.revenue, 0)
     const totalPinsSoldPeriod = pinSalesBreakdown.reduce((s, p) => s + p.pins_sold, 0)
+    const totalDigitalCommissionExpense = Number(digitalCommissionExpense._sum.amount || 0)
+    const digitalNet = totalPinRevenue - totalDigitalCommissionExpense
 
     // ── Admin cost of goods ──
     const allSoldItems = await prisma.orderItem.findMany({
       where:  { order: { status: 'delivered', seller_id: user.id } },
       select: { quantity: true, subtotal: true, product: { select: { cost_price: true } } },
     })
-    const totalAdminRevenue = Number(adminSalesAll._sum.total_amount || 0)
+    const totalAdminRevenue = allSoldItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
     const totalAdminCost    = allSoldItems.reduce((s, i) => s + Number(i.product.cost_price || 0) * Number(i.quantity), 0)
     const totalAdminProfit  = totalAdminRevenue - totalAdminCost
     const totalUnitsSold    = allSoldItems.reduce((s, i) => s + i.quantity, 0)
@@ -298,7 +351,7 @@ export async function GET(req: NextRequest) {
     const totalProductProfit   = totalProductRevenue - totalProductCost
     const totalProductUnitsSold = productSalesBreakdown.reduce((s, p) => s + p.units_sold, 0)
     const overallRevenue       = totalProductRevenue + totalPinRevenue
-    const overallProfit        = totalProductProfit + totalPinRevenue // pins are pure revenue
+    const overallProfit        = totalProductProfit + digitalNet
 
     return NextResponse.json({
       report: {
@@ -331,7 +384,7 @@ export async function GET(req: NextRequest) {
           adminProfit:       totalAdminProfit,
           adminOrders:       Number(adminSalesAll._count.id   || 0),
           adminUnitsSold:    totalUnitsSold,
-          periodRevenue:     Number(adminSalesPeriod._sum.total_amount || 0),
+          periodRevenue:     totalProductRevenue,
           periodOrders:      Number(adminSalesPeriod._count.id         || 0),
           chainRevenue:      Number(allDeliveredOrders._sum.total_amount || 0),
           chainOrders:       Number(allDeliveredOrders._count.id         || 0),
@@ -358,7 +411,7 @@ export async function GET(req: NextRequest) {
         // ── NEW ──
         overview: {
           totalProductRevenue, totalProductCost, totalProductProfit, totalProductUnitsSold,
-          totalPinRevenue, totalPinsSoldPeriod,
+          totalPinRevenue, totalPinsSoldPeriod, totalDigitalCommissionExpense, digitalNet,
           overallRevenue, overallProfit,
         },
 
@@ -371,6 +424,8 @@ export async function GET(req: NextRequest) {
           breakdown:      pinSalesBreakdown,
           totalRevenue:   totalPinRevenue,
           totalPinsSold:  totalPinsSoldPeriod,
+          commissionExpense: totalDigitalCommissionExpense,
+          digitalNet,
         },
 
         charts: {

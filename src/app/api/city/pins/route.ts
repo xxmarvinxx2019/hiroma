@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 export async function GET(req: NextRequest) {
   try {
@@ -71,7 +72,16 @@ export async function GET(req: NextRequest) {
           created_at: true,
           used_at: true,
           package: {
-            select: { name: true, price: true },
+            select: {
+              name: true,
+              price: true,
+              products: {
+                select: {
+                  quantity: true,
+                  product: { select: { price: true, reseller_price: true } },
+                },
+              },
+            },
           },
           used_by_user: {
             select: { full_name: true, username: true },
@@ -94,7 +104,15 @@ export async function GET(req: NextRequest) {
     ])
 
     return NextResponse.json({
-      pins,
+      pins: pins.map((pin) => ({
+        ...pin,
+        package: {
+          name: pin.package.name,
+          price: pin.package.products.length > 0
+            ? calculatePackageEconomics(pin.package.products).pinAllocation
+            : Number(pin.package.price),
+        },
+      })),
       packages,
       meta: {
         total,

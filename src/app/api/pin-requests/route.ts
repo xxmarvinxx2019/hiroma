@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 // ── Generate unique PIN code ──
 function generatePinCode(packageName: string): string {
@@ -98,14 +99,28 @@ export async function POST(req: NextRequest) {
 
     const pkg = await prisma.package.findUnique({
       where:  { id: package_id },
-      select: { id: true, name: true, price: true, is_active: true },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        is_active: true,
+        products: {
+          select: {
+            quantity: true,
+            product: { select: { price: true, reseller_price: true } },
+          },
+        },
+      },
     })
 
     if (!pkg || !pkg.is_active) {
       return NextResponse.json({ error: 'Package not found or inactive.' }, { status: 400 })
     }
 
-    const total_amount = Number(pkg.price) * quantity
+    const unitPinPrice = pkg.products.length > 0
+      ? calculatePackageEconomics(pkg.products).pinAllocation
+      : Number(pkg.price)
+    const total_amount = unitPinPrice * quantity
 
     const request = await prisma.pinRequest.create({
       data: {

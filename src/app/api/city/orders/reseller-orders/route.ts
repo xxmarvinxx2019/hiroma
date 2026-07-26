@@ -227,10 +227,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { reseller_id, customer_name, order_type, notes, items } = await req.json()
+    const { reseller_id, customer_name, order_type, notes, cash_received, items } = await req.json()
     const isNonMemberSale = !reseller_id
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
+    if (items.some((item: { product_id?: string; quantity?: number }) =>
+      !item.product_id || !Number.isInteger(item.quantity) || Number(item.quantity) <= 0
+    )) {
+      return NextResponse.json({ error: 'Each order item must have a valid product and positive whole-number quantity.' }, { status: 400 })
+    }
+    const uniqueProductIds = new Set(items.map((item: { product_id: string }) => item.product_id))
+    if (uniqueProductIds.size !== items.length) {
+      return NextResponse.json({ error: 'Duplicate products are not allowed in one order.' }, { status: 400 })
+    }
     if (!['online', 'offline'].includes(order_type))
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
 
@@ -265,6 +274,15 @@ export async function POST(req: NextRequest) {
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
     })
+    const cashReceived = Number(cash_received)
+    const totalCents = Math.round(total_amount * 100)
+    const cashReceivedCents = Math.round(cashReceived * 100)
+    if (!Number.isFinite(cashReceived) || cashReceived < 0 || cashReceivedCents < totalCents) {
+      return NextResponse.json({
+        error: 'Cash received must be equal to or greater than the order total.',
+      }, { status: 400 })
+    }
+    const changeAmount = (cashReceivedCents - totalCents) / 100
 
     // Create order with city dist as seller, reseller as buyer
     // Mark as delivered immediately since city dist is handing it over in person
@@ -301,6 +319,9 @@ export async function POST(req: NextRequest) {
           is_cross_purchase: false,
           is_non_member_sale: isNonMemberSale,
           customer_name:     isNonMemberSale ? String(customer_name || '').trim() || 'Walk-in Customer' : null,
+          payment_method:    'cash',
+          payment_status:    'paid',
+          payment_reference: `Cash received: ${cashReceived.toFixed(2)}; Change: ${changeAmount.toFixed(2)}`,
           notes:             notes?.trim() || null,
           items:             { create: orderItems },
         },
@@ -405,6 +426,10 @@ export async function POST(req: NextRequest) {
         buyer_id: reseller_id || null,
         customer_name: reseller?.full_name || String(customer_name || '').trim() || 'Walk-in Customer',
         pricing: isNonMemberSale ? 'srp' : 'reseller_price',
+        payment_method: 'cash',
+        payment_status: 'paid',
+        cash_received: cashReceived,
+        change_amount: changeAmount,
         owner_id: user.id,
         performed_by_staff: Boolean(user.is_staff),
       },
@@ -417,6 +442,11 @@ export async function POST(req: NextRequest) {
       success: true,
       message: `Order created for ${reseller?.full_name || String(customer_name || '').trim() || 'Walk-in Customer'} and marked as delivered.`,
       order,
+      payment: {
+        status: 'paid',
+        cash_received: cashReceived,
+        change_amount: changeAmount,
+      },
     })
   } catch (error) {
     console.error('[CITY RESELLER ORDER POST ERROR]', error)

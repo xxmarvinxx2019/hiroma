@@ -17,6 +17,7 @@ const navItems = [
     items: [
       { label: 'Dashboard', href: '/dashboard/city', icon: '📊' },
       { label: 'Resellers', href: '/dashboard/city/resellers', icon: '👥' },
+      { label: 'Top Performers', href: '/dashboard/city/top-performers', icon: '🏆' },
     ],
   },
   {
@@ -25,6 +26,7 @@ const navItems = [
       { label: 'PINs', href: '/dashboard/city/pins', icon: '🔑' },
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
+      { label: 'Reports', href: '/dashboard/city/reports', icon: '📈' },
       { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑' },
     ],
@@ -36,9 +38,11 @@ const staffNavItem = { label: 'Staff', href: '/dashboard/city/staff', icon: '�
 const navPermission: Record<string, string> = {
   '/dashboard/city': 'dashboard',
   '/dashboard/city/resellers': 'resellers',
+  '/dashboard/city/top-performers': 'resellers',
   '/dashboard/city/pins': 'pins',
   '/dashboard/city/inventory': 'inventory',
   '/dashboard/city/orders': 'orders',
+  '/dashboard/city/reports': 'orders',
   '/dashboard/city/payment-methods': 'payment_methods',
   '/dashboard/city/pin-requests': 'pin_requests',
 }

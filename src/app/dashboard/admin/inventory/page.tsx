@@ -21,7 +21,21 @@ interface InventoryItem {
   }
   product: {
     id: string; name: string; type: string
-    cost_price: number; regional_price: number; provincial_price: number; city_price: number; branch_price: number
+    price: number; cost_price: number; regional_price: number; provincial_price: number
+    city_price: number; branch_price: number; reseller_price: number
+  }
+  movement: {
+    quantity: number | null
+    reference_value: number
+    sale_value: number
+    admin_profit: number
+    is_sale: boolean
+    admin_stock_before: number | null
+    admin_stock_after: number | null
+    recipient_stock_before: number | null
+    recipient_stock_after: number
+    created_at: string | null
+    is_legacy: boolean
   }
 }
 
@@ -36,7 +50,7 @@ interface Reseller {
 
 interface ProductStock {
   id: string; name: string; type: string
-  cost_price: number; regional_price: number; provincial_price: number
+  price: number; cost_price: number; regional_price: number; provincial_price: number
   city_price: number; branch_price: number; reseller_price: number
   total_distributed: number; is_low_stock: boolean; admin_stock: number
 }
@@ -117,6 +131,7 @@ function AddProductionModal({
     setSubmitting(true); setError('')
     const res = await fetch('/api/admin/inventory', {
       method:  'PUT',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         notes,
@@ -129,7 +144,11 @@ function AddProductionModal({
       setSuccess(data.message || 'Stock added successfully.')
       setTimeout(() => { onSuccess(); onClose() }, 1500)
     } else {
-      setError(data.error || 'Something went wrong.')
+      setError(
+        res.status === 401
+          ? 'Your admin session has expired. Please sign in again, then retry.'
+          : data.error || 'Something went wrong.'
+      )
     }
   }
 
@@ -255,6 +274,7 @@ function AssignStockModal({
 
   const selectedDist = distributors.find((d) => d.id === ownerId) || recipients.find((r) => r.id === ownerId)
   const selectedLevel = selectedDist?.distributor_profile?.dist_level === 'branch' ? 'branch' : selectedDist?.role
+  const isBranchTransfer = selectedLevel === 'branch'
   const priceKey     = selectedLevel ? PRICE_KEY[selectedLevel] : null
   const unitPrice = (product: ProductStock) => {
     if (!priceKey) return 0
@@ -308,6 +328,7 @@ function AssignStockModal({
 
     const res = await fetch('/api/admin/inventory', {
       method:  'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         owner_id: ownerId,
@@ -331,7 +352,11 @@ function AssignStockModal({
         <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Assign / Sell Stock</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Select distributor or reseller — priced at their level, recorded as a delivered order</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {isBranchTransfer
+                ? 'Hiroma Branch transfer — moves inventory only and does not record a sale'
+                : 'Select distributor or reseller — priced at their level and recorded as a delivered order'}
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
         </div>
@@ -479,7 +504,7 @@ function AssignStockModal({
             </div>
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
               <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]">
-                <span>Total</span>
+                <span>{isBranchTransfer ? 'Reference Value' : 'Total'}</span>
                 <span>₱{total.toLocaleString()}</span>
               </div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -489,7 +514,9 @@ function AssignStockModal({
               {success && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-2 py-1.5 rounded-lg">{success}</p>}
               <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || !ownerId}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
-                {submitting ? 'Assigning...' : 'Assign Stock & Record Sale'}
+                {submitting
+                  ? (isBranchTransfer ? 'Transferring...' : 'Assigning...')
+                  : (isBranchTransfer ? 'Transfer Stock (No Sale)' : 'Assign Stock & Record Sale')}
               </button>
             </div>
           </div>
@@ -590,7 +617,7 @@ export default function AdminInventoryPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Inventory Management</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Assign stock to distributors — each assignment is recorded as a sale</p>
+          <p className="text-sm text-gray-400 mt-0.5">Assign stock to distributors and resellers — Hiroma Branch assignments are internal no-sale transfers</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowProduction(true)}
@@ -639,7 +666,7 @@ export default function AdminInventoryPage() {
 
       {/* ── PRODUCT STOCK OVERVIEW ── */}
       {tab === 'stock' && (
-        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-x-auto">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[#0D1B3E]/8 gap-4">
             <div>
               <p className="text-sm font-semibold text-[#0D1B3E]">Product Stock Summary</p>
@@ -654,8 +681,8 @@ export default function AdminInventoryPage() {
               className="bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400 w-60"
             />
           </div>
-          <div className="grid grid-cols-8 px-4 py-2 bg-[#F0F2F8]">
-            {['Product', 'Cost', 'Regional ₱', 'Provincial ₱', 'City ₱', 'Reseller ₱', 'Admin Stock', 'Distributed'].map((h) => (
+          <div className="grid min-w-[1180px] grid-cols-10 px-4 py-2 bg-[#F0F2F8]">
+            {['Product', 'Cost', 'Regional ₱', 'Provincial ₱', 'City ₱', 'Branch ₱', 'Reseller ₱', 'SRP ₱', 'Admin Stock', 'Distributed'].map((h) => (
               <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
             ))}
           </div>
@@ -664,7 +691,7 @@ export default function AdminInventoryPage() {
           ) : (
             productStock.map((p) => (
               <div key={p.id}
-                className={`grid grid-cols-8 px-4 py-3 border-b border-[#0D1B3E]/5 items-center transition-colors ${
+                className={`grid min-w-[1180px] grid-cols-10 px-4 py-3 border-b border-[#0D1B3E]/5 items-center transition-colors ${
                   p.is_low_stock ? 'bg-[#fdecea]/30' : 'hover:bg-[#F0F2F8]/50'
                 }`}>
                 <div>
@@ -682,7 +709,14 @@ export default function AdminInventoryPage() {
                 <p className="text-xs text-[#2563eb]">₱{Number(p.regional_price).toLocaleString()}</p>
                 <p className="text-xs text-[#9a6f1e]">₱{Number(p.provincial_price).toLocaleString()}</p>
                 <p className="text-xs text-[#1a7a4a]">₱{Number(p.city_price).toLocaleString()}</p>
+                <div>
+                  <p className="text-xs text-[#8b5cf6]">₱{Number(p.branch_price).toLocaleString()}</p>
+                  {Number(p.branch_price) <= 0 && (
+                    <p className="text-[9px] text-gray-400">uses cost ₱{Number(p.cost_price).toLocaleString()}</p>
+                  )}
+                </div>
                 <p className="text-xs text-[#C9A84C]">₱{Number(p.reseller_price).toLocaleString()}</p>
+                <p className="text-xs text-[#0D1B3E]">₱{Number(p.price).toLocaleString()}</p>
                 <div>
                   <p className={`text-sm font-semibold ${
                     p.admin_stock === 0 ? 'text-[#e05252]' : p.admin_stock <= 10 ? 'text-[#9a6f1e]' : 'text-[#1a7a4a]'
@@ -708,7 +742,7 @@ export default function AdminInventoryPage() {
 
       {/* ── DISTRIBUTOR INVENTORY ── */}
       {tab === 'distributed' && (
-        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-x-auto">
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
             <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}
@@ -736,8 +770,8 @@ export default function AdminInventoryPage() {
           </div>
 
           {/* Header */}
-          <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
-            {['Distributor', 'Product', 'Stock', 'Alert Threshold', 'Action'].map((h) => (
+          <div className="grid min-w-[1380px] grid-cols-[180px_180px_100px_110px_130px_120px_150px_170px_110px] px-4 py-2 bg-[#F0F2F8]">
+            {['Distributor', 'Product', 'Current Stock', 'Last Transfer', 'Sale / Value', 'Admin Net', 'Admin Stock', 'Recipient Stock', 'Action'].map((h) => (
               <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
             ))}
           </div>
@@ -756,14 +790,16 @@ export default function AdminInventoryPage() {
               const ownerLevel = displayLevel(item.owner)
               const price  = ownerLevel === 'branch'
                 ? Number(item.product.branch_price) || Number(item.product.cost_price)
-                : item.owner.role === 'regional'
+                : ownerLevel === 'regional'
                 ? item.product.regional_price
-                : item.owner.role === 'provincial'
+                : ownerLevel === 'provincial'
                 ? item.product.provincial_price
+                : ownerLevel === 'reseller'
+                ? item.product.reseller_price
                 : item.product.city_price
               return (
                 <div key={item.id}
-                  className={`grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 items-center ${isLow ? 'bg-[#fdecea]/20' : 'hover:bg-[#F0F2F8]/50'}`}>
+                  className={`grid min-w-[1380px] grid-cols-[180px_180px_100px_110px_130px_120px_150px_170px_110px] px-4 py-3 border-b border-[#0D1B3E]/5 items-center ${isLow ? 'bg-[#fdecea]/20' : 'hover:bg-[#F0F2F8]/50'}`}>
                   <div>
                     <p className="text-xs font-medium text-[#0D1B3E]">{item.owner.full_name}</p>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLE_COLOR[item.owner.role] || ''}`}>
@@ -781,25 +817,55 @@ export default function AdminInventoryPage() {
                     {isLow && <p className="text-[10px] text-[#e05252] font-medium">⚠ Restock needed</p>}
                   </div>
                   <div>
+                    <p className="text-sm font-semibold text-[#0D1B3E]">
+                      {item.movement.quantity == null ? '—' : item.movement.quantity.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] text-gray-400">{item.movement.is_legacy ? 'Legacy record' : 'latest movement'}</p>
+                  </div>
+                  <div>
+                    <p className={`text-sm font-semibold ${item.movement.is_sale ? 'text-[#1a7a4a]' : 'text-gray-400'}`}>
+                      ₱{item.movement.sale_value.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] text-gray-400">
+                      {item.movement.is_sale ? `value ₱${item.movement.reference_value.toLocaleString()}` : `No sale · ref ₱${item.movement.reference_value.toLocaleString()}`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className={`text-sm font-semibold ${item.movement.admin_profit > 0 ? 'text-[#1a7a4a]' : 'text-gray-400'}`}>
+                      ₱{item.movement.admin_profit.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] text-gray-400">{item.movement.is_sale ? 'price − cost' : 'No income'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#0D1B3E]">
+                      {item.movement.admin_stock_before == null ? '—' : `${item.movement.admin_stock_before.toLocaleString()} → ${item.movement.admin_stock_after?.toLocaleString()}`}
+                    </p>
+                    <p className="text-[10px] text-gray-400">before → after</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#0D1B3E]">
+                      {item.movement.recipient_stock_before == null ? `— → ${item.quantity.toLocaleString()}` : `${item.movement.recipient_stock_before.toLocaleString()} → ${item.movement.recipient_stock_after.toLocaleString()}`}
+                    </p>
+                    <p className="text-[10px] text-gray-400">before → after</p>
+                  </div>
+                  <div>
                     {isEdit ? (
                       <div className="flex items-center gap-1">
                         <input type="number" value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)}
-                          className="w-16 bg-[#F0F2F8] border border-[#C9A84C] rounded px-2 py-1 text-xs outline-none" />
+                          className="w-14 bg-[#F0F2F8] border border-[#C9A84C] rounded px-2 py-1 text-xs outline-none" />
                         <button onClick={() => handleSaveThreshold(item.id)} disabled={saving}
                           className="text-xs text-white bg-[#0D1B3E] px-2 py-1 rounded disabled:opacity-50">
                           {saving ? '...' : 'Save'}
                         </button>
-                        <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 px-1">✕</button>
                       </div>
                     ) : (
-                      <p className="text-xs text-gray-400">{item.low_stock_threshold} units</p>
+                      <button
+                        onClick={() => { setEditingId(item.id); setEditThreshold(String(item.low_stock_threshold)) }}
+                        className="text-xs text-[#C9A84C] hover:underline">
+                        Alert: {item.low_stock_threshold}
+                      </button>
                     )}
                   </div>
-                  <button
-                    onClick={() => { setEditingId(item.id); setEditThreshold(String(item.low_stock_threshold)) }}
-                    className="text-xs text-[#C9A84C] hover:underline">
-                    Set Alert
-                  </button>
                 </div>
               )
             })

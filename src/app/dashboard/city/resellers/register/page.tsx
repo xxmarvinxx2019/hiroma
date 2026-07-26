@@ -691,15 +691,23 @@ function CityRegisterResellerPageInner() {
                   <div className="bg-[#F0F2F8] rounded-xl px-4 py-3 space-y-2">
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-2">Price Breakdown</p>
                     <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">PIN Price</span>
+                      <span className="text-gray-500">PIN Allocation (included)</span>
                       <span className="font-medium text-[#0D1B3E]">₱{Number(successData.package.pin_price).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">Products Value (SRP)</span>
+                      <span className="text-gray-500">Customer Payment (Products SRP)</span>
                       <span className="font-medium text-[#0D1B3E]">₱{Number(successData.package.products_total).toLocaleString()}</span>
                     </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">Product Acquisition Cost</span>
+                      <span className="font-medium text-[#0D1B3E]">₱{Number(successData.package.acquisition_cost).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">Registration Profit</span>
+                      <span className="font-semibold text-[#1a7a4a]">₱{Number(successData.package.registration_profit).toLocaleString()}</span>
+                    </div>
                     <div className="flex justify-between text-xs pt-2 border-t border-[#0D1B3E]/8 font-semibold">
-                      <span className="text-[#0D1B3E]">Total Package Value</span>
+                      <span className="text-[#0D1B3E]">Total Amount Paid</span>
                       <span className="text-[#C9A84C]">₱{Number(successData.package.total_price).toLocaleString()}</span>
                     </div>
                   </div>

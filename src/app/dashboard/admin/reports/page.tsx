@@ -43,10 +43,11 @@ interface ReportData {
   overview: {
     totalProductRevenue: number; totalProductCost: number; totalProductProfit: number; totalProductUnitsSold: number
     totalPinRevenue: number; totalPinsSoldPeriod: number
+    totalDigitalCommissionExpense: number; digitalNet: number
     overallRevenue: number; overallProfit: number
   }
   productSales: { breakdown: ProductSale[]; resellerOrders: { product_id: string; name: string; type: string; units_sold: number; revenue: number }[] }
-  pinSales: { breakdown: PinSale[]; totalRevenue: number; totalPinsSold: number }
+  pinSales: { breakdown: PinSale[]; totalRevenue: number; totalPinsSold: number; commissionExpense: number; digitalNet: number }
   charts: { dailySales: DailySale[]; topProducts: TopProduct[] }
 }
 
@@ -342,12 +343,13 @@ export default function AdminReportsPage() {
 
           {/* Overall sales summary */}
           <div>
-            <SectionTitle title="Overall Sales Summary" subtitle="Product sales + PIN sales combined for the period" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard label="Total Revenue"   icon="💰" value={fmt(overview.overallRevenue)}          accent="#1a7a4a" sub="PIN + Product combined" />
-              <StatCard label="Total Profit"    icon="📈" value={fmt(overview.overallProfit)}           accent="#2563eb" sub={`${Math.round(overview.overallRevenue > 0 ? (overview.overallProfit/overview.overallRevenue)*100 : 0)}% margin`} />
-              <StatCard label="Product Revenue" icon="🧴" value={fmt(overview.totalProductRevenue)}     accent="#0D1B3E" sub={`${fmtN(overview.totalProductUnitsSold)} units sold`} />
-              <StatCard label="PIN Revenue"     icon="🔑" value={fmt(overview.totalPinRevenue)}         accent="#C9A84C" sub={`${fmtN(overview.totalPinsSoldPeriod)} PINs sold`} />
+            <SectionTitle title="Company Contribution Summary" subtitle="Distribution gross profit + digital net; analytics only, not a new accounting entry" />
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <StatCard label="Distribution Gross Profit" icon="🧴" value={fmt(overview.totalProductProfit)} accent="#0D1B3E" sub={`${fmtN(overview.totalProductUnitsSold)} units sold by Admin`} />
+              <StatCard label="PIN Revenue" icon="🔑" value={fmt(overview.totalPinRevenue)} accent="#C9A84C" sub={`${fmtN(overview.totalPinsSoldPeriod)} activated PINs`} />
+              <StatCard label="MLM Expense" icon="💸" value={fmt(overview.totalDigitalCommissionExpense)} accent="#e05252" sub="Direct, binary, and multilevel paid" />
+              <StatCard label="Digital Net" icon="📈" value={fmt(overview.digitalNet)} accent="#2563eb" sub="PIN revenue minus MLM expense" />
+              <StatCard label="Overall Contribution" icon="💰" value={fmt(overview.overallProfit)} accent="#1a7a4a" sub="Analytics only" />
             </div>
           </div>
 
@@ -496,10 +498,11 @@ export default function AdminReportsPage() {
         <div className="space-y-6">
 
           {/* Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <StatCard label="Total PIN Revenue" value={fmt(pinSales.totalRevenue)}  accent="#0D1B3E" />
+            <StatCard label="MLM Expense" value={fmt(pinSales.commissionExpense)} accent="#e05252" />
+            <StatCard label="Digital Net" value={fmt(pinSales.digitalNet)} accent="#1a7a4a" />
             <StatCard label="PINs Sold (Period)" value={fmtN(pinSales.totalPinsSold)} accent="#C9A84C" />
-            <StatCard label="Total Generated"   value={fmtN(catalog.totalPinsGenerated)} accent="#0D1B3E" />
             <StatCard label="Unused PINs"       value={fmtN(catalog.unusedPins)}     accent="#9a6f1e" sub={`${fmtN(catalog.usedPins)} used`} />
           </div>
 
