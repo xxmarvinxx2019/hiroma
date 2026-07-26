@@ -224,49 +224,60 @@ export async function POST(req: NextRequest) {
       }))
     } catch (e) { console.error('[ADMIN REGISTER] Ancestor count error:', e) }
 
-    // Direct referral bonus
-    if (!overflowToHiroma && !isHiromaNode) {
+    // Direct referral bonus — fires for everyone, overflow goes to Hiroma if cap exceeded
+    if (!isHiromaNode) {
       try {
         const today   = new Date(); today.setHours(0, 0, 0, 0)
         const isToday = referrerProfile?.last_referral_date ? new Date(referrerProfile.last_referral_date) >= today : false
-        await prisma.resellerProfile.update({
-          where: { user_id: referrer.id },
-          data:  { daily_referral_count: isToday ? { increment: 1 } : 1, last_referral_date: new Date() },
-        })
+
         const referrerBonus = Number(referrerProfile?.package?.direct_referral_bonus || 0)
-        // Get referred reseller's package bonus
         const referredPkg   = await prisma.package.findUnique({
           where:  { id: pin.package_id },
           select: { direct_referral_bonus: true },
         })
         const referredBonus = Number(referredPkg?.direct_referral_bonus || 0)
+        const earned        = Math.min(referrerBonus, referredBonus)
+        const overflow      = Math.max(0, referredBonus - referrerBonus)
+        const hiromaUser    = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
 
-        // Referrer earns MIN(referrer bonus, referred bonus)
-        const earned   = Math.min(referrerBonus, referredBonus)
-        // Overflow = MAX(0, referrer bonus - referred bonus) → Hiroma
-        const overflow = Math.max(0, referredBonus - referrerBonus)
-
-        const hiromaUser = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
-
-        const bonusOps: Promise<any>[] = []
-        if (earned > 0) {
-          bonusOps.push(
-            prisma.commission.create({ data: { user_id: referrer.id, type: 'direct_referral', amount: earned, source_user_id: newUser.id, is_pair_overflow: false } }),
-            prisma.wallet.update({ where: { user_id: referrer.id }, data: { balance: { increment: earned }, total_earned: { increment: earned } } })
-          )
-        }
-        if (overflow > 0 && hiromaUser) {
-          bonusOps.push(
-            prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'direct_referral', amount: overflow, source_user_id: newUser.id, is_pair_overflow: true, overflow_to: hiromaUser.id } }),
-            prisma.wallet.upsert({
+        if (overflowToHiroma) {
+          // Daily cap exceeded — entire bonus goes to Hiroma, source = referrer
+          const totalBonus = earned
+          if (totalBonus > 0 && hiromaUser) {
+            await prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'direct_referral', amount: totalBonus, source_user_id: referrer.id, is_pair_overflow: true, overflow_to: hiromaUser.id } })
+            await prisma.wallet.upsert({
               where:  { user_id: hiromaUser.id },
-              update: { balance: { increment: overflow }, total_earned: { increment: overflow } },
-              create: { user_id: hiromaUser.id, balance: overflow, total_earned: overflow, total_withdrawn: 0 },
+              update: { balance: { increment: totalBonus }, total_earned: { increment: totalBonus } },
+              create: { user_id: hiromaUser.id, balance: totalBonus, total_earned: totalBonus, total_withdrawn: 0 },
             })
-          )
+          }
+        } else {
+          // Normal — update daily count, credit referrer
+          await prisma.resellerProfile.update({
+            where: { user_id: referrer.id },
+            data:  { daily_referral_count: isToday ? { increment: 1 } : 1, last_referral_date: new Date() },
+          })
+
+          const bonusOps: Promise<any>[] = []
+          if (earned > 0) {
+            bonusOps.push(
+              prisma.commission.create({ data: { user_id: referrer.id, type: 'direct_referral', amount: earned, source_user_id: newUser.id, is_pair_overflow: false } }),
+              prisma.wallet.update({ where: { user_id: referrer.id }, data: { balance: { increment: earned }, total_earned: { increment: earned } } })
+            )
+          }
+          if (overflow > 0 && hiromaUser) {
+            bonusOps.push(
+              prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'direct_referral', amount: overflow, source_user_id: newUser.id, is_pair_overflow: true, overflow_to: hiromaUser.id } }),
+              prisma.wallet.upsert({
+                where:  { user_id: hiromaUser.id },
+                update: { balance: { increment: overflow }, total_earned: { increment: overflow } },
+                create: { user_id: hiromaUser.id, balance: overflow, total_earned: overflow, total_withdrawn: 0 },
+              })
+            )
+          }
+          await Promise.all(bonusOps)
         }
-        await Promise.all(bonusOps)
-      } catch (e) { console.error('[ADMIN REGISTER] Referral bonus error:', e) }
+      } catch (e) { console.error('[ADMIN REGISTER] Direct referral error:', e) }
     }
 
     // Binary pairing

@@ -17,14 +17,19 @@ export async function GET(req: NextRequest) {
     const page        = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize    = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
 
+    const validLevels = ['regional', 'provincial', 'city']
+
     const levels = parentLevel
-      ? parentLevel.split(',').filter((l) => ['regional', 'provincial', 'city'].includes(l))
-      : level !== 'all'
+      ? parentLevel.split(',').filter((l) => validLevels.includes(l))
+      : level !== 'all' && validLevels.includes(level)
         ? [level]
-        : ['regional', 'provincial', 'city']
+        : validLevels
+
+    const safeLevels = levels.length > 0 ? levels : validLevels
 
     const where: any = {
-      role: { in: levels },
+      role: { in: safeLevels },
+      distributor_profile: { dist_level: { in: safeLevels as any } },
       ...(search && {
         OR: [
           { full_name: { contains: search, mode: 'insensitive' } },
@@ -86,6 +91,23 @@ export async function GET(req: NextRequest) {
       prisma.user.count({ where: { role: 'city' } }),
     ])
 
+    // Fetch sales total per distributor via raw SQL
+    const distIds = distributors.map(d => d.id)
+    const salesRaw = distIds.length > 0
+      ? await prisma.$queryRaw<{ seller_id: string; total: number }[]>`
+          SELECT seller_id::text, COALESCE(SUM(total_amount), 0)::float AS total
+          FROM orders
+          WHERE seller_id::text = ANY(${distIds}::text[]) AND status = 'delivered'
+          GROUP BY seller_id
+        `
+      : []
+    const salesMap = new Map(salesRaw.map(s => [s.seller_id, Number(s.total)]))
+
+    const distributorsWithSales = distributors.map(d => ({
+      ...d,
+      sales_total: salesMap.get(d.id) || 0,
+    }))
+
     // Include admin as a parent option (fallback)
     const adminUser = await prisma.user.findFirst({
       where:  { role: 'admin' },
@@ -93,7 +115,7 @@ export async function GET(req: NextRequest) {
     })
 
     return NextResponse.json({
-      distributors,
+      distributors: distributorsWithSales,
       adminUser,
       totals: { regional: totalRegional, provincial: totalProvincial, city: totalCity },
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
