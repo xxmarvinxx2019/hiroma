@@ -24,6 +24,7 @@ interface Distributor {
   address: string | null
   status: string
   created_at: string
+  sales_total: number
   distributor_profile: {
     id:            string
     dist_level:    string
@@ -451,8 +452,8 @@ export default function DistributorsPage() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-6 px-4 py-2 bg-[#F0F2F8]">
-          {['Distributor', 'Level', 'Coverage area', 'Status', 'Registered', 'Parent'].map((h) => (
+        <div className="grid grid-cols-7 px-4 py-2 bg-[#F0F2F8]">
+          {['Distributor', 'Level', 'Coverage area', 'Total Sales', 'Status', 'Registered', 'Actions'].map((h) => (
             <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">
               {h}
             </p>
@@ -473,7 +474,7 @@ export default function DistributorsPage() {
           filtered.map((dist) => (
             <div
               key={dist.id}
-              className="grid grid-cols-6 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
+              className="grid grid-cols-7 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors items-center"
             >
               <div>
                 <p className="text-xs font-medium text-[#0D1B3E]">{dist.full_name}</p>
@@ -488,6 +489,10 @@ export default function DistributorsPage() {
               <p className="text-xs text-gray-500">
                 {dist.distributor_profile?.coverage_area || '—'}
               </p>
+              <div>
+                <p className="text-xs font-semibold text-[#1a7a4a]">₱{Number(dist.sales_total || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-[10px] text-gray-400">total sales</p>
+              </div>
               <span>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   dist.status === 'active'

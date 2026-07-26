@@ -378,12 +378,16 @@ export async function POST(req: NextRequest) {
 
     const {
       full_name, username, email, mobile, password, address,
+      birthday, birthplace,
       pin_id, referrer_username, actual_parent_node_id, actual_position,
     } = await req.json()
 
     if (!full_name || !username || !mobile || !password || !pin_id ||
         !referrer_username || !actual_parent_node_id || !actual_position) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
+    }
+    if (!birthday || !birthplace) {
+      return NextResponse.json({ error: 'Date of birth and place of birth are required.' }, { status: 400 })
     }
 
     if (!['left', 'right'].includes(actual_position)) {
@@ -444,10 +448,24 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedName = full_name.trim().toLowerCase()
-    const nameCap = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
-    if (nameCap && nameCap.count >= nameCap.max_allowed) {
+
+    // Check birthday + birthplace — same person counts toward 7-account limit
+    const birthdayStr    = new Date(birthday).toISOString().slice(0, 10)
+    const birthInfoRaw   = await prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(*)::int AS count FROM users
+      WHERE birthday::text = ${birthdayStr}
+        AND LOWER(TRIM(birthplace)) = ${birthplace.trim().toLowerCase()}
+        AND role = 'reseller'
+        AND status != 'inactive'
+    `
+    const birthInfoCount  = Number(birthInfoRaw[0]?.count || 0)
+    const nameCap         = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
+    const effectiveCount  = Math.max(nameCap?.count || 0, birthInfoCount)
+    const maxAllowed      = nameCap?.max_allowed || 7
+
+    if (effectiveCount >= maxAllowed) {
       return NextResponse.json({
-        error: `Maximum accounts (${nameCap.max_allowed}) reached for the name "${full_name}".`,
+        error: `Maximum accounts (${maxAllowed}) reached for this person.`,
       }, { status: 400 })
     }
 
@@ -518,6 +536,14 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      // Save birthday + birthplace via raw SQL
+      if (birthday && birthplace) {
+        await tx.$executeRaw`
+          UPDATE users SET birthday = ${new Date(birthday).toISOString().slice(0, 10)}::date, birthplace = ${birthplace.trim()}
+          WHERE id::text = ${created.id}
+        `
+      }
+
       await tx.resellerProfile.create({
         data: {
           user_id:              created.id,
@@ -583,29 +609,49 @@ export async function POST(req: NextRequest) {
       console.error('[REGISTER] Ancestor count error:', e)
     }
 
-    // Direct referral bonus — only if NOT overflow and NOT hiroma
-    if (!overflowToHiroma && !isHiromaNode) {
+    // Direct referral bonus — fires for everyone, but overflow goes to Hiroma if cap exceeded
+    if (!isHiromaNode) {
       try {
         const today   = new Date(); today.setHours(0, 0, 0, 0)
         const isToday = referrerProfile?.last_referral_date
           ? new Date(referrerProfile.last_referral_date) >= today : false
 
-        await prisma.resellerProfile.update({
-          where: { user_id: referrer.id },
-          data:  {
-            daily_referral_count: isToday ? { increment: 1 } : 1,
-            last_referral_date:   new Date(),
-          },
-        })
-
         const referrerBonus = Number(referrerProfile?.package?.direct_referral_bonus || 0)
-        // Get referred reseller's package bonus
-        const referredPkg    = await prisma.package.findUnique({
+        const referredPkg   = await prisma.package.findUnique({
           where:  { id: pin.package_id },
           select: { direct_referral_bonus: true },
         })
-        const referredBonus  = Number(referredPkg?.direct_referral_bonus || 0)
-        await creditDirectReferralBonus(referrer.id, newUser.id, referrerBonus, referredBonus)
+        const referredBonus = Number(referredPkg?.direct_referral_bonus || 0)
+
+        if (overflowToHiroma) {
+          // Daily cap exceeded — entire referral bonus goes to Hiroma
+          // source_user_id = referrer (who exceeded cap), so flushout page shows correct person
+          const hiromaUser = await prisma.user.findFirst({
+            where:  { username: 'hiroma' },
+            select: { id: true },
+          })
+          const totalBonus = Math.min(referrerBonus, referredBonus)
+          if (totalBonus > 0 && hiromaUser) {
+            await prisma.commission.create({
+              data: { user_id: hiromaUser.id, type: 'direct_referral', amount: totalBonus, source_user_id: referrer.id, is_pair_overflow: true, overflow_to: hiromaUser.id },
+            })
+            await prisma.wallet.upsert({
+              where:  { user_id: hiromaUser.id },
+              update: { balance: { increment: totalBonus }, total_earned: { increment: totalBonus } },
+              create: { user_id: hiromaUser.id, balance: totalBonus, total_earned: totalBonus, total_withdrawn: 0 },
+            })
+          }
+        } else {
+          // Normal — credit referrer, overflow to Hiroma if referred package is higher
+          await prisma.resellerProfile.update({
+            where: { user_id: referrer.id },
+            data:  {
+              daily_referral_count: isToday ? { increment: 1 } : 1,
+              last_referral_date:   new Date(),
+            },
+          })
+          await creditDirectReferralBonus(referrer.id, newUser.id, referrerBonus, referredBonus)
+        }
       } catch (e) {
         console.error('[REGISTER] Direct referral error:', e)
       }
