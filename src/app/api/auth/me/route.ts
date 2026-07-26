@@ -82,7 +82,18 @@ export async function GET() {
       )
     }
 
-    return NextResponse.json({ user })
+    return NextResponse.json({
+      user: {
+        ...user,
+        ...(currentUser.is_staff && {
+          full_name: currentUser.actor_name || currentUser.full_name,
+          username: currentUser.actor_username || currentUser.username,
+        }),
+        is_staff: Boolean(currentUser.is_staff),
+        permissions: currentUser.permissions || [],
+        owner_id: currentUser.owner_id || user.id,
+      },
+    })
   } catch (error) {
     console.error('[ME ERROR]', error)
     return NextResponse.json(

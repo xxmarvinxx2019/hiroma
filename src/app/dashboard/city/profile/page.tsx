@@ -163,7 +163,11 @@ export default function CityProfilePage() {
       <Section title="Account Info" desc="Your system credentials and coverage area">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <InputField label="Username"      value={user?.username || ''} disabled />
-          <InputField label="Role"          value="City Distributor"     disabled />
+          <InputField
+            label="Role"
+            value={user?.distributor_profile?.dist_level === 'branch' ? 'Branch' : 'City Distributor'}
+            disabled
+          />
           <InputField label="Coverage Area" value={user?.distributor_profile?.coverage_area || '—'} disabled />
           <InputField label="Account Status" value="Active"              disabled />
         </div>

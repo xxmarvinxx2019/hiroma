@@ -653,14 +653,14 @@ export async function POST(req: NextRequest) {
     // }
 
     createAuditLog({
-      user_id:       user.id,
+      user_id:       user.actor_id || user.id,
       user_name:     user.full_name || user.username,
-      user_role:     user.role,
-      member_id:     formatMemberId(user.id, user.role),
+      user_role:     user.is_staff ? 'staff' : user.role,
+      member_id:     formatMemberId(user.actor_id || user.id, user.is_staff ? 'staff' : user.role),
       activity_type: 'reseller_registered',
       category:      'reseller',
       description:   `New reseller registered: ${full_name} (@${username.trim().toLowerCase()})`,
-      metadata:      { reseller_id: newUser.id },
+      metadata:      { reseller_id: newUser.id, owner_id: user.id, performed_by_staff: Boolean(user.is_staff) },
       risk_level:    'low',
       status:        'normal',
     })

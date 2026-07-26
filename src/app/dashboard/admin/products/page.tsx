@@ -17,6 +17,7 @@ interface Product {
   regional_price:   number
   provincial_price: number
   city_price:       number
+  branch_price:     number
   reseller_price:   number
   pu_value:         number
   binary_eligible:  boolean
@@ -49,6 +50,7 @@ export default function ProductsPage() {
     regional_price:   '',
     provincial_price: '',
     city_price:       '',
+    branch_price:     '',
     reseller_price:   '',
     pu_value:         '0',
     binary_eligible:  true,
@@ -89,7 +91,7 @@ export default function ProductsPage() {
 
   const openCreate = () => {
     setEditProduct(null)
-    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', reseller_price: '', image_url: '', pu_value: '0', binary_eligible: true })
+    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', branch_price: '', reseller_price: '', image_url: '', pu_value: '0', binary_eligible: true })
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -106,6 +108,7 @@ export default function ProductsPage() {
       regional_price:   String(p.regional_price),
       provincial_price: String(p.provincial_price),
       city_price:       String(p.city_price),
+      branch_price:     String(p.branch_price),
       reseller_price:   String(p.reseller_price),
       pu_value:         String(p.pu_value || 0),
       binary_eligible:  p.binary_eligible ?? true,
@@ -389,6 +392,7 @@ export default function ProductsPage() {
                     { label: 'Reseller Price',   key: 'reseller_price',   hint: 'Price reseller pays to city dist *',             required: true  },
                     { label: 'Cost Price',       key: 'cost_price',       hint: 'Production / source cost',                      required: false },
                     { label: 'City Price',       key: 'city_price',       hint: 'Price city distributor pays',                   required: false },
+                    { label: 'Branch Price',     key: 'branch_price',     hint: 'Internal transfer price for Hiroma branches',    required: false },
                     { label: 'Provincial Price', key: 'provincial_price', hint: 'Price provincial distributor pays',             required: false },
                     { label: 'Regional Price',   key: 'regional_price',   hint: 'Price regional distributor pays',               required: false },
                   ].map((f) => (
