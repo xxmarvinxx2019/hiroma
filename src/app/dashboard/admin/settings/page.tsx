@@ -66,14 +66,7 @@ export default function SettingsPage() {
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [passwordError, setPasswordError] = useState('')
 
-  // MLM system settings
-  const [mlmSettings, setMlmSettings] = useState({
-    daily_referral_cap: 10,
-    daily_pairs_cap: 12,
-    name_cap: 7,
-  })
-  const [mlmSaving, setMlmSaving] = useState(false)
-  const [mlmSuccess, setMlmSuccess] = useState('')
+
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -154,20 +147,7 @@ export default function SettingsPage() {
     setPasswordSaving(false)
   }
 
-  const handleMlmSave = async () => {
-    setMlmSaving(true)
-    setMlmSuccess('')
-    const res = await fetch('/api/admin/settings/mlm', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mlmSettings),
-    })
-    if (res.ok) {
-      setMlmSuccess('MLM settings saved!')
-      setTimeout(() => setMlmSuccess(''), 3000)
-    }
-    setMlmSaving(false)
-  }
+
 
   if (loading) {
     return (
@@ -322,73 +302,6 @@ export default function SettingsPage() {
               className="bg-[#0D1B3E] text-white font-semibold text-sm rounded-lg py-2.5 hover:bg-[#1A2F5E] transition-colors disabled:opacity-60 w-fit px-6"
             >
               {passwordSaving ? 'Updating...' : 'Update password'}
-            </button>
-          </div>
-        </SettingsSection>
-
-        {/* MLM System Settings */}
-        <SettingsSection
-          title="MLM system rules"
-          desc="Configure daily caps and network limits"
-        >
-          <div className="flex flex-col gap-4">
-            <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg px-4 py-3">
-              <p className="text-xs text-[#9a6f1e]">
-                ⚠️ Changing these values affects all resellers immediately. Make sure you understand the impact before saving.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Daily referral cap
-                </label>
-                <input
-                  type="number"
-                  value={mlmSettings.daily_referral_cap}
-                  onChange={(e) => setMlmSettings({ ...mlmSettings, daily_referral_cap: parseInt(e.target.value) })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
-                />
-                <p className="text-xs text-gray-400 mt-1">Overflow → Hiroma</p>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Daily pairs cap
-                </label>
-                <input
-                  type="number"
-                  value={mlmSettings.daily_pairs_cap}
-                  onChange={(e) => setMlmSettings({ ...mlmSettings, daily_pairs_cap: parseInt(e.target.value) })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
-                />
-                <p className="text-xs text-gray-400 mt-1">Overflow → Hiroma</p>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Name cap
-                </label>
-                <input
-                  type="number"
-                  value={mlmSettings.name_cap}
-                  onChange={(e) => setMlmSettings({ ...mlmSettings, name_cap: parseInt(e.target.value) })}
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
-                />
-                <p className="text-xs text-gray-400 mt-1">Max accounts per name</p>
-              </div>
-            </div>
-
-            {mlmSuccess && (
-              <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-lg px-3 py-2">
-                <p className="text-[#1a7a4a] text-xs">{mlmSuccess}</p>
-              </div>
-            )}
-
-            <button
-              onClick={handleMlmSave}
-              disabled={mlmSaving}
-              className="bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60 w-fit px-6"
-            >
-              {mlmSaving ? 'Saving...' : 'Save MLM settings'}
             </button>
           </div>
         </SettingsSection>

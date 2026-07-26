@@ -180,7 +180,7 @@ export default function AdminOrdersPage() {
 
           {/* Level filter */}
           <div className="flex gap-1">
-            {(['all', 'regional', 'provincial', 'city'] as const).map((f) => (
+            {(['all', 'regional', 'provincial', 'city', 'reseller'] as const).map((f) => (
               <button key={f} onClick={() => setLevelFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   levelFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'

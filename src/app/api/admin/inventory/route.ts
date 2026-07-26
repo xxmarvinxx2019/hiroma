@@ -1,11 +1,134 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 
-const PRICE_FIELD: Record<string, 'regional_price' | 'provincial_price' | 'city_price'> = {
+// ── Product Binary Pairing for reseller inventory assignments ──
+async function triggerProductBinaryPairing(buyerUserId: string, currentOrderPU: number) {
+  if (currentOrderPU <= 0) return
+
+  const buyerNode = await prisma.binaryTreeNode.findUnique({
+    where:  { user_id: buyerUserId },
+    select: { id: true, parent_id: true, position: true },
+  })
+  if (!buyerNode?.parent_id) return
+
+  const hiromaUser = await prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } })
+
+  const ancestors = await prisma.$queryRaw<{ id: string; user_id: string; parent_id: string | null; position: string | null }[]>`
+    WITH RECURSIVE ancestor_chain AS (
+      SELECT id, user_id, parent_id, position FROM binary_tree_nodes WHERE id = ${buyerNode.parent_id}
+      UNION ALL
+      SELECT n.id, n.user_id, n.parent_id, n.position FROM binary_tree_nodes n
+      INNER JOIN ancestor_chain a ON n.id = a.parent_id
+    )
+    SELECT id, user_id, parent_id, position FROM ancestor_chain
+  `
+  if (!ancestors || ancestors.length === 0) return
+
+  const resetSettings = await prisma.$queryRaw<{ key: string; value: string }[]>`
+    SELECT key, value FROM system_settings WHERE key IN ('pu_reset_month', 'pu_reset_day')
+  `.catch(() => [] as { key: string; value: string }[])
+  const settingsMap = new Map(resetSettings.map(s => [s.key, s.value]))
+  const resetMonth  = parseInt(settingsMap.get('pu_reset_month') || '3') - 1
+  const resetDay    = parseInt(settingsMap.get('pu_reset_day')   || '1')
+  const now2        = new Date()
+  let periodStart   = new Date(now2.getFullYear(), resetMonth, resetDay)
+  if (now2 < periodStart) periodStart = new Date(now2.getFullYear() - 1, resetMonth, resetDay)
+  const resetAt = periodStart
+  const today   = new Date(); today.setHours(0, 0, 0, 0)
+
+  for (let i = 0; i < ancestors.length; i++) {
+    const ancestor = ancestors[i]
+    const profile  = await prisma.resellerProfile.findUnique({
+      where:  { user_id: ancestor.user_id },
+      select: { user_id: true, daily_pairing_count: true, daily_pairing_date: true, package: { select: { id: true, point_php_value: true } } },
+    })
+    if (!profile) continue
+
+    let extraData = { rank: 'default', total_pu: 0, daily_product_pairing_cap: 50 }
+    try {
+      const rows = await prisma.$queryRaw<{ rank: string; total_pu: number; daily_product_pairing_cap: number }[]>`
+        SELECT COALESCE(rp.rank, 'default') as rank, COALESCE(rp.total_pu, 0) as total_pu,
+               COALESCE(p.daily_product_pairing_cap, 50)::int as daily_product_pairing_cap
+        FROM reseller_profiles rp LEFT JOIN packages p ON p.id = rp.package_id
+        WHERE rp.user_id::text = ${ancestor.user_id}
+      `
+      if (rows[0]) extraData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu), daily_product_pairing_cap: Number(rows[0].daily_product_pairing_cap) }
+    } catch { /* not migrated yet */ }
+
+    const profileAny    = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number }
+    const packagePPV    = Number(profile.package?.point_php_value || 5)
+    const activeRank    = profile.package?.id ? await getCurrentRankForReseller(profile.package.id, profileAny.total_pu || 0) : null
+    const pointsPerPair = activeRank ? Number(activeRank.pair_income) : packagePPV
+    const phpPerPoint   = 0.50
+
+    const children = await prisma.binaryTreeNode.findMany({ where: { parent_id: ancestor.id }, select: { id: true, position: true } })
+    const leftChild  = children.find(c => c.position === 'left')
+    const rightChild = children.find(c => c.position === 'right')
+    if (!leftChild || !rightChild) continue
+
+    const [leftResult, rightResult] = await Promise.all([
+      prisma.$queryRaw<{ total: number }[]>`
+        WITH RECURSIVE subtree AS (
+          SELECT id, user_id FROM binary_tree_nodes WHERE id = ${leftChild.id}
+          UNION ALL SELECT n.id, n.user_id FROM binary_tree_nodes n INNER JOIN subtree s ON n.parent_id = s.id
+        )
+        SELECT COALESCE(SUM(oi.quantity * p.pu_value), 0)::int as total
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id
+        WHERE o.buyer_id IN (SELECT user_id FROM subtree) AND o.status = 'delivered'
+          AND p.binary_eligible = true AND p.pu_value > 0 AND o.created_at >= ${resetAt}
+      `,
+      prisma.$queryRaw<{ total: number }[]>`
+        WITH RECURSIVE subtree AS (
+          SELECT id, user_id FROM binary_tree_nodes WHERE id = ${rightChild.id}
+          UNION ALL SELECT n.id, n.user_id FROM binary_tree_nodes n INNER JOIN subtree s ON n.parent_id = s.id
+        )
+        SELECT COALESCE(SUM(oi.quantity * p.pu_value), 0)::int as total
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id
+        WHERE o.buyer_id IN (SELECT user_id FROM subtree) AND o.status = 'delivered'
+          AND p.binary_eligible = true AND p.pu_value > 0 AND o.created_at >= ${resetAt}
+      `,
+    ])
+
+    let leftPU  = Number(leftResult[0]?.total  || 0)
+    let rightPU = Number(rightResult[0]?.total || 0)
+    const leg: 'left' | 'right' = i === 0 ? (buyerNode.position as 'left' | 'right') : (ancestors[i - 1].position as 'left' | 'right') || 'left'
+    if (leg === 'left') leftPU += currentOrderPU; else rightPU += currentOrderPU
+
+    const possiblePairs = Math.floor(Math.min(leftPU, rightPU) / 2)
+    if (possiblePairs <= 0) continue
+
+    const lastPairDate = profileAny.daily_pairing_date ? new Date(profileAny.daily_pairing_date) : null
+    const isToday      = lastPairDate ? lastPairDate >= today : false
+    const usedToday    = isToday ? Number(profileAny.daily_pairing_count || 0) : 0
+    const remaining    = Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
+    const paidPairs     = Math.min(possiblePairs, remaining)
+    const overflowPairs = possiblePairs - paidPairs
+    const paidEarnings     = paidPairs     * pointsPerPair * phpPerPoint
+    const overflowEarnings = overflowPairs * pointsPerPair * phpPerPoint
+
+    if (paidPairs > 0) {
+      await Promise.all([
+        prisma.resellerProfile.update({ where: { user_id: ancestor.user_id }, data: { total_points: { increment: paidPairs * pointsPerPair }, daily_pairing_count: isToday ? { increment: paidPairs } : paidPairs, daily_pairing_date: today } }),
+        prisma.commission.create({ data: { user_id: ancestor.user_id, type: 'sponsor_point', amount: paidEarnings, points: paidPairs * pointsPerPair, source_user_id: buyerUserId, is_pair_overflow: false } }),
+        prisma.wallet.update({ where: { user_id: ancestor.user_id }, data: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } } }),
+      ])
+    }
+    if (overflowPairs > 0 && overflowEarnings > 0 && hiromaUser) {
+      await Promise.all([
+        prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'sponsor_point', amount: overflowEarnings, points: overflowPairs * pointsPerPair, source_user_id: buyerUserId, overflow_to: hiromaUser.id, is_pair_overflow: true } }),
+        prisma.wallet.upsert({ where: { user_id: hiromaUser.id }, update: { balance: { increment: overflowEarnings }, total_earned: { increment: overflowEarnings } }, create: { user_id: hiromaUser.id, balance: overflowEarnings, total_earned: overflowEarnings, total_withdrawn: 0 } }),
+      ])
+    }
+  }
+}
+
+const PRICE_FIELD: Record<string, 'regional_price' | 'provincial_price' | 'city_price' | 'reseller_price'> = {
   regional:   'regional_price',
   provincial: 'provincial_price',
   city:       'city_price',
+  reseller:   'reseller_price',  // ← added
 }
 
 // ── GET ──
@@ -69,7 +192,6 @@ export async function GET(req: NextRequest) {
       }),
       prisma.order.count({ where: { seller_id: user.id } }),
 
-      // recipient count
       prisma.user.count({
         where: {
           status: 'active',
@@ -83,7 +205,6 @@ export async function GET(req: NextRequest) {
         },
       }),
 
-      // recipient list
       prisma.user.findMany({
         where: {
           status: 'active',
@@ -102,7 +223,6 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    // ── All products with how many units distributed ──
     const allInventory = await prisma.inventory.findMany({
       where:  { owner: { role: { in: ['regional', 'provincial', 'city', 'reseller'] } } },
       select: {
@@ -145,14 +265,12 @@ export async function GET(req: NextRequest) {
       is_low_stock:      lowStockSet.has(p.id),
     }))
 
-    // ── Admin's own stock (what admin has in hand) ──
     const adminOwnStock = await prisma.inventory.findMany({
       where:  { owner_id: user.id },
       select: { product_id: true, quantity: true },
     })
     const adminStockMap = new Map(adminOwnStock.map((i) => [i.product_id, i.quantity]))
 
-    // Merge admin stock into product summary
     const productStockSummaryWithAdmin = productStockSummary.map((p) => ({
       ...p,
       admin_stock: adminStockMap.get(p.id) ?? 0,
@@ -194,20 +312,20 @@ export async function POST(req: NextRequest) {
     })
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
 
-    const priceField = PRICE_FIELD[owner.role]
+    const priceField = PRICE_FIELD[owner.role] || 'reseller_price'
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
       select: {
         id: true, name: true,
-        regional_price: true, provincial_price: true, city_price: true,
+        regional_price: true, provincial_price: true,
+        city_price: true, reseller_price: true,
       },
     })
 
     if (products.length !== productIds.length)
       return NextResponse.json({ error: 'One or more products not found.' }, { status: 400 })
 
-    // ── Validate admin has enough stock ──
     const adminStock = await prisma.inventory.findMany({
       where:  { owner_id: user.id, product_id: { in: productIds } },
       select: { product_id: true, quantity: true },
@@ -235,7 +353,7 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number }) => {
       const product   = productMap.get(item.product_id)!
-      const unitPrice = Number(product[priceField])
+      const unitPrice = Number(product[priceField] || product.reseller_price || 0)
       const subtotal  = unitPrice * item.quantity
       totalAmount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price: unitPrice, subtotal }
@@ -257,7 +375,6 @@ export async function POST(req: NextRequest) {
       })
 
       for (const item of orderItems) {
-        // Credit distributor inventory
         await tx.inventory.upsert({
           where:  { owner_id_product_id: { owner_id, product_id: item.product_id } },
           update: { quantity: { increment: item.quantity } },
@@ -269,7 +386,6 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // Deduct from admin's own stock
         await tx.inventory.updateMany({
           where: { owner_id: user.id, product_id: item.product_id },
           data:  { quantity: { decrement: item.quantity } },
@@ -278,6 +394,21 @@ export async function POST(req: NextRequest) {
 
       return newOrder
     })
+
+    // Fire product binary pairing if owner is reseller
+    if (owner.role === 'reseller') {
+      try {
+        const puProducts = await prisma.$queryRaw<{ id: string; pu_value: number }[]>`
+          SELECT id::text, COALESCE(pu_value, 0) as pu_value FROM products
+          WHERE id::text = ANY(${productIds}::text[]) AND COALESCE(binary_eligible, true) = true AND COALESCE(pu_value, 0) > 0
+        `.catch(() => [] as { id: string; pu_value: number }[])
+        const puMap = new Map(puProducts.map((p: any) => [p.id, Number(p.pu_value)]))
+        const currentOrderPU = items.reduce((sum: number, i: any) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
+        if (currentOrderPU > 0) {
+          await triggerProductBinaryPairing(owner_id, currentOrderPU)
+        }
+      } catch (e) { console.error('[INVENTORY] Product binary pairing error:', e) }
+    }
 
     return NextResponse.json({
       success:      true,
@@ -327,7 +458,6 @@ export async function PUT(req: NextRequest) {
     }
 
     const { items, notes } = await req.json()
-    // items: [{ product_id, quantity }]
 
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'items are required.' }, { status: 400 })
@@ -341,7 +471,6 @@ export async function PUT(req: NextRequest) {
     if (products.length !== productIds.length)
       return NextResponse.json({ error: 'One or more products not found.' }, { status: 400 })
 
-    // Upsert admin's own inventory for each product
     for (const item of items) {
       await prisma.inventory.upsert({
         where:  { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } },

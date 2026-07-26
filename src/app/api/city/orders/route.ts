@@ -366,12 +366,21 @@ async function checkSponsorPairingPoints(
       `
       if (rows[0]) extraData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu) }
     } catch { /* columns not migrated yet */ }
-    const profileAny = { ...profile, ...extraData }
+    const profileAny = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number }
 
-    const resetDays = profileAny.package?.point_reset_days || 30
-    const resetAt   = profileAny.points_reset_at
-      ? new Date(profile.points_reset_at)
-      : new Date(Date.now() - resetDays * 24 * 60 * 60 * 1000)
+    // Get PU reset date from system_settings (March 1 by default)
+    const resetSettings = await prisma.$queryRaw<{ key: string; value: string }[]>`
+      SELECT key, value FROM system_settings WHERE key IN ('pu_reset_month', 'pu_reset_day')
+    `.catch(() => [] as { key: string; value: string }[])
+    const settingsMap = new Map(resetSettings.map(s => [s.key, s.value]))
+    const resetMonth  = parseInt(settingsMap.get('pu_reset_month') || '3') - 1
+    const resetDay    = parseInt(settingsMap.get('pu_reset_day')   || '1')
+    const now2        = new Date()
+    let periodStart   = new Date(now2.getFullYear(), resetMonth, resetDay)
+    if (now2 < periodStart) {
+      periodStart = new Date(now2.getFullYear() - 1, resetMonth, resetDay)
+    }
+    const resetAt     = periodStart
 
     // Get current rank — only valid within active rank period
     const packageId     = profile.package?.id || ''
@@ -447,7 +456,7 @@ async function checkSponsorPairingPoints(
     const lastPairDate = profileAny.daily_pairing_date ? new Date(profileAny.daily_pairing_date) : null
     const isToday      = lastPairDate ? lastPairDate >= today : false
     const usedToday    = isToday ? Number(profileAny.daily_pairing_count || 0) : 0
-    const remaining    = Math.max(0, PRODUCT_DAILY_PAIRING_CAP - usedToday)
+    const remaining    = Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
 
     const paidPairs     = Math.min(possiblePairs, remaining)
     const overflowPairs = possiblePairs - paidPairs

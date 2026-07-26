@@ -138,21 +138,39 @@ export default function AdminRegisterResellerPage() {
   }, [])
 
   // Load provinces when region changes
+  // NCR and some regions have no provinces — cities go directly under the region
   useEffect(() => {
     if (!location.region_code) { setProvinces([]); setCityMunis([]); return }
     setLoadingProv(true)
-    fetch(`https://psgc.gitlab.io/api/regions/${location.region_code}/provinces/`)
-      .then((r) => r.json())
-      .then((data) => setProvinces(data.map((p: any) => ({ code: p.code, name: p.name })).sort((a: any, b: any) => a.name.localeCompare(b.name))))
-      .catch(() => setProvinces([]))
-      .finally(() => setLoadingProv(false))
     setLocation((l) => ({ ...l, province_code: '', province_name: '', city_muni_code: '', city_muni_name: '' }))
     setCityMunis([])
+
+    fetch(`https://psgc.gitlab.io/api/regions/${location.region_code}/provinces/`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!Array.isArray(data) || data.length === 0) {
+          // No provinces (e.g. NCR) — load cities directly under region
+          setProvinces([])
+          setLoadingProv(false)
+          setLoadingCity(true)
+          return fetch(`https://psgc.gitlab.io/api/regions/${location.region_code}/cities-municipalities/`)
+            .then((r) => r.json())
+            .then((cities) => {
+              setCityMunis(cities.map((c: any) => ({ code: c.code, name: c.name })).sort((a: any, b: any) => a.name.localeCompare(b.name)))
+              setLocation((l) => ({ ...l, province_code: 'DIRECT', province_name: '' }))
+            })
+            .catch(() => setCityMunis([]))
+            .finally(() => setLoadingCity(false))
+        }
+        setProvinces(data.map((p: any) => ({ code: p.code, name: p.name })).sort((a: any, b: any) => a.name.localeCompare(b.name)))
+      })
+      .catch(() => setProvinces([]))
+      .finally(() => setLoadingProv(false))
   }, [location.region_code])
 
   // Load cities when province changes
   useEffect(() => {
-    if (!location.province_code) { setCityMunis([]); return }
+    if (!location.province_code || location.province_code === 'DIRECT') { return }
     setLoadingCity(true)
     fetch(`https://psgc.gitlab.io/api/provinces/${location.province_code}/cities-municipalities/`)
       .then((r) => r.json())
@@ -392,7 +410,8 @@ export default function AdminRegisterResellerPage() {
               </select>
             </div>
 
-            {/* Province */}
+            {/* Province — hidden for regions with no provinces like NCR */}
+            {provinces.length > 0 && (
             <div>
               <label className="block text-xs text-gray-400 mb-1">Province <span className="text-[#C9A84C]">*</span></label>
               <select value={location.province_code} disabled={!location.region_code || loadingProv}
@@ -405,6 +424,7 @@ export default function AdminRegisterResellerPage() {
                 {provinces.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
               </select>
             </div>
+            )}
 
             {/* City/Municipality */}
             <div>
