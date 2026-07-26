@@ -23,6 +23,23 @@ const ROLE_ROUTES: Record<string, string> = {
 // ── Public routes that don't need auth ──
 const PUBLIC_ROUTES = ['/', '/login', '/forgot-password']
 
+function requiredStaffPermission(pathname: string, method: string): string | null {
+  if (pathname.startsWith('/dashboard/city/staff') || pathname.startsWith('/api/city/staff')) return '__owner_only__'
+  if (pathname.startsWith('/dashboard/city/profile') || pathname.startsWith('/api/city/profile')) return '__owner_only__'
+  if (pathname.startsWith('/dashboard/city/resellers/register')) return 'register_reseller'
+  if (pathname === '/api/city/resellers' && method !== 'GET') return 'register_reseller'
+  if (pathname.startsWith('/dashboard/city/resellers') || pathname.startsWith('/api/city/resellers')) return 'resellers'
+  if (pathname.startsWith('/dashboard/city/pins') || pathname.startsWith('/api/city/pins')) return 'pins'
+  if (pathname.startsWith('/dashboard/city/inventory') || pathname.startsWith('/api/city/inventory')) return 'inventory'
+  if (pathname.startsWith('/dashboard/city/orders') || pathname.startsWith('/api/city/orders') || pathname.startsWith('/api/orders/')) return 'orders'
+  if (pathname.startsWith('/dashboard/city/payment-methods') || pathname.startsWith('/api/payment-methods')) return 'payment_methods'
+  if (pathname.startsWith('/dashboard/city/pin-requests') || pathname.startsWith('/api/pin-requests')) return 'pin_requests'
+  if (pathname.startsWith('/api/city/products')) return 'inventory|orders'
+  if (pathname.startsWith('/api/city/packages')) return 'register_reseller|pins|pin_requests'
+  if (pathname === '/dashboard/city' || pathname.startsWith('/api/city/stats')) return 'dashboard'
+  return null
+}
+
 // ============================================================
 // MIDDLEWARE
 // ============================================================
@@ -36,7 +53,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ── Allow API routes to handle their own auth ──
-  if (pathname.startsWith('/api/')) {
+  if (pathname.startsWith('/api/') && requiredStaffPermission(pathname, req.method) === null) {
     return NextResponse.next()
   }
 
@@ -63,6 +80,24 @@ export async function middleware(req: NextRequest) {
 
     if (!role) {
       return NextResponse.redirect(new URL('/login', req.url))
+    }
+
+    if (payload.is_staff === true) {
+      const requiredPermission = requiredStaffPermission(pathname, req.method)
+      const permissions = Array.isArray(payload.permissions) ? payload.permissions : []
+      const hasPermission = !requiredPermission || requiredPermission
+        .split('|')
+        .some((permission) => permissions.includes(permission))
+      if (requiredPermission === '__owner_only__' || !hasPermission) {
+        if (pathname.startsWith('/api/')) {
+          return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
+        }
+        return NextResponse.redirect(new URL('/dashboard/city', req.url))
+      }
+    }
+
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.next()
     }
 
     const allowedRoute = ROLE_ROUTES[role]

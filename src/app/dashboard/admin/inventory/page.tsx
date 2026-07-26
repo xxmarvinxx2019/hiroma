@@ -12,15 +12,22 @@ interface InventoryItem {
   quantity: number
   low_stock_threshold: number
   updated_at: string
-  owner:   { id: string; full_name: string; username: string; role: string }
+  owner: {
+    id: string
+    full_name: string
+    username: string
+    role: string
+    distributor_profile?: { dist_level: string } | null
+  }
   product: {
     id: string; name: string; type: string
-    regional_price: number; provincial_price: number; city_price: number
+    cost_price: number; regional_price: number; provincial_price: number; city_price: number; branch_price: number
   }
 }
 
 interface Distributor {
   id: string; full_name: string; username: string; role: string
+  distributor_profile?: { dist_level: string } | null
 }
 
 interface Reseller {
@@ -30,7 +37,7 @@ interface Reseller {
 interface ProductStock {
   id: string; name: string; type: string
   cost_price: number; regional_price: number; provincial_price: number
-  city_price: number; reseller_price: number
+  city_price: number; branch_price: number; reseller_price: number
   total_distributed: number; is_low_stock: boolean; admin_stock: number
 }
 
@@ -51,6 +58,7 @@ const PRICE_KEY: Record<string, keyof ProductStock> = {
   regional:   'regional_price',
   provincial: 'provincial_price',
   city:       'city_price',
+  branch:     'branch_price',
   reseller:   'reseller_price',
 }
 
@@ -58,8 +66,14 @@ const PRICE_LABEL: Record<string, string> = {
   regional:   'Regional Price',
   provincial: 'Provincial Price',
   city:       'City Price',
+  branch:     'Branch Price',
   reseller:   'Reseller Price',
 }
+
+const displayLevel = (user: { role: string; distributor_profile?: { dist_level: string } | null }) =>
+  user.distributor_profile?.dist_level === 'branch'
+    ? 'branch'
+    : user.distributor_profile?.dist_level || user.role
 
 // ============================================================
 // ADD PRODUCTION MODAL — admin adds to their own stock
@@ -240,7 +254,13 @@ function AssignStockModal({
   const [recipientMeta, setRecipientMeta]     = useState({ total: 0, totalPages: 1 })
 
   const selectedDist = distributors.find((d) => d.id === ownerId) || recipients.find((r) => r.id === ownerId)
-  const priceKey     = selectedDist ? PRICE_KEY[selectedDist.role] : null
+  const selectedLevel = selectedDist?.distributor_profile?.dist_level === 'branch' ? 'branch' : selectedDist?.role
+  const priceKey     = selectedLevel ? PRICE_KEY[selectedLevel] : null
+  const unitPrice = (product: ProductStock) => {
+    if (!priceKey) return 0
+    const configured = Number(product[priceKey])
+    return selectedLevel === 'branch' && configured <= 0 ? Number(product.cost_price) : configured
+  }
 
   // Search recipients from API
   useEffect(() => {
@@ -278,7 +298,7 @@ function AssignStockModal({
   }
 
   const total = priceKey
-    ? cart.reduce((s, c) => s + Number(c.product[priceKey]) * c.quantity, 0)
+    ? cart.reduce((s, c) => s + unitPrice(c.product) * c.quantity, 0)
     : 0
 
   const handleSubmit = async () => {
@@ -326,7 +346,7 @@ function AssignStockModal({
                   <div className="flex items-center justify-between bg-[#F0F2F8] border border-[#C9A84C] rounded-lg px-3 py-2">
                     <div>
                       <p className="text-sm font-medium text-[#0D1B3E]">{selectedDist.full_name}</p>
-                      <p className="text-[10px] text-gray-400">@{selectedDist.username} · <span className="capitalize">{selectedDist.role}</span> · {PRICE_LABEL[selectedDist.role]}</p>
+                      <p className="text-[10px] text-gray-400">@{selectedDist.username} · <span className="capitalize">{selectedLevel}</span> · {selectedLevel ? PRICE_LABEL[selectedLevel] : ''}</p>
                     </div>
                     <button onClick={() => { setOwnerId(''); setCart([]) }} className="text-gray-400 hover:text-[#a03030] text-xs ml-2">✕</button>
                   </div>
@@ -365,7 +385,7 @@ function AssignStockModal({
                               r.role === 'city'       ? 'bg-[#e8f7ef] text-[#1a7a4a]' :
                               r.role === 'provincial' ? 'bg-[#f0f7ff] text-[#2563eb]' :
                                                         'bg-[#eef0f8] text-[#0D1B3E]'
-                            }`}>{r.role}</span>
+                            }`}>{displayLevel(r) === 'branch' ? 'Branch' : r.role}</span>
                           </button>
                         ))}
                       </div>
@@ -399,7 +419,7 @@ function AssignStockModal({
                 <p className="text-center text-xs text-gray-400 py-8">No products found</p>
               ) : (
                 filtered.map((product) => {
-                  const price  = priceKey ? Number(product[priceKey]) : 0
+                  const price  = unitPrice(product)
                   const inCart = cart.find((c) => c.product.id === product.id)
                   return (
                     <div key={product.id}
@@ -437,7 +457,7 @@ function AssignStockModal({
                 <p className="text-xs text-gray-400 text-center pt-4">No items yet</p>
               ) : (
                 cart.map((c) => {
-                  const price = priceKey ? Number(c.product[priceKey]) : 0
+                  const price = unitPrice(c.product)
                   return (
                     <div key={c.product.id} className="text-xs">
                       <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
@@ -733,7 +753,10 @@ export default function AdminInventoryPage() {
             items.map((item) => {
               const isLow  = item.quantity <= item.low_stock_threshold
               const isEdit = editingId === item.id
-              const price  = item.owner.role === 'regional'
+              const ownerLevel = displayLevel(item.owner)
+              const price  = ownerLevel === 'branch'
+                ? Number(item.product.branch_price) || Number(item.product.cost_price)
+                : item.owner.role === 'regional'
                 ? item.product.regional_price
                 : item.owner.role === 'provincial'
                 ? item.product.provincial_price
@@ -744,7 +767,7 @@ export default function AdminInventoryPage() {
                   <div>
                     <p className="text-xs font-medium text-[#0D1B3E]">{item.owner.full_name}</p>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLE_COLOR[item.owner.role] || ''}`}>
-                      {item.owner.role}
+                      {ownerLevel === 'branch' ? 'Branch' : item.owner.role}
                     </span>
                   </div>
                   <div>

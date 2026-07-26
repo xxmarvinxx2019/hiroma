@@ -31,6 +31,18 @@ const navItems = [
   }
 ]
 
+const staffNavItem = { label: 'Staff', href: '/dashboard/city/staff', icon: '🪪' }
+
+const navPermission: Record<string, string> = {
+  '/dashboard/city': 'dashboard',
+  '/dashboard/city/resellers': 'resellers',
+  '/dashboard/city/pins': 'pins',
+  '/dashboard/city/inventory': 'inventory',
+  '/dashboard/city/orders': 'orders',
+  '/dashboard/city/payment-methods': 'payment_methods',
+  '/dashboard/city/pin-requests': 'pin_requests',
+}
+
 // ============================================================
 // SIDEBAR
 // ============================================================
@@ -41,7 +53,13 @@ function Sidebar({
   onClose,
   onLogout,
 }: {
-  user: { full_name: string; username: string; distributor_profile?: { coverage_area: string } } | null
+  user: {
+    full_name: string
+    username: string
+    distributor_profile?: { coverage_area: string; dist_level: string }
+    is_staff?: boolean
+    permissions?: string[]
+  } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
@@ -72,7 +90,9 @@ function Sidebar({
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">
               {group.section}
             </p>
-            {group.items.map((item) => (
+            {[...group.items, ...(group.section === 'Main' && !user?.is_staff ? [staffNavItem] : [])]
+              .filter((item) => !user?.is_staff || user.permissions?.includes(navPermission[item.href]))
+              .map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -102,7 +122,9 @@ function Sidebar({
           <div className="overflow-hidden">
             <p className="text-white text-xs font-medium truncate">{user?.full_name || 'City Dist.'}</p>
             <p className="text-white/40 text-xs truncate">
-              {user?.distributor_profile?.coverage_area || 'City distributor'}
+              {user?.distributor_profile?.dist_level === 'branch'
+                ? `Branch${user.distributor_profile.coverage_area ? ` · ${user.distributor_profile.coverage_area}` : ''}`
+                : user?.distributor_profile?.coverage_area || 'City distributor'}
             </p>
           </div>
         </div>
@@ -199,7 +221,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
           <div className="flex items-center gap-3">
             <NotificationBell userId={user?.id} role="city" />
             <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-semibold px-3 py-1 rounded-full border border-[#1D9E75]/30 tracking-wide">
-              CITY DIST.
+              {user?.distributor_profile?.dist_level === 'branch' ? 'BRANCH' : 'CITY DIST.'}
             </span>
             <div className="relative">
               <button onClick={() => setProfileMenuOpen(!profileMenuOpen)}
@@ -215,11 +237,13 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
                       <p className="text-[10px] text-gray-400">@{user?.username || ''}</p>
                     </div>
                     <div className="py-1">
-                      <Link href="/dashboard/city/profile" onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
-                        <span className="text-base">👤</span>
-                        <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
-                      </Link>
+                      {!user?.is_staff && (
+                        <Link href="/dashboard/city/profile" onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                          <span className="text-base">👤</span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                        </Link>
+                      )}
                     </div>
                     <div className="border-t border-[#0D1B3E]/8 py-1">
                       <button onClick={() => { setProfileMenuOpen(false); handleLogout() }}

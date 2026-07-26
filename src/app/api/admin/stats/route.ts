@@ -60,8 +60,21 @@ export async function GET(req: NextRequest) {
       adminId ? prisma.order.groupBy({ by: ['status'], where: { seller_id: adminId }, _count: { status: true } }) : Promise.resolve([]),
       prisma.order.findMany({
         where: { status: { not: 'cancelled' } }, orderBy: { created_at: 'desc' }, take: 3,
-        select: { id: true, order_number: true, status: true, total_amount: true, created_at: true,
-          buyer: { select: { full_name: true, role: true } }, seller: { select: { full_name: true } } },
+        select: {
+          id: true,
+          order_number: true,
+          status: true,
+          total_amount: true,
+          created_at: true,
+          buyer: {
+            select: {
+              full_name: true,
+              role: true,
+              distributor_profile: { select: { dist_level: true } },
+            },
+          },
+          seller: { select: { full_name: true } },
+        },
       }),
       // PIN revenue today via raw SQL
       adminId ? prisma.$queryRaw<{ total: number }[]>`

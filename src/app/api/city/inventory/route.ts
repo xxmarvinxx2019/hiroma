@@ -9,6 +9,13 @@ export async function GET(req: NextRequest) {
     if (!user || user.role !== 'city') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    const profile = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { dist_level: true },
+    })
+    const isBranch = profile?.dist_level === 'branch'
+    const inventoryCost = (product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) =>
+      isBranch ? Number(product.branch_price) || Number(product.cost_price) : Number(product.city_price)
 
     const { searchParams } = req.nextUrl
     const search     = searchParams.get('search') || ''
@@ -53,6 +60,7 @@ export async function GET(req: NextRequest) {
               is_active:      true,
               cost_price:     true,
               city_price:     true,
+              branch_price:   true,
               reseller_price: true,
             },
           },
@@ -66,7 +74,7 @@ export async function GET(req: NextRequest) {
         quantity:            true,
         low_stock_threshold: true,
         product: {
-          select: { city_price: true, reseller_price: true },
+          select: { cost_price: true, city_price: true, branch_price: true, reseller_price: true },
         },
       },
     })
@@ -78,7 +86,7 @@ export async function GET(req: NextRequest) {
           select: {
             quantity: true,
             subtotal: true,
-            product:  { select: { id: true, name: true, type: true, city_price: true } },
+            product:  { select: { id: true, name: true, type: true, cost_price: true, city_price: true, branch_price: true } },
           },
         },
       },
@@ -88,7 +96,7 @@ export async function GET(req: NextRequest) {
       (s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0
     )
     const actualCost = deliveredOrders.reduce(
-      (s, o) => s + o.items.reduce((ss, i) => ss + Number(i.product.city_price) * i.quantity, 0), 0
+      (s, o) => s + o.items.reduce((ss, i) => ss + inventoryCost(i.product) * i.quantity, 0), 0
     )
 
     // Build product sales map
@@ -100,7 +108,7 @@ export async function GET(req: NextRequest) {
         const existing = salesMap.get(p.id) || { name: p.name, type: p.type, units_sold: 0, revenue: 0, cost: 0 }
         existing.units_sold += item.quantity
         existing.revenue    += Number(item.subtotal)
-        existing.cost       += Number(p.city_price) * item.quantity
+        existing.cost       += inventoryCost(p) * item.quantity
         salesMap.set(p.id, existing)
       }
     }
@@ -113,9 +121,9 @@ export async function GET(req: NextRequest) {
       low_stock:           all.filter((i) => i.quantity > 0 && i.quantity <= i.low_stock_threshold).length,
       out_of_stock:        all.filter((i) => i.quantity === 0).length,
       total_units:         all.reduce((s, i) => s + i.quantity, 0),
-      total_cost_value:    all.reduce((s, i) => s + Number(i.product.city_price)     * i.quantity, 0),
+      total_cost_value:    all.reduce((s, i) => s + inventoryCost(i.product) * i.quantity, 0),
       total_selling_value: all.reduce((s, i) => s + Number(i.product.reseller_price) * i.quantity, 0),
-      potential_profit:    all.reduce((s, i) => s + (Number(i.product.reseller_price) - Number(i.product.city_price)) * i.quantity, 0),
+      potential_profit:    all.reduce((s, i) => s + (Number(i.product.reseller_price) - inventoryCost(i.product)) * i.quantity, 0),
       actual_revenue:      actualRevenue,
       actual_cost:         actualCost,
       actual_profit:       actualRevenue - actualCost,
@@ -127,14 +135,18 @@ export async function GET(req: NextRequest) {
         quantity:   true,
         unit_price: true,
         subtotal:   true,
-        product:    { select: { id: true, name: true, type: true, city_price: true } },
+        product:    { select: { id: true, name: true, type: true, cost_price: true, city_price: true, branch_price: true } },
       },
     })
 
 
 
     return NextResponse.json({
-      items, summary, productSales,
+      items: items.map((item) => ({
+        ...item,
+        product: { ...item.product, city_price: inventoryCost(item.product) },
+      })),
+      summary, productSales,
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {

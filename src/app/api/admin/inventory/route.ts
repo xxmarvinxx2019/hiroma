@@ -124,10 +124,11 @@ async function triggerProductBinaryPairing(buyerUserId: string, currentOrderPU: 
   }
 }
 
-const PRICE_FIELD: Record<string, 'regional_price' | 'provincial_price' | 'city_price' | 'reseller_price'> = {
+const PRICE_FIELD: Record<string, 'regional_price' | 'provincial_price' | 'city_price' | 'branch_price' | 'reseller_price'> = {
   regional:   'regional_price',
   provincial: 'provincial_price',
   city:       'city_price',
+  branch:     'branch_price',
   reseller:   'reseller_price',  // ← added
 }
 
@@ -172,18 +173,27 @@ export async function GET(req: NextRequest) {
         take: pageSize,
         select: {
           id: true, quantity: true, low_stock_threshold: true, updated_at: true,
-          owner:   { select: { id: true, full_name: true, username: true, role: true } },
+          owner: {
+            select: {
+              id: true, full_name: true, username: true, role: true,
+              distributor_profile: { select: { dist_level: true } },
+            },
+          },
           product: {
             select: {
               id: true, name: true, type: true,
-              regional_price: true, provincial_price: true, city_price: true,
+              cost_price: true, regional_price: true, provincial_price: true, city_price: true,
+              branch_price: true,
             },
           },
         },
       }),
       prisma.user.findMany({
         where:   { role: { in: ['regional', 'provincial', 'city', 'reseller'] }, status: 'active' },
-        select:  { id: true, full_name: true, username: true, role: true },
+        select:  {
+          id: true, full_name: true, username: true, role: true,
+          distributor_profile: { select: { dist_level: true } },
+        },
         orderBy: { role: 'asc' },
       }),
       prisma.order.aggregate({
@@ -216,7 +226,10 @@ export async function GET(req: NextRequest) {
             ],
           }),
         },
-        select:  { id: true, full_name: true, username: true, role: true },
+        select:  {
+          id: true, full_name: true, username: true, role: true,
+          distributor_profile: { select: { dist_level: true } },
+        },
         orderBy: { full_name: 'asc' },
         skip:    (recipient_page - 1) * recipient_size,
         take:    recipient_size,
@@ -251,7 +264,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, name: true, type: true,
           cost_price: true, regional_price: true, provincial_price: true,
-          city_price: true, reseller_price: true,
+          city_price: true, branch_price: true, reseller_price: true,
         },
         orderBy: { name: 'asc' },
         skip:    (stockPage - 1) * pageSize,
@@ -308,18 +321,21 @@ export async function POST(req: NextRequest) {
 
     const owner = await prisma.user.findFirst({
       where:  { id: owner_id, role: { in: ['regional', 'provincial', 'city', 'reseller'] }, status: 'active' },
-      select: { id: true, full_name: true, role: true },
+      select: {
+        id: true, full_name: true, role: true,
+        distributor_profile: { select: { dist_level: true } },
+      },
     })
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
 
-    const priceField = PRICE_FIELD[owner.role] || 'reseller_price'
+    const priceLevel = owner.distributor_profile?.dist_level === 'branch' ? 'branch' : owner.role
+    const priceField = PRICE_FIELD[priceLevel] || 'reseller_price'
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
       select: {
         id: true, name: true,
-        regional_price: true, provincial_price: true,
-        city_price: true, reseller_price: true,
+        cost_price: true, regional_price: true, provincial_price: true, city_price: true, branch_price: true, reseller_price: true,
       },
     })
 
@@ -353,7 +369,10 @@ export async function POST(req: NextRequest) {
 
     const orderItems = items.map((item: { product_id: string; quantity: number }) => {
       const product   = productMap.get(item.product_id)!
-      const unitPrice = Number(product[priceField] || product.reseller_price || 0)
+      const configuredPrice = Number(product[priceField] || product.reseller_price || 0)
+      const unitPrice = priceLevel === 'branch' && configuredPrice <= 0
+        ? Number(product.cost_price)
+        : configuredPrice
       const subtotal  = unitPrice * item.quantity
       totalAmount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price: unitPrice, subtotal }
