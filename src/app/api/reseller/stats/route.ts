@@ -84,6 +84,16 @@ export async function GET() {
       } catch { /* columns not migrated yet */ }
     }
     const profile = profileBase ? { ...profileBase, ...rankData } : null
+    let referralCap = { enabled: true, cap: 10 }
+    if (profile?.package_id) {
+      const [row] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+        SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
+               COALESCE(daily_referral_cap, 10)::int AS cap
+        FROM packages
+        WHERE id = ${profile.package_id}
+      `
+      if (row) referralCap = { enabled: Boolean(row.enabled), cap: Number(row.cap) || 10 }
+    }
     const wallet            = results[1] as any
     const treeNode          = results[2] as any
     const commissions       = (results[3] || []) as any[]
@@ -109,7 +119,9 @@ export async function GET() {
     const lastDate = profile?.last_referral_date
     const isToday  = lastDate ? new Date(lastDate) >= today : false
     const dailyReferralsToday = isToday ? (profile?.daily_referral_count || 0) : 0
-    const dailyReferralsLeft  = Math.max(0, 10 - dailyReferralsToday)
+    const dailyReferralsLeft = referralCap.enabled
+      ? Math.max(0, referralCap.cap - dailyReferralsToday)
+      : 0
 
     return NextResponse.json({
       user: {
@@ -137,7 +149,8 @@ export async function GET() {
       referrals: {
         today:      dailyReferralsToday,
         remaining:  dailyReferralsLeft,
-        cap:        10,
+        cap:        referralCap.cap,
+        cap_enabled: referralCap.enabled,
       },
       rank: {
         current:       profile?.rank       || 'default',

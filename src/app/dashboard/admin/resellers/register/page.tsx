@@ -95,7 +95,10 @@ export default function AdminRegisterResellerPage() {
   const [formLoading, setFormLoading]             = useState(false)
   const [agreedToTerms, setAgreedToTerms]         = useState(false)
   const [formError, setFormError]                 = useState('')
-  const [successData, setSuccessData]             = useState<{ full_name: string; username: string; package: any } | null>(null)
+  const [successData, setSuccessData]             = useState<{ id: string; full_name: string; username: string; package: any } | null>(null)
+  const [smsPromptOpen, setSmsPromptOpen]         = useState(false)
+  const [smsSending, setSmsSending]               = useState(false)
+  const [smsStatus, setSmsStatus]                 = useState<{ type: 'success' | 'error' | 'skipped'; message: string } | null>(null)
   const [adminId, setAdminId]                       = useState<string>('')
 
   // Auto-generate username
@@ -199,6 +202,7 @@ export default function AdminRegisterResellerPage() {
     setAgreedToTerms(false)
     setNameCapInfo(null); setUsernameAvailable(null); setUsernameEdited(false)
     setFormError('')
+    setSmsPromptOpen(false); setSmsSending(false); setSmsStatus(null)
   }, [])
 
   // Step 3 — Verify referral + load slots
@@ -283,9 +287,27 @@ export default function AdminRegisterResellerPage() {
     if (!res.ok) {
       setFormError(data.error || 'Registration failed.')
     } else {
-      setSuccessData({ full_name: form.full_name, username: form.username.toLowerCase(), package: data.package || null })
+      setSuccessData({ id: data.reseller.id, full_name: form.full_name, username: form.username.toLowerCase(), package: data.package || null })
+      setSmsStatus(null)
+      setSmsPromptOpen(true)
     }
     setFormLoading(false)
+  }
+
+  const sendWelcomeSms = async () => {
+    if (!successData) return
+    setSmsSending(true)
+    const res = await fetch('/api/city/resellers/send-welcome-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reseller_id: successData.id, password: form.password }),
+    })
+    const data = await res.json()
+    setSmsSending(false)
+    setSmsPromptOpen(false)
+    setSmsStatus(res.ok
+      ? { type: 'success', message: data.message || 'Login credentials sent by SMS.' }
+      : { type: 'error', message: data.error || 'SMS could not be sent.' })
   }
 
   const filteredPins = pins.filter((p) =>
@@ -668,6 +690,36 @@ export default function AdminRegisterResellerPage() {
         )}
       </div>
 
+      {/* Optional welcome SMS confirmation */}
+      {successData && smsPromptOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center px-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">
+            <div className="w-12 h-12 rounded-full bg-[#fef9ee] flex items-center justify-center mx-auto text-2xl">📱</div>
+            <h3 className="text-lg font-bold text-[#0D1B3E] text-center mt-3">Send login credentials?</h3>
+            <p className="text-sm text-gray-500 text-center mt-2">
+              Send the username and initial password to the reseller&apos;s registered mobile number via SMS?
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => {
+                  setSmsPromptOpen(false)
+                  setSmsStatus({ type: 'skipped', message: 'SMS sending was skipped.' })
+                }}
+                disabled={smsSending}
+                className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] font-semibold text-sm rounded-xl py-3 disabled:opacity-60">
+                No, skip
+              </button>
+              <button
+                onClick={sendWelcomeSms}
+                disabled={smsSending}
+                className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 disabled:opacity-60">
+                {smsSending ? 'Sending...' : 'Yes, send SMS'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Success Modal */}
       {successData && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center px-4 overflow-y-auto py-6">
@@ -691,6 +743,17 @@ export default function AdminRegisterResellerPage() {
             </div>
 
             <div className="p-5 space-y-4">
+              {smsStatus && (
+                <div className={`rounded-xl px-4 py-3 text-xs font-medium ${
+                  smsStatus.type === 'success'
+                    ? 'bg-green-50 border border-green-200 text-green-700'
+                    : smsStatus.type === 'error'
+                      ? 'bg-red-50 border border-red-200 text-red-600'
+                      : 'bg-gray-50 border border-gray-200 text-gray-500'
+                }`}>
+                  {smsStatus.message}
+                </div>
+              )}
 
               {/* Account credentials reminder */}
               <div className="bg-[#e8f7ef] border border-[#1a7a4a]/30 rounded-xl px-4 py-3">

@@ -22,7 +22,8 @@ interface PackageBreakdown {
 
 interface PackageConfig {
   name:             string
-  daily_pair_limit: number
+  daily_pair_limit: number | null
+  cap_enabled?: boolean
   pair_value:       number
   limit_type:       string
 }
@@ -251,7 +252,9 @@ export default function AdminFlushoutPage() {
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: getColor(pkg.name, i) }} />
                 <p className="text-xs font-semibold text-[#0D1B3E]">{pkg.name}</p>
               </div>
-              <p className="text-xs font-semibold text-[#0D1B3E]">{pkg.daily_pair_limit} Pairs</p>
+              <p className="text-xs font-semibold text-[#0D1B3E]">
+                {pkg.cap_enabled === false ? 'Unlimited' : `${pkg.daily_pair_limit} Pairs`}
+              </p>
               <p className="text-xs font-bold text-[#1a7a4a]">{fmt(pkg.pair_value)}</p>
               <span className="text-[10px] bg-[#eef0f8] text-[#0D1B3E] px-2 py-0.5 rounded-full font-medium w-fit">{pkg.limit_type}</span>
             </div>

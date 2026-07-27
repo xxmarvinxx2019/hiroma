@@ -74,16 +74,22 @@ export async function GET(req: NextRequest) {
       ? Number(product.branch_price) || Number(product.cost_price)
       : Number(product.city_price) || Number(product.cost_price)
 
-    const [orders, registrationSnapshots, registrations, packageNames] = await Promise.all([
+    const [orders, paidOrders, registrationSnapshots, registrationCollections, registrations, packageNames] = await Promise.all([
       prisma.order.findMany({
         where: {
           seller_id: user.id,
           status: 'delivered',
-          ...(dateFilter ? { created_at: dateFilter } : {}),
+          ...(dateFilter ? {
+            OR: [
+              { delivered_at: dateFilter },
+              { delivered_at: null, created_at: dateFilter },
+            ],
+          } : {}),
         },
         select: {
           id: true,
           created_at: true,
+          delivered_at: true,
           total_amount: true,
           payment_status: true,
           is_non_member_sale: true,
@@ -91,6 +97,7 @@ export async function GET(req: NextRequest) {
             select: {
               quantity: true,
               subtotal: true,
+              unit_acquisition_cost: true,
               product: {
                 select: {
                   id: true,
@@ -103,7 +110,20 @@ export async function GET(req: NextRequest) {
             },
           },
         },
-        orderBy: { created_at: 'asc' },
+        orderBy: { delivered_at: 'asc' },
+      }),
+      prisma.order.findMany({
+        where: {
+          seller_id: user.id,
+          payment_status: 'paid',
+          ...(dateFilter ? {
+            OR: [
+              { paid_at: dateFilter },
+              { paid_at: null, created_at: dateFilter },
+            ],
+          } : {}),
+        },
+        select: { total_amount: true },
       }),
       prisma.registrationFinancial.findMany({
         where: {
@@ -118,12 +138,27 @@ export async function GET(req: NextRequest) {
           reseller_value: true,
           pin_allocation: true,
           registration_profit: true,
+          payment_status: true,
+          paid_at: true,
         },
       }).catch((error) => {
         registrationLedgerAvailable = false
         console.warn('[CITY REPORTS] Registration ledger unavailable; using legacy PIN calculations.', error)
         return []
       }),
+      prisma.registrationFinancial.findMany({
+        where: {
+          city_dist_id: user.id,
+          payment_status: 'paid',
+          ...(dateFilter ? {
+            OR: [
+              { paid_at: dateFilter },
+              { paid_at: null, created_at: dateFilter },
+            ],
+          } : {}),
+        },
+        select: { customer_payment: true },
+      }).catch(() => []),
       prisma.pin.findMany({
         where: {
           city_dist_id: user.id,
@@ -170,19 +205,24 @@ export async function GET(req: NextRequest) {
       cost: number
       profit: number
     }>()
-    let collectedRevenue = 0
+    const collectedRevenue = paidOrders.reduce(
+      (sum, order) => sum + Number(order.total_amount || 0),
+      0
+    )
     let outstandingRevenue = 0
 
     for (const order of orders) {
       const bucket = order.is_non_member_sale ? nonMemberSales : memberSales
       bucket.orders += 1
       const orderRevenue = Number(order.total_amount || 0)
-      if (order.payment_status === 'paid') collectedRevenue += orderRevenue
-      else outstandingRevenue += orderRevenue
+      if (order.payment_status !== 'paid') outstandingRevenue += orderRevenue
 
       for (const item of order.items) {
         const revenue = Number(item.subtotal || 0)
-        const cost = acquisitionCost(item.product) * item.quantity
+        const historicalUnitCost = item.unit_acquisition_cost == null
+          ? acquisitionCost(item.product)
+          : Number(item.unit_acquisition_cost)
+        const cost = historicalUnitCost * item.quantity
         bucket.units += item.quantity
         bucket.revenue += revenue
         bucket.cost += cost
@@ -304,6 +344,13 @@ export async function GET(req: NextRequest) {
     const productRevenue = memberSales.revenue + nonMemberSales.revenue
     const productCost = memberSales.cost + nonMemberSales.cost
     const productProfit = memberSales.profit + nonMemberSales.profit
+    let collectedRegistrationCash = 0
+    for (const row of registrationCollections) {
+      collectedRegistrationCash += Number(row.customer_payment || 0)
+    }
+    const legacyRegistrationCash = registrationLedgerAvailable
+      ? collectedRegistrationCash
+      : registrationSummary.customer_payment
 
     return NextResponse.json({
       account: {
@@ -320,9 +367,9 @@ export async function GET(req: NextRequest) {
         gross_revenue: productRevenue + registrationSummary.revenue,
         total_cost: productCost + registrationSummary.cost,
         net_profit: productProfit + registrationSummary.profit,
-        collected_cash_total: collectedRevenue + registrationSummary.customer_payment,
+        collected_cash_total: collectedRevenue + legacyRegistrationCash,
         collected_product_cash: collectedRevenue,
-        collected_registration_cash: registrationSummary.customer_payment,
+        collected_registration_cash: legacyRegistrationCash,
         outstanding_product_sales: outstandingRevenue,
         total_orders: orders.length,
         total_units: memberSales.units + nonMemberSales.units,
@@ -333,10 +380,10 @@ export async function GET(req: NextRequest) {
       products: [...productMap.values()].sort((a, b) => b.revenue - a.revenue),
       packages: [...packageMap.values()].sort((a, b) => b.revenue - a.revenue),
       notes: {
-        sales_basis: 'Delivered orders created within the selected period',
-        collection_basis: 'Delivered orders marked paid',
+        sales_basis: 'Orders delivered within the selected period',
+        collection_basis: 'Product and registration payments collected within the selected period',
         registration_basis: 'City/Branch product revenue is reseller value; PIN allocation is a remittance payable to Hiroma and is not City/Branch revenue',
-        cost_basis: isBranch ? 'Branch acquisition price' : 'City Distributor acquisition price',
+        cost_basis: `Historical ${isBranch ? 'Branch' : 'City Distributor'} acquisition price captured when each order was created`,
         registration_data_source: registrationLedgerAvailable
           ? 'Financial ledger snapshots'
           : 'Legacy used-PIN records calculated from current configured prices',

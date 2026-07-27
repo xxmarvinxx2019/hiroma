@@ -307,8 +307,8 @@ export default function ResellerTreePage() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
             { label: 'Total Earned',   value: fmt(earnings.total_earned),                          sub: `Wallet: ${fmt(earnings.wallet_balance)}`,               color: '#1a7a4a', icon: '💰' },
-            { label: 'Left Leg',       value: String(meta.left_count),                              sub: 'Downline members',                                      color: '#3b82f6', icon: '👥' },
-            { label: 'Right Leg',      value: String(meta.right_count),                             sub: 'Downline members',                                      color: '#f59e0b', icon: '👥' },
+            { label: 'Left Affiliates',  value: String(meta.left_count),                              sub: 'Affiliate members',                                     color: '#3b82f6', icon: '👥' },
+            { label: 'Right Affiliates', value: String(meta.right_count),                             sub: 'Affiliate members',                                     color: '#f59e0b', icon: '👥' },
             { label: 'Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`,      sub: `≈ ${fmt(earnings.total_points * 0.50)}`,                color: '#C9A84C', icon: '⭐' },
             { label: 'Carry Over',     value: `${earnings.pending_pairing_balance.toLocaleString()} pts`, sub: 'Unmatched binary points',                         color: '#9a6f1e', icon: '🔄' },
           ].map((s) => (
@@ -332,7 +332,7 @@ export default function ResellerTreePage() {
             : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={searchInput ? 'text-[#C9A84C]' : 'text-gray-300'}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           }
           <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
-            placeholder="Search your downline by name or username..."
+            placeholder="Search your affiliates by name or username..."
             className="flex-1 text-sm text-[#0D1B3E] outline-none placeholder:text-gray-300 bg-transparent" />
           {searchInput && (
             <button onClick={() => { setSearchInput(''); setSearchResults([]) }}
@@ -424,11 +424,11 @@ export default function ResellerTreePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-[#eff6ff] rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-[#3b82f6]">{selectedNode.left_count}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Left Leg</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Left Affiliates</p>
                 </div>
                 <div className="bg-[#fffbeb] rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-[#f59e0b]">{selectedNode.right_count}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Right Leg</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Right Affiliates</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -501,11 +501,11 @@ export default function ResellerTreePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-[#eff6ff] rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-[#3b82f6]">{selectedResult.left_count}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Left Leg</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Left Affiliates</p>
                 </div>
                 <div className="bg-[#fffbeb] rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-[#f59e0b]">{selectedResult.right_count}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Right Leg</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Right Affiliates</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -528,7 +528,7 @@ export default function ResellerTreePage() {
                   </span>
                 </div>
                 <div className="flex justify-between py-1.5">
-                  <span className="text-sm text-gray-400">Total Downline</span>
+                  <span className="text-sm text-gray-400">Total Affiliates</span>
                   <span className="text-sm font-semibold text-[#0D1B3E]">{(selectedResult.left_count + selectedResult.right_count).toLocaleString()}</span>
                 </div>
               </div>

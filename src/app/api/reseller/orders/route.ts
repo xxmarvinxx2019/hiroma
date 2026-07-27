@@ -115,36 +115,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
     }
 
-    // Get city distributor — use selected one from request or fall back to profile
-    let cityDist: { id: string; full_name: string; username: string } | null = null
-
-    if (city_dist_id) {
-      // Reseller explicitly selected a city dist (or admin registered them)
-      const dist = await prisma.user.findUnique({
-        where:  { id: city_dist_id, role: { in: ['city', 'admin'] } },
-        select: { id: true, full_name: true, username: true },
-      })
-      cityDist = dist || null
-    }
-
-    if (!cityDist) {
-      // Fall back to profile's city_dist
-      const profile = await prisma.resellerProfile.findUnique({
-        where:  { user_id: user.id },
-        select: { city_dist: { select: { id: true, full_name: true, username: true } } },
-      })
-      cityDist = profile?.city_dist || null
-    }
+    // Self-service orders are always routed to the reseller's assigned distributor.
+    const profile = await prisma.resellerProfile.findUnique({
+      where:  { user_id: user.id },
+      select: {
+        city_dist_id: true,
+        city_dist: {
+          select: { id: true, full_name: true, username: true, status: true },
+        },
+      },
+    })
+    const cityDist = profile?.city_dist?.status === 'active' ? profile.city_dist : null
 
     if (!cityDist) {
-      return NextResponse.json({ error: 'City distributor not found.' }, { status: 400 })
+      return NextResponse.json({ error: 'No active distributor is assigned to your account.' }, { status: 400 })
+    }
+    if (city_dist_id && city_dist_id !== profile?.city_dist_id) {
+      return NextResponse.json({
+        error: 'Online orders can only be placed with your assigned distributor.',
+      }, { status: 403 })
     }
 
     // Validate products
     const productIds = items.map((i: { product_id: string }) => i.product_id)
+    const sellerProfile = await prisma.distributorProfile.findUnique({
+      where: { user_id: cityDist.id },
+      select: { dist_level: true },
+    })
+    const sellerIsBranch = sellerProfile?.dist_level === 'branch'
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, is_active: true },
-      select: { id: true, name: true, price: true, reseller_price: true },
+      select: {
+        id: true, name: true, price: true, reseller_price: true,
+        cost_price: true, city_price: true, branch_price: true,
+      },
     })
 
     if (products.length !== productIds.length) {
@@ -157,9 +161,12 @@ export async function POST(req: NextRequest) {
     const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
       const product    = productMap.get(item.product_id)!
       const unit_price = item.unit_price ?? Number(product.reseller_price || product.price)
+      const unit_acquisition_cost = sellerIsBranch
+        ? Number(product.branch_price) || Number(product.cost_price)
+        : Number(product.city_price) || Number(product.cost_price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
-      return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
+      return { product_id: item.product_id, quantity: item.quantity, unit_price, unit_acquisition_cost, subtotal }
     })
 
     const order = await prisma.order.create({
@@ -216,7 +223,10 @@ export async function PATCH(req: NextRequest) {
     if (action === 'mark_paid') {
       const updated = await prisma.order.update({
         where: { id: order_id },
-        data:  { payment_status: 'paid' },
+        data:  {
+          payment_status: 'paid',
+          ...(order.payment_status !== 'paid' && { paid_at: new Date() }),
+        },
       })
       return NextResponse.json({ success: true, order: updated })
     }

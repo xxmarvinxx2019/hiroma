@@ -22,8 +22,15 @@ export async function PUT(
       point_php_value,
       point_reset_days,
       daily_product_pairing_cap,
+      product_binary_cap_enabled,
+      direct_referral_cap_enabled,
+      daily_referral_cap,
+      binary_pair_cap_enabled,
+      daily_binary_pair_cap,
       products,
     } = await req.json()
+    const productBinaryCapEnabled =
+      typeof product_binary_cap_enabled === 'boolean' ? product_binary_cap_enabled : null
 
     const pkg = await prisma.$transaction(async (tx) => {
       const updated = await tx.package.update({
@@ -56,9 +63,15 @@ export async function PUT(
       return updated
     })
 
-    // Update daily_product_pairing_cap via raw SQL (not in Prisma schema)
+    // Update package-level caps via raw SQL (not in Prisma schema)
     await prisma.$executeRaw`
-      UPDATE packages SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50}
+      UPDATE packages
+      SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50},
+          product_binary_cap_enabled = COALESCE(${productBinaryCapEnabled}, product_binary_cap_enabled),
+          direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
+          daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
+          binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
+          daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
       WHERE id::text = ${id}
     `
 

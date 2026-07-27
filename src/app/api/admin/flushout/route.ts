@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-const DAILY_PAIR_CAP = 10
-
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -32,6 +30,17 @@ export async function GET(req: NextRequest) {
       orderBy: { price: 'asc' },
     })
     const pkgNames = packages.map(p => p.name)
+    const packageIds = packages.map(p => p.id)
+    const packageCaps = packageIds.length
+      ? await prisma.$queryRaw<{ id: string; enabled: boolean; cap: number }[]>`
+          SELECT id::text,
+                 COALESCE(binary_pair_cap_enabled, true) AS enabled,
+                 COALESCE(daily_binary_pair_cap, 10)::int AS cap
+          FROM packages
+          WHERE id::text = ANY(${packageIds}::text[])
+        `
+      : []
+    const packageCapMap = new Map(packageCaps.map(row => [row.id, row]))
 
     // ── Base where for overflow commissions ──
     const where: any = {
@@ -95,7 +104,7 @@ export async function GET(req: NextRequest) {
         // Determine reason based on actual context
         let reason = 'Flushout to Hiroma'
         if (r.type === 'direct_referral') {
-          reason = 'Direct referral package difference'
+          reason = 'Direct referral overflow / package difference'
         } else if (pts === 0) {
           reason = 'Deactivated account — wallet balance flushed'
         } else if (r.source_user?.status === 'inactive') {
@@ -178,7 +187,10 @@ export async function GET(req: NextRequest) {
       package_breakdown: packageBreakdown,
       package_config: packages.map((pkg, i) => ({
         name:             pkg.name,
-        daily_pair_limit: DAILY_PAIR_CAP,
+        daily_pair_limit: packageCapMap.get(pkg.id)?.enabled === false
+          ? null
+          : Number(packageCapMap.get(pkg.id)?.cap || 10),
+        cap_enabled:      packageCapMap.get(pkg.id)?.enabled !== false,
         pair_value:       Number(pkg.pairing_bonus_value),
         limit_type:       'Per Day',
         color:            colors[i] || '#9ca3af',

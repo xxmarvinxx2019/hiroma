@@ -45,6 +45,14 @@ interface ReportData {
     totalPinRevenue: number; totalPinsSoldPeriod: number
     totalDigitalCommissionExpense: number; digitalNet: number
     overallRevenue: number; overallProfit: number
+    adminRegistrations: {
+      count: number
+      customerPayments: number
+      productRevenue: number
+      productCost: number
+      productProfit: number
+      pinAllocation: number
+    }
   }
   productSales: { breakdown: ProductSale[]; resellerOrders: { product_id: string; name: string; type: string; units_sold: number; revenue: number }[] }
   pinSales: { breakdown: PinSale[]; totalRevenue: number; totalPinsSold: number; commissionExpense: number; digitalNet: number }
@@ -390,6 +398,52 @@ export default function AdminReportsPage() {
                 value={fmtN(showAllTime ? sales.adminUnitsSold : Math.round(sales.adminUnitsSold * (sales.periodRevenue / (sales.adminRevenue || 1))))}
                 accent="#C9A84C"
                 sub={showAllTime ? 'All time' : 'Estimated period'} />
+            </div>
+          </div>
+
+          {/* Admin reseller registration allocation */}
+          <div>
+            <SectionTitle
+              title="Admin Reseller Registration Allocation"
+              subtitle="The customer package price is divided between products and the internal PIN allocation; it is not charged twice"
+            />
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+              <StatCard
+                label="Registrations"
+                value={fmtN(overview.adminRegistrations?.count || 0)}
+                accent="#0D1B3E"
+                sub="Registered directly by Admin"
+              />
+              <StatCard
+                label="Customer Payments"
+                value={fmt(overview.adminRegistrations?.customerPayments || 0)}
+                accent="#2563eb"
+                sub="SRP × package product quantity"
+              />
+              <StatCard
+                label="Product Portion"
+                value={fmt(overview.adminRegistrations?.productRevenue || 0)}
+                accent="#C9A84C"
+                sub="Reseller-value allocation"
+              />
+              <StatCard
+                label="Product Cost"
+                value={fmt(overview.adminRegistrations?.productCost || 0)}
+                accent="#e05252"
+                sub="Admin production/source cost"
+              />
+              <StatCard
+                label="Product Profit"
+                value={fmt(overview.adminRegistrations?.productProfit || 0)}
+                accent="#1a7a4a"
+                sub="Product portion minus cost"
+              />
+              <StatCard
+                label="PIN Allocation"
+                value={fmt(overview.adminRegistrations?.pinAllocation || 0)}
+                accent="#7c3aed"
+                sub="Inside customer payment"
+              />
             </div>
           </div>
 

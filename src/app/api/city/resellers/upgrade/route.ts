@@ -8,8 +8,6 @@ import prisma from '@/app/lib/prisma'
 // Only adds the DIFFERENCE in points to ancestors (guide rule #7)
 // ============================================================
 
-const POINTS_PER_PAIR      = 100
-const DAILY_PAIRING_CAP    = 12
 const BINARY_POINT_TO_PESO = 0.50
 
 export async function PATCH(req: NextRequest) {
@@ -158,9 +156,26 @@ async function fireUpgradePairingBonus(
       right_points:        true,
       daily_pairing_count: true,
       daily_pairing_date:  true,
+      package: {
+        select: {
+          id:                  true,
+          pairing_bonus_value: true,
+        },
+      },
     },
   })
   const profileMap = new Map(profiles.map((p) => [p.user_id, p]))
+  const ancestorPackageIds = [...new Set(profiles.map((p) => p.package.id))]
+  const binaryCaps = ancestorPackageIds.length
+    ? await prisma.$queryRaw<{ id: string; enabled: boolean; cap: number }[]>`
+        SELECT id::text,
+               COALESCE(binary_pair_cap_enabled, true) AS enabled,
+               COALESCE(daily_binary_pair_cap, 10)::int AS cap
+        FROM packages
+        WHERE id::text = ANY(${ancestorPackageIds}::text[])
+      `
+    : []
+  const binaryCapMap = new Map(binaryCaps.map((row) => [row.id, row]))
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -183,8 +198,17 @@ async function fireUpgradePairingBonus(
     if (leg === 'left')  leftPts  += diffPts
     else                 rightPts += diffPts
 
+    const pointsPerPair = Number(profile.package.pairing_bonus_value || 0)
+    if (pointsPerPair <= 0) {
+      await prisma.resellerProfile.update({
+        where: { user_id: ancestor.user_id },
+        data: { left_points: leftPts, right_points: rightPts },
+      })
+      continue
+    }
+
     const pairPoints    = Math.min(leftPts, rightPts)
-    const possiblePairs = Math.floor(pairPoints / POINTS_PER_PAIR)
+    const possiblePairs = Math.floor(pairPoints / pointsPerPair)
 
     console.log(`[UPGRADE PAIRING] ${ancestor.user_id} | leg:${leg} | L:${leftPts} R:${rightPts} | pairs:${possiblePairs}`)
 
@@ -193,15 +217,18 @@ async function fireUpgradePairingBonus(
         ? new Date(profile.daily_pairing_date) : null
       const isToday   = lastPairDate ? lastPairDate >= today : false
       const usedToday = isToday ? Number(profile.daily_pairing_count || 0) : 0
-      const remaining = Math.max(0, DAILY_PAIRING_CAP - usedToday)
+      const capConfig = binaryCapMap.get(profile.package.id)
+      const remaining = capConfig?.enabled === false
+        ? possiblePairs
+        : Math.max(0, Number(capConfig?.cap ?? 10) - usedToday)
 
       const paidPairs     = Math.min(possiblePairs, remaining)
       const overflowPairs = possiblePairs - paidPairs
 
-      const paidEarnings     = paidPairs     * POINTS_PER_PAIR * BINARY_POINT_TO_PESO
-      const overflowEarnings = overflowPairs * POINTS_PER_PAIR * BINARY_POINT_TO_PESO
+      const paidEarnings     = paidPairs     * pointsPerPair * BINARY_POINT_TO_PESO
+      const overflowEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
 
-      const deduct = possiblePairs * POINTS_PER_PAIR
+      const deduct = possiblePairs * pointsPerPair
       leftPts  -= deduct
       rightPts -= deduct
 
@@ -211,7 +238,7 @@ async function fireUpgradePairingBonus(
             user_id:          ancestor.user_id,
             type:             'binary_pairing',
             amount:           paidEarnings,
-            points:           paidPairs * POINTS_PER_PAIR,
+            points:           paidPairs * pointsPerPair,
             source_user_id:   resellerId,
             is_pair_overflow: false,
           },
@@ -228,7 +255,7 @@ async function fireUpgradePairingBonus(
             user_id:          hiromaUser.id,
             type:             'binary_pairing',
             amount:           overflowEarnings,
-            points:           overflowPairs * POINTS_PER_PAIR,
+            points:           overflowPairs * pointsPerPair,
             source_user_id:   resellerId,
             overflow_to:      hiromaUser.id,
             is_pair_overflow: true,

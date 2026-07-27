@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -48,7 +47,7 @@ interface CityDist {
   id: string
   full_name: string
   username: string
-  distributor_profile: { coverage_area: string } | null
+  distributor_profile: { coverage_area: string; dist_level?: string } | null
 }
 
 interface PaymentMethodInfo {
@@ -90,7 +89,7 @@ function CreateOrderModal({
   onClose: () => void
   onSuccess: () => void
 }) {
-  const [cityDists, setCityDists]         = useState<CityDist[]>([])
+  const [assignedDist, setAssignedDist]   = useState<CityDist | null>(null)
   const [selectedDistId, setSelectedDistId] = useState('')
   const [distSearch, setDistSearch]       = useState('')
   const [showDistDrop, setShowDistDrop]   = useState(false)
@@ -111,8 +110,10 @@ function CreateOrderModal({
     fetch('/api/reseller/city-distributors')
       .then((r) => r.json())
       .then((d) => {
-        setCityDists(d.distributors || [])
-        if (d.default_city_dist_id) setSelectedDistId(d.default_city_dist_id)
+        const assigned = d.assigned_distributor || d.distributors?.[0] || null
+        setAssignedDist(assigned)
+        if (assigned?.id) setSelectedDistId(assigned.id)
+        else setError(d.error || 'No active distributor is assigned to your account.')
       })
       .finally(() => setLoadingDists(false))
   }, [])
@@ -122,7 +123,7 @@ function CreateOrderModal({
     setLoadingProducts(true)
     // Fetch products and payment methods in parallel
     Promise.all([
-      fetch(`/api/reseller/products?city_dist_id=${selectedDistId}`).then((r) => r.json()),
+      fetch('/api/reseller/products').then((r) => r.json()),
       fetch(`/api/payment-methods?user_id=${selectedDistId}&status=approved`).then((r) => r.json()),
     ]).then(([prodData, pmData]) => {
       setProducts(prodData.products || [])
@@ -159,11 +160,10 @@ function CreateOrderModal({
   }
 
   const total = cart.reduce((s, c) => s + c.product.price * c.quantity, 0)
-
-  const selectedDist = cityDists.find((d) => d.id === selectedDistId)
+  const cityDists = assignedDist ? [assignedDist] : []
 
   const handleSubmit = async () => {
-    if (!selectedDistId) { setError('Please select a city distributor.'); return }
+    if (!selectedDistId) { setError('No active distributor is assigned to your account.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
     if (paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
       setError('Please enter the payment reference number.')
@@ -176,7 +176,6 @@ function CreateOrderModal({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         order_type:        orderType,
-        city_dist_id:      selectedDistId,
         notes,
         payment_method:    paymentMethod,
         payment_reference: paymentReference.trim() || null,
@@ -202,7 +201,7 @@ function CreateOrderModal({
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Place New Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {selectedDistId ? `Ordering from: ${selectedDist?.full_name || ''}` : 'Select a city distributor'}
+              {assignedDist ? `Ordering from: ${assignedDist.full_name}` : 'No assigned distributor'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
@@ -216,14 +215,15 @@ function CreateOrderModal({
 
               {/* Searchable city distributor dropdown */}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">City Distributor</label>
+                <label className="block text-xs text-gray-400 mb-1">Assigned Distributor</label>
                 {loadingDists ? (
-                  <p className="text-xs text-gray-400">Loading distributors...</p>
+                  <div className="h-[58px] rounded-xl bg-[#F0F2F8] animate-pulse" />
                 ) : (
                   <div className="relative">
                     <input
                       type="text"
-                      value={distSearch || (selectedDistId ? (selectedDist?.full_name || '') : '')}
+                      value={assignedDist?.full_name || ''}
+                      readOnly
                       onChange={(e) => {
                         setDistSearch(e.target.value)
                         setShowDistDrop(true)
@@ -234,11 +234,11 @@ function CreateOrderModal({
                       placeholder="Search city distributor..."
                       className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
                     />
-                    {selectedDistId && (
+                    {false && selectedDistId && (
                       <button onClick={() => { setSelectedDistId(''); setDistSearch('') }}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
                     )}
-                    {showDistDrop && (
+                    {false && showDistDrop && (
                       <div className="absolute z-[100] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-40 overflow-y-auto">
                         {cityDists
                           .filter((d) =>
@@ -447,6 +447,7 @@ export default function ResellerOrdersPage() {
   const [cancelling, setCancelling]     = useState<string | null>(null)
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
   const [showCreate, setShowCreate]     = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   const [summary, setSummary] = useState({
     total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0,
@@ -490,7 +491,7 @@ export default function ResellerOrdersPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-[#0D1B3E]">Order History</h1>
+          <h1 className="text-xl font-semibold text-[#0D1B3E]">My Orders</h1>
           <p className="text-sm text-gray-400 mt-0.5">Your orders from city distributors</p>
         </div>
         <button onClick={() => setShowCreate(true)}
@@ -508,7 +509,7 @@ export default function ResellerOrdersPage() {
           { label: 'Delivered',  value: summary.delivered,  accent: '#1a7a4a' },
           { label: 'Cancelled',  value: summary.cancelled,  accent: '#e05252' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
+          <div key={s.label} className="orderSummaryCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
             style={{ borderTop: `2px solid ${s.accent}` }}>
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
             <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
@@ -601,15 +602,15 @@ export default function ResellerOrdersPage() {
                 <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
 
                   {/* View details */}
-                  <Link href={"/dashboard/reseller/orders/" + (order.order_number || order.id)}
-                    onClick={(e) => e.stopPropagation()}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setSelectedOrder(order) }}
                     className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
                     title="View details">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                       <circle cx="12" cy="12" r="3"/>
                     </svg>
-                  </Link>
+                  </button>
 
                   {/* Cancel */}
                   {order.status === 'pending' && (
@@ -626,7 +627,7 @@ export default function ResellerOrdersPage() {
 
               {/* Expanded items */}
               {expandedId === order.id && (
-                <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
+                <div className="orderExpandedItems px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                   <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>
                   <div className="space-y-1.5">
                     {order.items.map((item, i) => (
@@ -662,6 +663,164 @@ export default function ResellerOrdersPage() {
           onClose={() => setShowCreate(false)}
           onSuccess={() => { setShowCreate(false); fetchOrders() }}
         />
+      )}
+
+      {/* Order Details Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={() => setSelectedOrder(null)}>
+          <div className="orderDetailsModal bg-[#F7F8FC] rounded-[24px] shadow-2xl border border-white/20 w-full max-w-2xl max-h-[92vh] overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}>
+            <div className="relative overflow-hidden px-6 py-5 bg-gradient-to-br from-[#0D1B3E] via-[#152C5B] to-[#0D1B3E] flex items-start justify-between">
+              <div className="absolute -right-10 -top-14 w-40 h-40 rounded-full bg-[#C9A84C]/15 blur-xl" />
+              <div className="relative">
+                <p className="text-[10px] uppercase tracking-[0.22em] text-[#C9A84C] font-semibold mb-1">Order overview</p>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-white tracking-tight">
+                    Order {selectedOrder.order_number || `#${selectedOrder.id.slice(0, 8).toUpperCase()}`}
+                  </h2>
+                  <span className="text-[10px] px-2.5 py-1 rounded-full capitalize bg-white/10 text-white border border-white/10">
+                    {selectedOrder.status}
+                  </span>
+                </div>
+                <p className="text-xs text-white/50 mt-1">
+                  Placed on {new Date(selectedOrder.created_at).toLocaleString('en-PH')}
+                </p>
+              </div>
+              <button onClick={() => setSelectedOrder(null)}
+                className="relative w-9 h-9 rounded-xl bg-white/10 text-white/60 hover:text-white hover:bg-white/20 text-lg transition-colors">
+                ×
+              </button>
+            </div>
+
+            <div className="overflow-y-auto max-h-[calc(92vh-88px)] p-5 space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="rounded-2xl bg-white border border-[#0D1B3E]/8 p-4 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Supplier</p>
+                  <div className="flex items-center gap-2">
+                    <span className="w-8 h-8 rounded-xl bg-[#eef0f8] flex items-center justify-center">🏪</span>
+                    <p className="text-sm font-semibold text-[#0D1B3E]">{selectedOrder.seller.full_name}</p>
+                  </div>
+                  <p className="text-xs text-gray-400">@{selectedOrder.seller.username}</p>
+                </div>
+                <div className="rounded-2xl bg-white border border-[#0D1B3E]/8 p-4 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Payment</p>
+                  <p className="text-sm font-medium text-[#0D1B3E]">
+                    {PAYMENT_LABEL[selectedOrder.payment_method || 'cash_on_pickup'] || selectedOrder.payment_method}
+                  </p>
+                  <p className={`text-xs mt-1 ${selectedOrder.payment_status === 'paid' ? 'text-[#1a7a4a]' : 'text-[#9a6f1e]'}`}>
+                    {selectedOrder.payment_status === 'paid' ? '✓ Paid' : 'Pending payment'}
+                  </p>
+                  {selectedOrder.payment_reference && (
+                    <p className="text-xs text-gray-400 mt-1">Reference: {selectedOrder.payment_reference}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-[#0D1B3E]/8 overflow-hidden shadow-sm">
+                <div className="bg-white px-4 py-3 border-b border-[#0D1B3E]/6 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-[#0D1B3E]">Order Items</p>
+                  <span className="text-[10px] bg-[#eef0f8] text-[#0D1B3E] px-2 py-1 rounded-full">
+                    {selectedOrder.items.reduce((sum, item) => sum + item.quantity, 0)} units
+                  </span>
+                </div>
+                {selectedOrder.items.map((item, index) => (
+                  <div key={`${item.product.name}-${index}`}
+                    className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F8F9FC] transition-colors">
+                    <div className="flex items-center gap-3">
+                      <span className="w-9 h-9 rounded-xl bg-[#F0F2F8] flex items-center justify-center">📦</span>
+                      <div>
+                      <p className="text-xs font-medium text-[#0D1B3E]">{item.product.name}</p>
+                      <p className="text-[10px] text-gray-400">
+                        ₱{Number(item.unit_price).toLocaleString()} × {item.quantity}
+                      </p>
+                      </div>
+                    </div>
+                    <p className="text-xs font-semibold text-[#0D1B3E]">
+                      ₱{Number(item.subtotal).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+                <div className="flex justify-between items-center px-4 py-4 bg-gradient-to-r from-[#F8F9FC] to-[#fef9ee]">
+                  <p className="text-sm font-semibold text-[#0D1B3E]">Total Amount</p>
+                  <p className="text-lg font-bold text-[#C9A84C]">
+                    ₱{Number(selectedOrder.total_amount).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-[#0D1B3E]/8 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Order journey</p>
+                    <p className="text-sm font-semibold text-[#0D1B3E] mt-0.5">
+                      {selectedOrder.status === 'cancelled' ? 'Order cancelled' : 'Track your order progress'}
+                    </p>
+                  </div>
+                  <span className="text-xl">{selectedOrder.status === 'delivered' ? '🎉' : selectedOrder.status === 'cancelled' ? '✕' : '🚚'}</span>
+                </div>
+
+                {selectedOrder.status === 'cancelled' ? (
+                  <div className="rounded-xl bg-[#fdecea] border border-[#e05252]/20 px-4 py-3 flex items-center gap-3">
+                    <span className="w-9 h-9 rounded-full bg-[#e05252] text-white flex items-center justify-center font-bold">×</span>
+                    <div>
+                      <p className="text-xs font-semibold text-[#a03030]">This order was cancelled</p>
+                      <p className="text-[10px] text-[#a03030]/70 mt-0.5">No further processing or delivery will occur.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative grid grid-cols-3">
+                    <div className="absolute top-5 left-[16.66%] right-[16.66%] h-1 bg-[#e6e8ef] rounded-full" />
+                    <div
+                      className="absolute top-5 left-[16.66%] h-1 bg-gradient-to-r from-[#C9A84C] to-[#dfc36f] rounded-full transition-all"
+                      style={{
+                        width: selectedOrder.status === 'pending'
+                          ? '0%'
+                          : selectedOrder.status === 'processing'
+                            ? '33.34%'
+                            : '66.68%',
+                      }}
+                    />
+                    {([
+                      ['pending', 'Order Placed', '✓'],
+                      ['processing', 'Processing', '📦'],
+                      ['delivered', 'Delivered', '✓'],
+                    ] as const).map(([step, label, icon]) => {
+                      const sequence = ['pending', 'processing', 'delivered']
+                      const reached = sequence.indexOf(step) <= sequence.indexOf(selectedOrder.status)
+                      const current = step === selectedOrder.status
+                      return (
+                        <div key={step} className="relative z-10 text-center">
+                          <div className={`mx-auto w-11 h-11 rounded-full flex items-center justify-center border-4 border-white shadow-sm transition-all ${
+                            reached ? 'bg-[#C9A84C] text-white' : 'bg-[#e6e8ef] text-gray-400'
+                          } ${current ? 'ring-4 ring-[#C9A84C]/15 scale-110' : ''}`}>
+                            <span className="text-sm font-bold">{icon}</span>
+                          </div>
+                          <p className={`text-xs mt-2 font-semibold ${reached ? 'text-[#0D1B3E]' : 'text-gray-300'}`}>{label}</p>
+                          <p className="text-[9px] text-gray-400 mt-0.5">
+                            {step === 'pending' ? 'Received' : step === 'processing' ? 'Being prepared' : 'Completed'}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {selectedOrder.notes && (
+                <div className="rounded-xl bg-[#fef9ee] border border-[#C9A84C]/30 px-4 py-3">
+                  <p className="text-[10px] uppercase text-[#9a6f1e]">Order note</p>
+                  <p className="text-xs text-[#7a5717] mt-1">{selectedOrder.notes}</p>
+                </div>
+              )}
+
+              <button onClick={() => setSelectedOrder(null)}
+                className="w-full bg-gradient-to-r from-[#0D1B3E] to-[#193464] text-white text-sm font-medium py-3 rounded-xl hover:shadow-lg hover:shadow-[#0D1B3E]/15 transition-all">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Cancel Confirmation Modal */}

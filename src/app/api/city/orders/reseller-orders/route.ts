@@ -254,9 +254,17 @@ export async function POST(req: NextRequest) {
 
     // Validate products and check city dist inventory
     const productIds = items.map((i: { product_id: string }) => i.product_id)
+    const sellerProfile = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { dist_level: true },
+    })
+    const isBranch = sellerProfile?.dist_level === 'branch'
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
-      select: { id: true, name: true, price: true, reseller_price: true },
+      select: {
+        id: true, name: true, price: true, reseller_price: true,
+        cost_price: true, city_price: true, branch_price: true,
+      },
     })
 
     if (products.length !== productIds.length)
@@ -270,9 +278,12 @@ export async function POST(req: NextRequest) {
       const unit_price = isNonMemberSale
         ? Number(product.price)
         : Number(product.reseller_price || product.price)
+      const unit_acquisition_cost = isBranch
+        ? Number(product.branch_price) || Number(product.cost_price)
+        : Number(product.city_price) || Number(product.cost_price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
-      return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }
+      return { product_id: item.product_id, quantity: item.quantity, unit_price, unit_acquisition_cost, subtotal }
     })
     const cashReceived = Number(cash_received)
     const totalCents = Math.round(total_amount * 100)
@@ -316,11 +327,13 @@ export async function POST(req: NextRequest) {
           order_type,
           status:            'delivered', // immediate — city dist is present
           total_amount,
+          delivered_at:      new Date(),
           is_cross_purchase: false,
           is_non_member_sale: isNonMemberSale,
           customer_name:     isNonMemberSale ? String(customer_name || '').trim() || 'Walk-in Customer' : null,
           payment_method:    'cash',
           payment_status:    'paid',
+          paid_at:            new Date(),
           payment_reference: `Cash received: ${cashReceived.toFixed(2)}; Change: ${changeAmount.toFixed(2)}`,
           notes:             notes?.trim() || null,
           items:             { create: orderItems },

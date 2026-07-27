@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getCutoffDays, getNextCutoffDate, getPayoutDateMap, getPayoutDateFromCutoff } from '@/app/api/admin/settings/route'
 import prisma from '@/app/lib/prisma'
+import { getResellerPayoutMode } from '@/app/lib/resellerPayoutPolicy'
 
 // ── GET wallet balance + commission history + payout history ──
 export async function GET(req: NextRequest) {
@@ -44,6 +45,10 @@ export async function GET(req: NextRequest) {
           status:             true,
           payment_method:     true,
           payment_reference:  true,
+          transaction_number: true,
+          cutoff_date:        true,
+          payout_date:        true,
+          notes:              true,
           requested_at:       true,
           processed_at:       true,
         },
@@ -134,6 +139,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { amount, payment_method, payment_reference } = await req.json()
+    const payoutMode = await getResellerPayoutMode()
 
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       return NextResponse.json({ error: 'Invalid amount.' }, { status: 400 })
@@ -142,8 +148,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Minimum payout request is ₱500.00.' }, { status: 400 })
     }
 
-    if (!payment_method?.trim()) {
-      return NextResponse.json({ error: 'Payment method is required.' }, { status: 400 })
+    let resolvedMethod = payoutMode === 'cash' ? 'Cash' : payoutMode === 'check' ? 'Check' : ''
+    let resolvedReference: string | null = payoutMode === 'account' ? null : user.full_name
+    if (payoutMode === 'account') {
+      const approved = await prisma.paymentMethod.findFirst({
+        where: { id: payment_method, user_id: user.id, status: 'approved' },
+      })
+      if (!approved) {
+        return NextResponse.json({ error: 'Select an approved payout account.' }, { status: 400 })
+      }
+      resolvedMethod = approved.type === 'gcash' ? 'GCash' : approved.bank_name || 'Bank Transfer'
+      resolvedReference = `${approved.account_name} · ${approved.account_number}`
     }
 
     // Check wallet balance
@@ -188,8 +203,8 @@ export async function POST(req: NextRequest) {
         user_id:           user.id,
         amount:            requestedAmount,
         status:            'pending',
-        payment_method:    payment_method.trim(),
-        payment_reference: payment_reference?.trim() || null,
+        payment_method:    resolvedMethod,
+        payment_reference: resolvedReference || payment_reference?.trim() || null,
       },
     })
 

@@ -82,6 +82,22 @@ function MetricCard({ label, value, detail, color }: {
   )
 }
 
+function BreakdownLine({ label, value, emphasize, color }: {
+  label: string
+  value: string
+  emphasize?: boolean
+  color?: string
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-3 ${emphasize ? 'border-t border-[#0D1B3E]/10 pt-2 mt-2' : ''}`}>
+      <span className={emphasize ? 'font-semibold text-[#0D1B3E]' : 'text-gray-400'}>{label}</span>
+      <span className={emphasize ? 'font-bold' : 'font-medium text-[#0D1B3E]'} style={color ? { color } : undefined}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
 export default function CityReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>('today')
   const [report, setReport] = useState<ReportData | null>(null)
@@ -178,6 +194,68 @@ export default function CityReportsPage() {
                 <span className="text-gray-400">PIN payable to Hiroma</span><span className="text-right">{peso(report.registrations.pin_allocation)}</span>
                 <span className="text-gray-400">Profit</span><span className="text-right font-semibold text-[#1a7a4a]">{peso(report.registrations.profit)}</span>
               </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden mb-6">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 bg-gradient-to-r from-[#0D1B3E] to-[#162b5b]">
+              <h2 className="text-sm font-bold text-white">Overall Liquidation Breakdown</h2>
+              <p className="text-[11px] text-white/65 mt-1">
+                Complete reconciliation of sales, registration activity, costs, collections, and final net profit.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+              <div className="p-5 border-b md:border-r xl:border-b-0 border-[#0D1B3E]/8">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#1a7a4a] mb-4">Revenue Composition</p>
+                <div className="space-y-2.5 text-xs">
+                  <BreakdownLine label="Member / reseller sales" value={peso(report.member_sales.revenue)} />
+                  <BreakdownLine label="Non-member / SRP sales" value={peso(report.non_member_sales.revenue)} />
+                  <BreakdownLine label="Registration product revenue" value={peso(report.registrations.revenue)} />
+                  <BreakdownLine label="Gross revenue" value={peso(report.liquidation.gross_revenue)}
+                    emphasize color="#1a7a4a" />
+                </div>
+              </div>
+
+              <div className="p-5 border-b xl:border-b-0 xl:border-r border-[#0D1B3E]/8">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#dc4444] mb-4">Cost Composition</p>
+                <div className="space-y-2.5 text-xs">
+                  <BreakdownLine label="Member / reseller cost" value={peso(report.member_sales.cost)} />
+                  <BreakdownLine label="Non-member / SRP cost" value={peso(report.non_member_sales.cost)} />
+                  <BreakdownLine label="Registration product acquisition" value={peso(report.registrations.acquisition_cost)} />
+                  <BreakdownLine label="Total cost" value={peso(report.liquidation.total_cost)}
+                    emphasize color="#dc4444" />
+                </div>
+              </div>
+
+              <div className="p-5 border-b md:border-b-0 md:border-r border-[#0D1B3E]/8">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#2563eb] mb-4">Profit Reconciliation</p>
+                <div className="space-y-2.5 text-xs">
+                  <BreakdownLine label="Member / reseller profit" value={peso(report.member_sales.profit)} />
+                  <BreakdownLine label="Non-member / SRP profit" value={peso(report.non_member_sales.profit)} />
+                  <BreakdownLine label="Registration profit" value={peso(report.registrations.profit)} />
+                  <BreakdownLine label="Overall net profit" value={peso(report.liquidation.net_profit)}
+                    emphasize color="#2563eb" />
+                </div>
+              </div>
+
+              <div className="p-5">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#C9A84C] mb-4">Cash Accountability</p>
+                <div className="space-y-2.5 text-xs">
+                  <BreakdownLine label="Product cash collected" value={peso(report.liquidation.collected_product_cash)} />
+                  <BreakdownLine label="Registration cash collected" value={peso(report.registrations.customer_payment)} />
+                  <BreakdownLine label="PIN payable to Hiroma" value={peso(report.registrations.pin_allocation)} />
+                  <BreakdownLine label="Outstanding product sales" value={peso(report.liquidation.outstanding_product_sales)} />
+                  <BreakdownLine label="Total cash collected" value={peso(report.liquidation.collected_cash_total)}
+                    emphasize color="#9a7418" />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-[#fef9ee] border-t border-[#C9A84C]/20 text-[11px] text-[#7a6428]">
+              Net profit reconciliation: {peso(report.member_sales.profit)} member sales + {peso(report.non_member_sales.profit)}
+              {' '}non-member sales + {peso(report.registrations.profit)} registrations = {peso(report.liquidation.net_profit)}.
+              Registration cash includes {peso(report.registrations.pin_allocation)} payable to Hiroma and is not counted as City/Branch revenue.
             </div>
           </div>
 

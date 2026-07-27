@@ -1,96 +1,76 @@
-// src/app/components/ui/NotificationBell.tsx
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useNotifications, Notification } from '@/app/hooks/useNotifications'
-import { useEffect, useRef } from 'react'
 
-const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
-
-const ROLE_LABELS: Record<string, string> = {
-  admin:      '👑 Admin',
-  regional:   '🏙️ Regional Dist.',
-  provincial: '🏛️ Provincial Dist.',
-  city:       '🏢 City Dist.',
-  reseller:   '👤 Reseller',
-  unknown:    '❓ Unknown',
+function timeAgo(value: string) {
+  const diff = Math.max(0, Date.now() - new Date(value).getTime())
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return new Date(value).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
 }
 
-function timeAgo(date: string) {
-  // Ensure UTC is parsed correctly — append Z if missing
-  const normalized = date.endsWith('Z') || date.includes('+') ? date : date + 'Z'
-  const diff = Math.floor((Date.now() - new Date(normalized).getTime()) / 1000)
-  if (diff < 5)    return 'just now'
-  if (diff < 60)   return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return new Date(normalized).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
+function notificationIcon(type: string) {
+  if (type.includes('referral')) return '👥'
+  if (type.includes('binary') || type === 'sponsor_point') return '🔗'
+  if (type.startsWith('payout')) return '💸'
+  if (type.startsWith('order')) return '🛒'
+  if (type.startsWith('payment_method')) return '💳'
+  if (type.startsWith('security')) return '🛡️'
+  return '🔔'
 }
 
-export function NotificationToast({ notif, href }: { notif: Notification; href: string }) {
+function NotificationToast({ notification }: { notification: Notification }) {
+  if (!notification.action_url) return null
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] animate-slide-up cursor-pointer"
-      onClick={() => window.location.href = href}>
-      <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 p-4 w-80 flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-[#1a7a4a]/15 flex items-center justify-center text-xl flex-shrink-0">
-          🛒
+    <Link href={notification.action_url}
+      className="fixed bottom-5 right-5 z-[9999] w-80 rounded-2xl border border-[#0D1B3E]/10 bg-white p-4 shadow-2xl">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#C9A84C]/15 text-xl">
+          {notificationIcon(notification.type)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-[#0D1B3E]">{notification.title}</p>
+          <p className="mt-1 text-xs text-gray-500">{notification.message}</p>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-[#0D1B3E]">New Order Received!</p>
-          <p className="text-xs text-gray-500 mt-0.5 truncate">
-            {notif.buyer_name}
-          </p>
-          <p className="text-sm font-bold text-[#1a7a4a] mt-1">{fmt(notif.amount)}</p>
-          {notif.order_number && (
-            <p className="text-[10px] text-gray-400 mt-0.5">{notif.order_number}</p>
-          )}
-        </div>
-        <div className="w-2 h-2 rounded-full bg-[#1a7a4a] flex-shrink-0 mt-1 animate-pulse" />
+        <span className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#e05252]" />
       </div>
-    </div>
+    </Link>
   )
 }
 
 export default function NotificationBell({ userId, role }: { userId?: string; role?: string }) {
-  const { notifications, unreadCount, toast, markAllRead, markOneRead, mounted } = useNotifications(userId)
-  const router = useRouter()
-
-  const getOrderRoute = (sellerId: string) => {
-    switch (role) {
-      case 'admin':      return '/dashboard/admin/orders'
-      case 'regional':   return '/dashboard/regional/orders'
-      case 'provincial': return '/dashboard/provincial/orders'
-      case 'city':       return '/dashboard/city/orders'
-      case 'reseller':   return '/dashboard/reseller/orders'
-      default:           return '/dashboard'
-    }
-  }
-
-  const handleNotifClick = (n: Notification) => {
-    markOneRead(n.id)
-    setOpen(false)
-    router.push(getOrderRoute(n.seller_id))
-  }
+  const { notifications, unreadCount, toast, markAllRead, markOneRead, mounted } =
+    useNotifications(userId, 5)
   const [open, setOpen] = useState(false)
+  const router = useRouter()
+  const allHref = role === 'reseller' ? '/dashboard/reseller/notifications' : null
+
+  const openNotification = async (notification: Notification) => {
+    await markOneRead(notification.id)
+    setOpen(false)
+    if (notification.action_url) router.push(notification.action_url)
+  }
 
   return (
     <>
-      {/* Toast */}
-      {toast && <NotificationToast notif={toast} href={getOrderRoute(toast.seller_id)} />}
-
-      {/* Bell */}
+      {toast && <NotificationToast notification={toast} />}
       <div className="relative">
         <button
-          onClick={() => setOpen(!open)}
-          className="relative w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          onClick={() => setOpen((value) => !value)}
+          aria-label="Notifications"
+          className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 transition-colors hover:bg-white/20">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
           {mounted && unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#e05252] text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
-              {unreadCount > 9 ? '9+' : unreadCount}
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#e05252] px-1 text-[9px] font-bold text-white">
+              {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}
         </button>
@@ -98,67 +78,67 @@ export default function NotificationBell({ userId, role }: { userId?: string; ro
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-11 z-50 bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 w-80 overflow-hidden">
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[#0D1B3E]/8 bg-[#f8f9fc]">
+            <div className="absolute right-0 top-11 z-50 w-80 overflow-hidden rounded-2xl border border-[#0D1B3E]/10 bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-3">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-bold text-[#0D1B3E]">Notifications</p>
                   {unreadCount > 0 && (
-                    <span className="text-[10px] font-bold bg-[#e05252] text-white px-1.5 py-0.5 rounded-full">{unreadCount}</span>
+                    <span className="rounded-full bg-[#e05252] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      {unreadCount}
+                    </span>
                   )}
                 </div>
-                {notifications.length > 0 && (
-                  <button onClick={markAllRead} className="text-[10px] text-[#C9A84C] hover:underline">
+                {unreadCount > 0 && (
+                  <button onClick={markAllRead} className="text-[10px] text-[#9a6f1e] hover:underline">
                     Mark all read
                   </button>
                 )}
               </div>
 
-              {/* List */}
-              <div className="max-h-96 overflow-y-auto">
+              <div>
                 {notifications.length === 0 ? (
                   <div className="flex flex-col items-center py-10">
-                    <span className="text-3xl mb-2">🔔</span>
+                    <span className="mb-2 text-3xl">🔔</span>
                     <p className="text-sm text-gray-400">No notifications yet</p>
-                    <p className="text-xs text-gray-300 mt-1">New orders will appear here</p>
+                    <p className="mt-1 text-xs text-gray-300">Important account activity will appear here.</p>
                   </div>
-                ) : notifications.map(n => (
-                  <div key={n.id}
-                    onClick={() => handleNotifClick(n)}
-                    className={`flex items-start gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 transition-colors cursor-pointer
-                      ${!n.read
-                        ? 'bg-[#fffbeb] hover:bg-[#fef3c7] border-l-2 border-l-[#C9A84C]'
-                        : 'hover:bg-[#f8f9fc] opacity-60'
+                ) : notifications.map((notification) => {
+                  const unread = !notification.read_at
+                  return (
+                    <button key={notification.id} onClick={() => openNotification(notification)}
+                      className={`flex w-full items-start gap-3 border-b border-[#0D1B3E]/5 px-4 py-3 text-left transition-colors ${
+                        unread
+                          ? 'border-l-2 border-l-[#C9A84C] bg-[#fffbeb] hover:bg-[#fef3c7]'
+                          : 'bg-white hover:bg-[#f8f9fc]'
                       }`}>
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${!n.read ? 'bg-[#1a7a4a]/15' : 'bg-[#f1f5f9]'}`}>
-                      🛒
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <p className={`text-xs truncate ${!n.read ? 'font-bold text-[#0D1B3E]' : 'font-medium text-gray-400'}`}>
-                          New Order
-                        </p>
-                        <p className="text-[9px] text-gray-400 flex-shrink-0">{timeAgo(n.created_at)}</p>
-                      </div>
-                      <p className={`text-[11px] truncate ${!n.read ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>
-                        {n.buyer_name}
-                      </p>
-                      <p className={`text-xs font-bold ${!n.read ? 'text-[#1a7a4a]' : 'text-gray-400'}`}>
-                        {fmt(n.amount)}
-                      </p>
-                      {n.order_number && <p className="text-[9px] text-gray-400">{n.order_number}</p>}
-                    </div>
-                    {!n.read
-                      ? <div className="w-2.5 h-2.5 rounded-full bg-[#C9A84C] flex-shrink-0 mt-1 animate-pulse" />
-                      : <div className="w-2.5 h-2.5 rounded-full bg-gray-200 flex-shrink-0 mt-1" />
-                    }
-                  </div>
-                ))}
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg ${
+                        unread ? 'bg-[#C9A84C]/15' : 'bg-[#f1f5f9]'
+                      }`}>{notificationIcon(notification.type)}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className={`truncate text-xs ${unread ? 'font-bold text-[#0D1B3E]' : 'font-medium text-gray-500'}`}>
+                            {notification.title}
+                          </span>
+                          <span className="shrink-0 text-[9px] text-gray-400">{timeAgo(notification.created_at)}</span>
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 block text-[11px] text-gray-500">
+                          {notification.message}
+                        </span>
+                      </span>
+                      {unread && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#C9A84C]" />}
+                    </button>
+                  )
+                })}
               </div>
 
-              {notifications.length > 0 && (
-                <div className="px-4 py-2 border-t border-[#0D1B3E]/8 text-center">
-                  <p className="text-[10px] text-gray-400">{notifications.length} notification{notifications.length !== 1 ? 's' : ''} total</p>
+              {allHref ? (
+                <Link href={allHref} onClick={() => setOpen(false)}
+                  className="block border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-3 text-center text-xs font-semibold text-[#0D1B3E] hover:text-[#9a6f1e]">
+                  See all notifications
+                </Link>
+              ) : (
+                <div className="border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-2 text-center text-[10px] text-gray-400">
+                  Showing the latest 5 notifications
                 </div>
               )}
             </div>

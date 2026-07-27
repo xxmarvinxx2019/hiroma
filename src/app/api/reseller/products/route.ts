@@ -10,21 +10,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = req.nextUrl
-    const requestedCityDistId = searchParams.get('city_dist_id')
-
-    let cityDistId = requestedCityDistId
-
-    if (!cityDistId) {
-      const profile = await prisma.resellerProfile.findUnique({
-        where:  { user_id: user.id },
-        select: { city_dist_id: true },
-      })
-      if (!profile) {
-        return NextResponse.json({ error: 'Reseller profile not found.' }, { status: 404 })
-      }
-      cityDistId = profile.city_dist_id
+    const profile = await prisma.resellerProfile.findUnique({
+      where:  { user_id: user.id },
+      select: { city_dist_id: true },
+    })
+    if (!profile) {
+      return NextResponse.json({ error: 'Reseller profile not found.' }, { status: 404 })
     }
+    const cityDistId = profile.city_dist_id
 
     // Validate city distributor
     const cityDist = await prisma.user.findFirst({

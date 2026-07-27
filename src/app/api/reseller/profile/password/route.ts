@@ -33,10 +33,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Current password is incorrect.' }, { status: 400 })
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data:  { password_hash: await hashPassword(new_password) },
-    })
+    const passwordHash = await hashPassword(new_password)
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data:  { password_hash: passwordHash },
+      }),
+      prisma.notification.create({
+        data: {
+          user_id: user.id,
+          type: 'security_password_changed',
+          title: 'Password changed',
+          message: 'Your Hiroma account password was changed successfully. If this was not you, contact Hiroma support immediately.',
+          entity_type: 'security',
+          action_url: '/dashboard/reseller/profile',
+        },
+      }),
+    ])
 
     return NextResponse.json({ success: true, message: 'Password updated successfully.' })
   } catch (error) {

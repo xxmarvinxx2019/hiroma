@@ -30,6 +30,11 @@ interface Package {
   point_php_value: number
   point_reset_days: number
   daily_product_pairing_cap: number
+  product_binary_cap_enabled: boolean
+  direct_referral_cap_enabled: boolean
+  daily_referral_cap: number
+  binary_pair_cap_enabled: boolean
+  daily_binary_pair_cap: number
   is_active: boolean
   created_at: string
   products: PackageProduct[]
@@ -58,6 +63,11 @@ export default function PackagesPage() {
     point_php_value:           '',
     point_reset_days:          '30',
     daily_product_pairing_cap: '50',
+    product_binary_cap_enabled: true,
+    direct_referral_cap_enabled: true,
+    daily_referral_cap:        '10',
+    binary_pair_cap_enabled:    true,
+    daily_binary_pair_cap:      '10',
   })
   const [selectedProducts, setSelectedProducts] = useState<
     { product_id: string; quantity: number }[]
@@ -97,6 +107,11 @@ export default function PackagesPage() {
       point_php_value:           '',
       point_reset_days:          '30',
       daily_product_pairing_cap: '50',
+      product_binary_cap_enabled: true,
+      direct_referral_cap_enabled: true,
+      daily_referral_cap:        '10',
+      binary_pair_cap_enabled:    true,
+      daily_binary_pair_cap:      '10',
     })
     setSelectedProducts([])
     setFormError('')
@@ -114,6 +129,11 @@ export default function PackagesPage() {
       point_php_value:           String(pkg.point_php_value),
       point_reset_days:          String(pkg.point_reset_days),
       daily_product_pairing_cap: String(pkg.daily_product_pairing_cap || 50),
+      product_binary_cap_enabled: pkg.product_binary_cap_enabled !== false,
+      direct_referral_cap_enabled: pkg.direct_referral_cap_enabled !== false,
+      daily_referral_cap:        String(pkg.daily_referral_cap || 10),
+      binary_pair_cap_enabled:    pkg.binary_pair_cap_enabled !== false,
+      daily_binary_pair_cap:      String(pkg.daily_binary_pair_cap || 10),
     })
     setSelectedProducts(
       pkg.products.map((p) => ({
@@ -140,6 +160,14 @@ export default function PackagesPage() {
       setFormError('Please fill in all required fields.')
       return
     }
+    if (form.direct_referral_cap_enabled && Number(form.daily_referral_cap) < 1) {
+      setFormError('Direct referral daily cap must be at least 1 when enabled.')
+      return
+    }
+    if (form.binary_pair_cap_enabled && Number(form.daily_binary_pair_cap) < 1) {
+      setFormError('Registration binary daily cap must be at least 1 when enabled.')
+      return
+    }
 
     setFormLoading(true)
     setFormError('')
@@ -159,6 +187,11 @@ export default function PackagesPage() {
         point_php_value:           parseFloat(form.point_php_value),
         point_reset_days:          parseInt(form.point_reset_days),
         daily_product_pairing_cap: parseInt(form.daily_product_pairing_cap),
+        product_binary_cap_enabled: form.product_binary_cap_enabled,
+        direct_referral_cap_enabled: form.direct_referral_cap_enabled,
+        daily_referral_cap:        parseInt(form.daily_referral_cap) || 10,
+        binary_pair_cap_enabled:    form.binary_pair_cap_enabled,
+        daily_binary_pair_cap:      parseInt(form.daily_binary_pair_cap) || 10,
         products:                  selectedProducts.filter((p) => p.product_id),
       }),
     })
@@ -223,11 +256,11 @@ export default function PackagesPage() {
                 <div>
                   <h3 className="text-white font-semibold text-sm">{pkg.name}</h3>
                   <p className="text-[#C9A84C] text-xs mt-0.5">
-                    PIN: ₱{Number(pkg.price).toLocaleString()}
+                    PIN allocation: ₱{Number(pkg.price).toLocaleString()}
                   </p>
                   {pkg.products.length > 0 && (
                     <p className="text-[#e8f7ef] text-xs mt-0.5">
-                      Total: ₱{(Number(pkg.price) + pkg.products.reduce((s, p) => s + Number(p.product.price || p.product.reseller_price || 0) * p.quantity, 0)).toLocaleString()}
+                      Customer price: ₱{pkg.products.reduce((s, p) => s + Number(p.product.price || p.product.reseller_price || 0) * p.quantity, 0).toLocaleString()}
                     </p>
                   )}
                 </div>
@@ -245,7 +278,24 @@ export default function PackagesPage() {
                     { label: 'Binary Points',               value: `${Number(pkg.pairing_bonus_value).toLocaleString()} pts` },
                     { label: 'Product Binary Point Value',  value: `${Number(pkg.point_php_value).toLocaleString()} pts` },
                     { label: 'Point reset period',          value: `Every ${pkg.point_reset_days} days` },
-                    { label: 'Daily Product Pairing Cap',   value: `${pkg.daily_product_pairing_cap || 50} pairs/day` },
+                    {
+                      label: 'Product Binary Daily Cap',
+                      value: pkg.product_binary_cap_enabled !== false
+                        ? `${pkg.daily_product_pairing_cap || 50} pairs/day`
+                        : 'Unlimited (Off)',
+                    },
+                    {
+                      label: 'Direct Referral Daily Cap',
+                      value: pkg.direct_referral_cap_enabled
+                        ? `${pkg.daily_referral_cap || 10} referrals/day`
+                        : 'Unlimited (Off)',
+                    },
+                    {
+                      label: 'Registration Binary Daily Cap',
+                      value: pkg.binary_pair_cap_enabled
+                        ? `${pkg.daily_binary_pair_cap || 10} pairs/day`
+                        : 'Unlimited (Off)',
+                    },
                   ].map((item) => (
                     <div key={item.label} className="flex justify-between py-1 border-b border-[#0D1B3E]/5">
                       <span className="text-xs text-gray-400">{item.label}</span>
@@ -359,13 +409,112 @@ export default function PackagesPage() {
                       className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
                   },
                   {
-                    label: 'Daily Product Pairing Cap',
-                    hint:  'Max product binary pairs per day',
+                    label: 'Direct Referral Daily Cap',
+                    hint: form.direct_referral_cap_enabled
+                      ? 'Excess referrals go to Hiroma after this daily limit'
+                      : 'Disabled — direct referrals are unlimited',
                     required: false,
-                    input: <input type="number" value={form.daily_product_pairing_cap}
-                      onChange={(e) => setForm({ ...form, daily_product_pairing_cap: e.target.value })}
-                      placeholder="e.g. 50"
-                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                    input: (
+                      <div className="flex shrink-0 items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, direct_referral_cap_enabled: !form.direct_referral_cap_enabled })}
+                          className={`inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-bold tracking-wide transition-colors ${
+                            form.direct_referral_cap_enabled
+                              ? 'border-[#16814d] bg-[#e8f7ef] text-[#126b41]'
+                              : 'border-gray-300 bg-gray-100 text-gray-500'
+                          }`}
+                          aria-pressed={form.direct_referral_cap_enabled}
+                        >
+                          <span className={`h-2 w-2 rounded-full ${
+                            form.direct_referral_cap_enabled ? 'bg-[#16814d]' : 'bg-gray-400'
+                          }`} />
+                          {form.direct_referral_cap_enabled ? 'ON' : 'OFF'}
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          disabled={!form.direct_referral_cap_enabled}
+                          value={form.daily_referral_cap}
+                          onChange={(e) => setForm({ ...form, daily_referral_cap: e.target.value })}
+                          placeholder="e.g. 10"
+                          aria-label="Direct referral daily limit"
+                          className="h-9 w-[72px] shrink-0 rounded-lg border border-[#0D1B3E]/15 bg-white px-3 text-sm outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    label: 'Registration Binary Daily Cap',
+                    hint: form.binary_pair_cap_enabled
+                      ? 'Excess package-binary pairs go to Hiroma after this daily limit'
+                      : 'Disabled — registration binary pairs are unlimited',
+                    required: false,
+                    input: (
+                      <div className="flex shrink-0 items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, binary_pair_cap_enabled: !form.binary_pair_cap_enabled })}
+                          className={`inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-bold tracking-wide transition-colors ${
+                            form.binary_pair_cap_enabled
+                              ? 'border-[#16814d] bg-[#e8f7ef] text-[#126b41]'
+                              : 'border-gray-300 bg-gray-100 text-gray-500'
+                          }`}
+                          aria-pressed={form.binary_pair_cap_enabled}
+                        >
+                          <span className={`h-2 w-2 rounded-full ${
+                            form.binary_pair_cap_enabled ? 'bg-[#16814d]' : 'bg-gray-400'
+                          }`} />
+                          {form.binary_pair_cap_enabled ? 'ON' : 'OFF'}
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          disabled={!form.binary_pair_cap_enabled}
+                          value={form.daily_binary_pair_cap}
+                          onChange={(e) => setForm({ ...form, daily_binary_pair_cap: e.target.value })}
+                          placeholder="e.g. 10"
+                          aria-label="Registration binary daily limit"
+                          className="h-9 w-[72px] shrink-0 rounded-lg border border-[#0D1B3E]/15 bg-white px-3 text-sm outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    label: 'Product Binary Daily Cap',
+                    hint: form.product_binary_cap_enabled
+                      ? 'Excess product-binary pairs go to Hiroma after this daily limit'
+                      : 'Disabled — product-binary pairs are unlimited',
+                    required: false,
+                    input: (
+                      <div className="flex shrink-0 items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, product_binary_cap_enabled: !form.product_binary_cap_enabled })}
+                          className={`inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-bold tracking-wide transition-colors ${
+                            form.product_binary_cap_enabled
+                              ? 'border-[#16814d] bg-[#e8f7ef] text-[#126b41]'
+                              : 'border-gray-300 bg-gray-100 text-gray-500'
+                          }`}
+                          aria-pressed={form.product_binary_cap_enabled}
+                        >
+                          <span className={`h-2 w-2 rounded-full ${
+                            form.product_binary_cap_enabled ? 'bg-[#16814d]' : 'bg-gray-400'
+                          }`} />
+                          {form.product_binary_cap_enabled ? 'ON' : 'OFF'}
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          disabled={!form.product_binary_cap_enabled}
+                          value={form.daily_product_pairing_cap}
+                          onChange={(e) => setForm({ ...form, daily_product_pairing_cap: e.target.value })}
+                          placeholder="e.g. 50"
+                          aria-label="Product binary daily limit"
+                          className="h-9 w-[72px] shrink-0 rounded-lg border border-[#0D1B3E]/15 bg-white px-3 text-sm outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                        />
+                      </div>
+                    ),
                   },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center justify-between gap-3 bg-white rounded-lg px-3 py-2">
@@ -391,15 +540,14 @@ export default function PackagesPage() {
                         const prod = products.find((p) => p.id === sp.product_id)
                         return sum + (Number(prod?.price || prod?.reseller_price || 0) * Number(sp.quantity))
                       }, 0)
-                      const pinPrice = parseFloat(form.price) || 0
                       return (
                         <div className="text-right">
                           <p className="text-[10px] text-gray-400">
-                            Products total: <span className="text-[#0D1B3E] font-medium">₱{productTotal.toLocaleString()}</span>
+                            Customer package price: <span className="text-[#0D1B3E] font-medium">₱{productTotal.toLocaleString()}</span>
                           </p>
                           <p className="text-[10px] text-gray-400">
-                            Package total value: <span className="text-[#1a7a4a] font-medium">
-                              ₱{(pinPrice + productTotal).toLocaleString()}
+                            PIN allocation inside package: <span className="text-[#1a7a4a] font-medium">
+                              ₱{(parseFloat(form.price) || 0).toLocaleString()}
                             </span>
                           </p>
                         </div>

@@ -80,16 +80,16 @@ export default function ResellerGenealogyPage() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-[#0D1B3E]">Genealogy / Downline</h1>
+        <h1 className="text-xl font-semibold text-[#0D1B3E]">Genealogy / Affiliates</h1>
         <p className="text-sm text-gray-400 mt-0.5">All resellers in your network</p>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
-          { label: 'Total Downline', value: summary.total, accent: '#0D1B3E' },
-          { label: 'Left Leg',       value: summary.left,  accent: '#2563eb' },
-          { label: 'Right Leg',      value: summary.right, accent: '#9a6f1e' },
+          { label: 'Total Affiliates', value: summary.total, accent: '#0D1B3E' },
+          { label: 'Left Affiliates',  value: summary.left,  accent: '#2563eb' },
+          { label: 'Right Affiliates', value: summary.right, accent: '#9a6f1e' },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
             style={{ borderTop: `2px solid ${s.accent}` }}>
@@ -140,7 +140,7 @@ export default function ResellerGenealogyPage() {
         ) : downline.length === 0 ? (
           <div className="px-4 py-12 text-center">
             <p className="text-gray-400 text-sm">
-              {summary.total === 0 ? 'No downline yet.' : 'No results found.'}
+              {summary.total === 0 ? 'No affiliates yet.' : 'No results found.'}
             </p>
           </div>
         ) : (
