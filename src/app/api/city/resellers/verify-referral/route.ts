@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
           select: {
             daily_referral_count: true,
             last_referral_date: true,
-            package: { select: { name: true } },
+            package: { select: { id: true, name: true } },
           },
         },
       },
@@ -118,7 +118,13 @@ export async function POST(req: NextRequest) {
       const lastDate = referrer.reseller_profile.last_referral_date
       const isToday = lastDate ? new Date(lastDate) >= today : false
       dailyCount = isToday ? (referrer.reseller_profile.daily_referral_count || 0) : 0
-      dailyCapReached = dailyCount >= 10
+      const [capConfig] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+        SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
+               COALESCE(daily_referral_cap, 10)::int AS cap
+        FROM packages
+        WHERE id = ${referrer.reseller_profile.package.id}
+      `
+      dailyCapReached = Boolean(capConfig?.enabled) && dailyCount >= Number(capConfig?.cap || 10)
     }
 
     return NextResponse.json({

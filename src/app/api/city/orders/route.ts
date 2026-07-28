@@ -367,16 +367,26 @@ async function checkSponsorPairingPoints(
       },
     })
     if (!profile) continue
-    // Fetch rank/total_pu via raw SQL (not in Prisma client until generate is run)
-    let extraData = { rank: 'default', total_pu: 0 }
+    // Fetch rank/total_pu and package cap settings via raw SQL.
+    let extraData = { rank: 'default', total_pu: 0, daily_product_pairing_cap: 50, product_binary_cap_enabled: true }
     try {
-      const rows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
-        SELECT COALESCE(rank, 'default') as rank, COALESCE(total_pu, 0) as total_pu
-        FROM reseller_profiles WHERE user_id::text = ${ancestor.user_id}
+      const rows = await prisma.$queryRaw<{ rank: string; total_pu: number; daily_product_pairing_cap: number; product_binary_cap_enabled: boolean }[]>`
+        SELECT COALESCE(rp.rank, 'default') as rank,
+               COALESCE(rp.total_pu, 0) as total_pu,
+               COALESCE(p.daily_product_pairing_cap, 50)::int as daily_product_pairing_cap,
+               COALESCE(p.product_binary_cap_enabled, true) as product_binary_cap_enabled
+        FROM reseller_profiles rp
+        LEFT JOIN packages p ON p.id = rp.package_id
+        WHERE rp.user_id::text = ${ancestor.user_id}
       `
-      if (rows[0]) extraData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu) }
+      if (rows[0]) extraData = {
+        rank: rows[0].rank,
+        total_pu: Number(rows[0].total_pu),
+        daily_product_pairing_cap: Number(rows[0].daily_product_pairing_cap),
+        product_binary_cap_enabled: rows[0].product_binary_cap_enabled !== false,
+      }
     } catch { /* columns not migrated yet */ }
-    const profileAny = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number }
+    const profileAny = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number; product_binary_cap_enabled: boolean }
 
     // Get PU reset date from system_settings (March 1 by default)
     const resetSettings = await prisma.$queryRaw<{ key: string; value: string }[]>`
@@ -466,7 +476,9 @@ async function checkSponsorPairingPoints(
     const lastPairDate = profileAny.daily_pairing_date ? new Date(profileAny.daily_pairing_date) : null
     const isToday      = lastPairDate ? lastPairDate >= today : false
     const usedToday    = isToday ? Number(profileAny.daily_pairing_count || 0) : 0
-    const remaining    = Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
+    const remaining    = profileAny.product_binary_cap_enabled
+      ? Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
+      : possiblePairs
 
     const paidPairs     = Math.min(possiblePairs, remaining)
     const overflowPairs = possiblePairs - paidPairs
@@ -580,6 +592,8 @@ export async function PATCH(req: NextRequest) {
         data: {
           ...(status         && { status }),
           ...(payment_status && { payment_status }),
+          ...(status === 'delivered' && order.status !== 'delivered' && { delivered_at: new Date() }),
+          ...(payment_status === 'paid' && order.payment_status !== 'paid' && { paid_at: new Date() }),
         },
       })
 

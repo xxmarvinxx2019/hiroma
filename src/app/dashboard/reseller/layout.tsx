@@ -5,31 +5,39 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAutoLogout } from '@/app/hooks/useAutoLogout'
+import NotificationBell from '@/app/components/ui/NotificationBell'
+import styles from './reseller-theme.module.css'
+
+type ThemePreference = 'off' | 'on' | 'automatic'
 
 const navItems = [
   {
     section: 'Main',
     items: [
-      { label: 'Dashboard',     href: '/dashboard/reseller' },
+      { label: 'Dashboard',     href: '/dashboard/reseller', icon: '📊' },
     ],
   },
   {
     section: 'My Network',
     items: [
-      { label: 'Binary Tree',   href: '/dashboard/reseller/tree' },
-      { label: 'Referrals',     href: '/dashboard/reseller/genealogy' },
+      { label: 'Binary Tree',   href: '/dashboard/reseller/tree', icon: '🌳' },
+      { label: 'Affiliates',    href: '/dashboard/reseller/genealogy', icon: '👥' },
+      { label: 'Rank Advancement', href: '/dashboard/reseller/points', icon: '♙', premiumOnly: true },
     ],
   },
   {
     section: 'Earnings',
     items: [
-      { label: 'Wallet',         href: '/dashboard/reseller/wallet' },
+      { label: 'Wallet',         href: '/dashboard/reseller/wallet', icon: '💰' },
+      { label: 'Payouts',        href: '/dashboard/reseller/payouts', icon: '💸' },
+      { label: 'Payment Method', href: '/dashboard/reseller/payment-methods', icon: '💳' },
     ],
   },
   {
     section: 'Orders',
     items: [
-      { label: 'Order History',  href: '/dashboard/reseller/orders' },
+      { label: 'Order History',  href: '/dashboard/reseller/orders', icon: '🛒' },
+      { label: 'My Orders', href: '/dashboard/reseller/orders', icon: '▤', premiumOnly: true },
     ],
   },
 ]
@@ -39,12 +47,17 @@ function Sidebar({
   pathname,
   onClose,
   onLogout,
+  theme,
+  onThemeChange,
 }: {
   user: { full_name: string; username: string } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
+  theme: ThemePreference
+  onThemeChange: (theme: ThemePreference) => void
 }) {
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const isActive = (href: string) => {
     if (href === '/dashboard/reseller') return pathname === href
     return pathname.startsWith(href)
@@ -75,23 +88,90 @@ function Sidebar({
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">
               {group.section}
             </p>
-            {group.items.map((item) => (
+            {group.items.filter((item) => item.label !== 'Order History').map((item) => (
               <Link
-                key={item.href}
+                key={`${group.section}-${item.label}`}
                 href={item.href}
                 onClick={onClose}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm mb-0.5 transition-all duration-150 ${
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm mb-0.5 transition-all duration-150 ${'premiumOnly' in item && item.premiumOnly ? styles.premiumNavItem : ''} ${
                   isActive(item.href)
                     ? 'bg-[#C9A84C]/15 text-[#C9A84C] border-l-2 border-[#C9A84C] rounded-l-none pl-2.5'
                     : 'text-white/50 hover:text-white hover:bg-white/5'
                 }`}
               >
+                <span className="w-5 text-center text-sm flex-shrink-0" aria-hidden="true">
+                  {item.icon}
+                </span>
                 <span className="flex-1">{item.label}</span>
               </Link>
             ))}
           </div>
         ))}
       </nav>
+
+      {/* Display preference */}
+      <div className="relative px-3 pb-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={() => setThemeMenuOpen((open) => !open)}
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/55 transition-colors hover:bg-white/5 hover:text-white"
+          aria-expanded={themeMenuOpen}
+          aria-haspopup="menu"
+        >
+          <span className="w-5 text-center text-base" aria-hidden="true">☾</span>
+          <span className="flex-1">Dark mode</span>
+          <span className="text-[10px] font-semibold uppercase text-[#C9A84C]">
+            {theme === 'automatic' ? 'Auto' : theme}
+          </span>
+        </button>
+
+        {themeMenuOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Close dark mode menu"
+              className="fixed inset-0 z-40 cursor-default"
+              onClick={() => setThemeMenuOpen(false)}
+            />
+            <div
+              role="menu"
+              className="absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#13244a] p-1.5 shadow-2xl"
+            >
+              {([
+                ['off', 'Off', 'Use Hiroma light display'],
+                ['on', 'On', 'Use Hiroma navy display'],
+                ['automatic', 'Automatic', 'Follow this device setting'],
+              ] as const).map(([value, label, description]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={theme === value}
+                  onClick={() => {
+                    onThemeChange(value)
+                    setThemeMenuOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    theme === value ? 'bg-[#C9A84C]/15' : 'hover:bg-white/5'
+                  }`}
+                >
+                  <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                    theme === value
+                      ? 'border-[#C9A84C] bg-[#C9A84C] text-[#0D1B3E]'
+                      : 'border-white/30'
+                  }`}>
+                    {theme === value && <span className="text-[10px] font-bold">✓</span>}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-white">{label}</span>
+                    <span className="block text-[10px] text-white/40">{description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* User Footer */}
       <div className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0">
@@ -130,7 +210,29 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
   })
   const [sidebarOpen, setSidebarOpen]     = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ full_name: string; username: string } | null>(null)
+  const [user, setUser] = useState<{ id: string; full_name: string; username: string } | null>(null)
+  const [theme, setTheme] = useState<ThemePreference>('off')
+  const [systemDark, setSystemDark] = useState(false)
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem('hiroma-reseller-theme')
+    if (stored === 'off' || stored === 'on' || stored === 'automatic') {
+      setTheme(stored)
+    }
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const syncSystemTheme = () => setSystemDark(media.matches)
+    syncSystemTheme()
+    media.addEventListener('change', syncSystemTheme)
+    return () => media.removeEventListener('change', syncSystemTheme)
+  }, [])
+
+  const handleThemeChange = (preference: ThemePreference) => {
+    setTheme(preference)
+    window.localStorage.setItem('hiroma-reseller-theme', preference)
+  }
+
+  const darkMode = theme === 'on' || (theme === 'automatic' && systemDark)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -151,10 +253,19 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
         i.href === '/dashboard/reseller'
           ? pathname === i.href
           : pathname.startsWith(i.href)
-      )?.label || 'Dashboard'
+      )?.label || (pathname === '/dashboard/reseller/notifications' ? 'Notifications' : 'Dashboard')
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#F0F2F8' }}>
+    <div
+      className={`${styles.shell} ${darkMode ? styles.dark : ''}`}
+      data-reseller-theme={darkMode ? 'dark' : 'light'}
+      style={{
+        display: 'flex',
+        height: '100vh',
+        overflow: 'hidden',
+        background: darkMode ? '#050D20' : '#F0F2F8',
+      }}
+    >
       {/* Inactivity warning */}
       {showWarning && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
@@ -170,7 +281,14 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} />
+        <Sidebar
+          user={user}
+          pathname={pathname}
+          onClose={() => {}}
+          onLogout={handleLogout}
+          theme={theme}
+          onThemeChange={handleThemeChange}
+        />
       </div>
 
       {/* Mobile Sidebar */}
@@ -181,7 +299,14 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
             onClick={() => setSidebarOpen(false)}
           />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} />
+            <Sidebar
+              user={user}
+              pathname={pathname}
+              onClose={() => setSidebarOpen(false)}
+              onLogout={handleLogout}
+              theme={theme}
+              onThemeChange={handleThemeChange}
+            />
           </div>
         </>
       )}
@@ -207,6 +332,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
           </div>
 
           <div className="flex items-center gap-3">
+            <NotificationBell userId={user?.id} role="reseller" />
             <span className="bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-semibold px-3 py-1 rounded-full border border-[#C9A84C]/30 tracking-wide">
               RESELLER
             </span>
@@ -248,7 +374,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
         </header>
 
         {/* Page Content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+        <main className={styles.pageContent} style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
           {children}
         </main>
       </div>

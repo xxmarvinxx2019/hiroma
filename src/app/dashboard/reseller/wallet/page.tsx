@@ -95,15 +95,27 @@ function PayoutModal({
   const [reference, setReference] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]         = useState('')
+  const [mode, setMode] = useState<'cash' | 'check' | 'account'>('cash')
+  const [methods, setMethods] = useState<Array<{ id: string; type: string; bank_name: string | null; account_number: string }>>([])
 
-  const METHODS = ['GCash', 'Maya', 'BDO', 'BPI', 'UnionBank', 'Cash']
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/reseller/payment-policy').then((r) => r.json()),
+      fetch('/api/payment-methods?status=approved').then((r) => r.json()),
+    ]).then(([policy, methodData]) => {
+      const nextMode = policy.mode || 'cash'
+      setMode(nextMode)
+      setMethods(methodData.methods || [])
+      if (nextMode !== 'account') setMethod(nextMode)
+    })
+  }, [])
 
   const handleSubmit = async () => {
     setError('')
     if (!amount || parseFloat(amount) <= 0) { setError('Enter a valid amount.'); return }
     if (parseFloat(amount) < 500) { setError('Minimum payout request is ₱500.00.'); return }
     if (parseFloat(amount) > balance)        { setError('Amount exceeds your balance.'); return }
-    if (!method)                             { setError('Select a payment method.'); return }
+    if (!method)                             { setError('Select an approved payment method.'); return }
 
     setSubmitting(true)
     const res = await fetch('/api/reseller/wallet', {
@@ -159,19 +171,41 @@ function PayoutModal({
           {/* Payment method */}
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
-            <div className="grid grid-cols-3 gap-2">
-              {METHODS.map((m) => (
-                <button key={m} onClick={() => setMethod(m)}
-                  className={`text-xs py-2 rounded-lg border transition-colors ${
-                    method === m
-                      ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]'
-                      : 'bg-[#F0F2F8] text-gray-500 border-transparent hover:border-[#0D1B3E]/20'
-                  }`}>{m}</button>
-              ))}
-            </div>
+            {mode === 'account' ? (
+              methods.length > 0 ? (
+                <select value={method} onChange={(e) => setMethod(e.target.value)}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm">
+                  <option value="">Select approved account</option>
+                  {methods.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.type === 'gcash' ? 'GCash' : m.bank_name || 'Bank'} · {m.account_number}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="text-xs text-[#a03030] bg-[#fdecea] rounded-lg p-3">
+                  <p>No approved payout account.</p>
+                  <p className="mt-1">
+                    Add one under{' '}
+                    <Link
+                      href="/dashboard/reseller/payment-methods"
+                      className="font-semibold underline underline-offset-2 text-[#8b1f1f] hover:text-[#C9A84C] transition-colors"
+                    >
+                      Payment Method →
+                    </Link>{' '}
+                    and wait for Admin approval.
+                  </p>
+                </div>
+              )
+            ) : (
+              <div className="bg-[#F0F2F8] rounded-lg px-3 py-2 text-sm font-medium text-[#0D1B3E] capitalize">
+                {mode} (set by Admin)
+              </div>
+            )}
           </div>
 
           {/* Account / reference */}
+          {mode === 'account' && (
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Account Number / Reference</label>
             <input
@@ -181,6 +215,7 @@ function PayoutModal({
               className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
             />
           </div>
+          )}
 
           {error && <p className="text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{error}</p>}
 
@@ -259,7 +294,7 @@ export default function ResellerWalletPage() {
             { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#1a7a4a', icon: '📈', sub: 'Lifetime earnings'  },
             { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#0D1B3E', icon: '💸', sub: 'Paid out'           },
           ].map((c) => (
-            <div key={c.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
+            <div key={c.label} className="walletStatCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
               style={{ borderTop: `2px solid ${c.accent}` }}>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs text-gray-400 uppercase tracking-wide">{c.label}</p>
@@ -278,7 +313,7 @@ export default function ResellerWalletPage() {
           <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Earnings Breakdown</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {Object.entries(commissionSummary).filter(([type]) => type !== 'multilevel').map(([type, data]) => (
-              <div key={type} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
+              <div key={type} className="commissionSummaryCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
                 style={{ borderTop: `2px solid ${COMMISSION_COLORS[type] || '#9ca3af'}` }}>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-400 uppercase tracking-wide">{COMMISSION_LABELS[type] || type}</p>

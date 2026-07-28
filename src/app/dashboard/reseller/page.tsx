@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
+import styles from './reseller-theme.module.css'
 
 interface Stats {
   user:      { full_name: string; username: string }
@@ -15,7 +16,7 @@ interface Stats {
     active_period: { start_date: string; end_date: string } | null
   }
   points:    { total: number; reset_at: string | null; php_value: number }
-  referrals: { today: number; remaining: number; cap: number }
+  referrals: { today: number; remaining: number; cap: number; cap_enabled: boolean }
   commission_summary: {
     direct_referral: { amount: number; count: number }
     binary_pairing:  { amount: number; count: number }
@@ -137,12 +138,72 @@ function CircularProgress({ value, max, label }: { value: number; max: number; l
 export default function ResellerDashboardPage() {
   const [stats, setStats]     = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [dataSearchResults, setDataSearchResults] = useState<GlobalSearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return DASHBOARD_SEARCH_ITEMS.slice(0, 5)
+    const navigationResults = DASHBOARD_SEARCH_ITEMS.filter((item) =>
+      `${item.title} ${item.description} ${item.keywords}`.toLowerCase().includes(query)
+    )
+    return [...dataSearchResults, ...navigationResults].slice(0, 12)
+  }, [dataSearchResults, searchQuery])
 
   useEffect(() => {
     fetch('/api/reseller/stats')
       .then((r) => r.json())
       .then(setStats)
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    const query = searchQuery.trim()
+    if (query.length < 2) {
+      setDataSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const response = await fetch(`/api/reseller/search?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        })
+        const data = await response.json()
+        if (response.ok) setDataSearchResults(data.results || [])
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') setDataSearchResults([])
+      } finally {
+        if (!controller.signal.aborted) setSearchLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [searchQuery])
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        setSearchOpen(true)
+      }
+      if (event.key === 'Escape') {
+        setSearchOpen(false)
+        searchInputRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
   }, [])
 
   if (loading) return (
@@ -164,6 +225,7 @@ export default function ResellerDashboardPage() {
   const rightCount    = stats.tree?.right_count      || 0
   const refToday      = stats.referrals?.today       || 0
   const refCap        = stats.referrals?.cap         || 10
+  const refCapEnabled = stats.referrals?.cap_enabled !== false
   const refRemaining  = stats.referrals?.remaining   || 0
   const totalEarned   = (stats.commission_summary?.direct_referral?.amount || 0)
     + (stats.commission_summary?.binary_pairing?.amount  || 0)
@@ -195,10 +257,229 @@ export default function ResellerDashboardPage() {
   const potentialEarnings = refRemaining * directBonus
 
   return (
-    <div className="w-full space-y-5">
+    <>
+      <div className={styles.premiumDashboard}>
+        <section className={styles.premiumHero}>
+          <div className={styles.heroTechnology} aria-hidden="true">
+            <i /><i /><i /><i /><i /><i /><i />
+            <b /><b /><b /><b /><b />
+          </div>
+          <div className={styles.heroSearch}>
+            <span aria-hidden="true">⌕</span>
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value)
+                setSearchOpen(true)
+              }}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+              placeholder="Search your dashboard..."
+              aria-label="Search your dashboard"
+              aria-expanded={searchOpen}
+              aria-controls="dashboard-search-results"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setSearchQuery('')
+                  searchInputRef.current?.focus()
+                }}
+                aria-label="Clear search"
+              >
+                ×
+              </button>
+            ) : <kbd>Ctrl K</kbd>}
+            {searchOpen && (
+              <div id="dashboard-search-results" className={styles.heroSearchResults}>
+                <small>{searchQuery ? 'Search results' : 'Quick access'}</small>
+                {searchLoading && <div className={styles.heroSearchLoading}>Searching your account…</div>}
+                {searchResults.length ? searchResults.map((item) => (
+                  <Link key={item.id} href={item.href}>
+                    <em>{item.category}</em>
+                    <span>{item.title}</span>
+                    <small>{item.description}</small>
+                    <b aria-hidden="true">→</b>
+                  </Link>
+                )) : (
+                  <p>No dashboard result found for “{searchQuery}”.</p>
+                )}
+              </div>
+            )}
+          </div>
+          <div className={styles.heroWelcome}>
+            <span className={styles.heroEyebrow}>HIROMA DIGITAL NETWORK</span>
+            <h1>Good afternoon, {firstName}! 👋</h1>
+            <p>Stay focused and keep growing your network. You&apos;re doing great!</p>
+            <div className={styles.heroPulse}><i /> Network is active</div>
+          </div>
+          <div className={styles.premiumHeroCards}>
+            <article className={styles.potentialCard}>
+              <span>🎁 Today&apos;s Potential Earnings</span>
+              <strong>{fmt(potentialEarnings)}</strong>
+              <small><b>{refRemaining} referrals</b> to earn {fmt(directBonus)} more!</small>
+              <div className={styles.miniChart} aria-hidden="true">
+                <i /><i /><i /><i /><i /><i /><i />
+              </div>
+              <div className={styles.earningProgress}><i style={{ width: `${Math.min(100, (refToday / Math.max(1, refCap)) * 100)}%` }} /></div>
+            </article>
+            <article className={styles.balanceCard}>
+              <span>▣ Total Wallet Balance</span>
+              <strong>{fmt(walletBal)}</strong>
+              <Link href="/dashboard/reseller/wallet">Withdraw</Link>
+              <div className={styles.walletSignal} aria-hidden="true"><i /><i /><i /></div>
+            </article>
+          </div>
+        </section>
+
+        <section className={styles.statusRibbon}>
+          <article><i>🏅</i><span>Active Rank</span><strong>{currentRankObj?.name || stats.package?.name || 'Starter'}</strong><small>Next Rank: {nextRank?.name || 'Maximum'}</small></article>
+          <article><i>◔</i><span>Rank Progress</span><strong>{progressPct}%</strong><small>{puToNext ? `${puToNext} PU remaining` : 'Goal completed'}</small><em><b style={{ width: `${progressPct}%` }} /></em></article>
+          <article><i>↗</i><span>Network Strength</span><strong className={styles.green}>High</strong><small>Keep up the momentum!</small></article>
+          <article><i>⚖</i><span>Binary Status</span><strong className={styles.cyan}>Balanced</strong><small>Well done!</small></article>
+          <article><i>✓</i><span>Account Status</span><strong className={styles.green}>Verified</strong><small>All systems operational</small></article>
+        </section>
+
+        <div className={styles.premiumMainGrid}>
+          <div className={styles.premiumLeft}>
+            <section className={`${styles.premiumPanel} ${styles.walletVisual}`}>
+              <div>
+                <h2>Wallet Overview</h2>
+                <span>Total Balance</span>
+                <strong>{fmt(walletBal)}</strong>
+                <small>▲ +{fmt(stats.wallet?.total_earned || 0)} lifetime</small>
+                <Link href="/dashboard/reseller/wallet">▣ View Wallet</Link>
+              </div>
+              <div className={styles.walletOrb}>💳</div>
+            </section>
+
+            <section className={`${styles.premiumPanel} ${styles.referralCompact}`}>
+              <h2>Daily Referral Cap</h2>
+              <CircularProgress value={refCapEnabled ? refToday : 0} max={refCap} label={refCapEnabled ? 'Per Day' : 'No Cap'} />
+              <div>
+                <strong>{refCapEnabled ? refRemaining : '∞'}</strong>
+                <span>{refCapEnabled ? 'referrals remaining' : 'unlimited referrals'}</span>
+                <small>{refToday} credited today</small>
+              </div>
+            </section>
+
+            <section className={`${styles.premiumPanel} ${styles.premiumEarnings}`}>
+              <h2>Earnings Breakdown</h2>
+              <div className={styles.earningsContent}>
+                <DonutChart data={donutData} />
+                <div>
+                  {donutData.map((item) => {
+                    const percent = totalEarned ? Math.round((item.value / totalEarned) * 100) : 0
+                    return <div className={styles.earningLine} key={item.label}>
+                      <span><i style={{ background: item.color }} />{item.label}<b>{percent}%</b></span>
+                      <em><i style={{ width: `${percent}%`, background: item.color }} /></em>
+                      <small>{fmt(item.value)}</small>
+                    </div>
+                  })}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className={styles.premiumCenter}>
+            <section className={`${styles.premiumPanel} ${styles.premiumTeam}`}>
+              <header><h2>Team Overview</h2><Link href="/dashboard/reseller/tree">View Tree →</Link></header>
+              <div className={styles.premiumLegs}>
+                <article><i>👤</i><strong>{leftCount}</strong><span>Left Team</span><small>Members</small></article>
+                <article><i>👤</i><strong>{rightCount}</strong><span>Right Team</span><small>Members</small></article>
+              </div>
+              <dl>
+                <div><dt>Total Affiliates</dt><dd>{leftCount + rightCount}</dd></div>
+                <div><dt>Position</dt><dd>{stats.tree?.position || '—'}</dd></div>
+                <div><dt>Sponsor</dt><dd>{stats.tree?.sponsor?.full_name || 'Hiroma'}</dd></div>
+              </dl>
+              <Link className={styles.treeButton} href="/dashboard/reseller/tree">🌳 View Binary Tree</Link>
+            </section>
+
+            <section className={`${styles.premiumPanel} ${styles.premiumCommissions}`}>
+              <header><h2>Recent Commissions</h2><Link href="/dashboard/reseller/commissions">View All →</Link></header>
+              {(stats.recent_commissions || []).slice(0, 4).map((item, index) => (
+                <article key={`${item.created_at}-${index}`}>
+                  <i>{COMM_ICONS[item.type] || '💼'}</i>
+                  <div><strong>{COMM_LABELS[item.type] || item.type}</strong><span>from @{item.source_user?.username || 'Hiroma'}</span></div>
+                  <b>+{fmt(Number(item.amount))}<small>{new Date(item.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</small></b>
+                </article>
+              ))}
+            </section>
+          </div>
+
+          <div className={styles.premiumRight}>
+            <section className={`${styles.premiumPanel} ${styles.liveActivity}`}>
+              <header><h2><i /> Live Activity</h2><Link href="/dashboard/reseller/notifications">View All →</Link></header>
+              {[
+                ['👤', `${stats.user.full_name} viewed the dashboard`, 'Just now'],
+                ['🔥', `${firstName} earned ${fmt(stats.commission_summary?.direct_referral?.amount || 0)}`, 'Recent'],
+                ['🟣', `Your affiliate network reached ${leftCount + rightCount}`, 'Today'],
+                ['🔗', `${stats.commission_summary?.binary_pairing?.count || 0} binary pairs matched`, 'Today'],
+                ['💵', `Wallet balance updated to ${fmt(walletBal)}`, 'Current'],
+              ].map(([icon, text, time]) => <article key={text}><i>{icon}</i><span>{text}</span><small>{time}</small></article>)}
+            </section>
+
+            <section className={`${styles.premiumPanel} ${styles.aiPanel}`}>
+              <div className={styles.aiNetwork} aria-hidden="true">
+                <i /><i /><i /><i /><i /><i />
+              </div>
+              <div className={styles.aiCube} aria-hidden="true"><span>AI</span></div>
+              <div className={styles.aiCopy}>
+                <h2>Hiroma AI Insights <b>NEW</b></h2>
+                <strong>Your network is growing.</strong>
+                <p>Invite {Math.max(1, refRemaining)} more people to maximize your binary earnings.</p>
+                <Link href="/dashboard/reseller/tree" aria-label="View AI network insight">⌁</Link>
+              </div>
+              <div className={styles.aiBrain} aria-hidden="true">
+                <span>AI</span>
+                <i /><i /><i /><i />
+              </div>
+            </section>
+
+            <section className={styles.growthCard}>
+              <h2>Keep Growing,<br />Keep Earning!</h2>
+              <p>Your success is our mission.<br />Let&apos;s build your legacy together.</p>
+              <div className={styles.growthChart} aria-hidden="true">
+                <span className={styles.growthStars}>· ✦ ·</span>
+                <span className={styles.growthBar} />
+                <span className={styles.growthBar} />
+                <span className={styles.growthBar} />
+                <span className={styles.growthBar} />
+                <span className={styles.growthBar} />
+                <i className={styles.growthLine} />
+                <b className={styles.growthArrow}>➤</b>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <section className={`${styles.premiumPanel} ${styles.achievements}`}>
+          <header><h2>Achievements</h2><Link href="/dashboard/reseller/points">View All →</Link></header>
+          <div>
+            {[
+              ['✓', 'First Sale', 'Completed', true],
+              ['●', 'First Referral', 'Completed', true],
+              ['★', 'Bronze Qualified', currentRankObj ? 'Completed' : 'In progress', Boolean(currentRankObj)],
+              ['★', 'Silver Qualified', 'Locked', false],
+              ['★', 'Gold Qualified', 'Locked', false],
+              ['◇', 'Diamond Qualified', 'Locked', false],
+            ].map(([icon, title, status, complete]) => (
+              <article className={complete ? styles.achievementDone : ''} key={title as string}>
+                <i><b>{icon}</b></i><strong>{title}</strong><span>{status}</span>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className={`w-full space-y-5 ${styles.dashboard} ${styles.classicDashboard}`}>
 
       {/* ── Welcome Banner ── */}
-      <div className="bg-gradient-to-br from-[#0D1B3E] via-[#1a2f5e] to-[#0D1B3E] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 overflow-hidden relative">
+      <div className={`bg-gradient-to-br from-[#0D1B3E] via-[#1a2f5e] to-[#0D1B3E] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 overflow-hidden relative ${styles.welcome}`}>
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#C9A84C]/5 rounded-full -translate-y-1/2 translate-x-1/2" />
         <div className="absolute bottom-0 left-32 w-32 h-32 bg-white/3 rounded-full translate-y-1/2" />
         <div className="relative z-10">
@@ -241,15 +522,15 @@ export default function ResellerDashboardPage() {
       </div>
 
       {/* ── Top Stat Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${styles.statGrid}`}>
         {[
           { label: 'Total Earned',   value: fmt(walletEarned),              sub: 'Lifetime earnings',    color: '#1a7a4a', icon: '💰', href: '/dashboard/reseller/wallet' },
           { label: 'Total Points',   value: totalPoints.toLocaleString(),        sub: `≈ ${fmt(pointsValue)}`, color: '#C9A84C', icon: '⭐', href: '/dashboard/reseller/points' },
-          { label: 'Left Leg',       value: leftCount.toLocaleString(),          sub: 'Downline members',     color: '#2563eb', icon: '👥', href: '/dashboard/reseller/tree' },
-          { label: 'Right Leg',      value: rightCount.toLocaleString(),         sub: 'Downline members',     color: '#9a6f1e', icon: '👥', href: '/dashboard/reseller/tree' },
+          { label: 'Left Affiliates',  value: leftCount.toLocaleString(),          sub: 'Affiliate members',    color: '#2563eb', icon: '👥', href: '/dashboard/reseller/tree' },
+          { label: 'Right Affiliates', value: rightCount.toLocaleString(),         sub: 'Affiliate members',    color: '#9a6f1e', icon: '👥', href: '/dashboard/reseller/tree' },
         ].map((s) => (
           <Link key={s.label} href={s.href}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all group">
+            className={`bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all group ${styles.statCard}`}>
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
               <span className="text-lg">{s.icon}</span>
@@ -261,10 +542,10 @@ export default function ResellerDashboardPage() {
       </div>
 
       {/* ── Middle Row ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-4">
+      <div className={`grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-4 ${styles.middleGrid}`}>
 
         {/* Rank Progress */}
-        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.rankPanel}`}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Rank Progress</p>
             {stats.rank?.active_period && (
@@ -325,19 +606,19 @@ export default function ResellerDashboardPage() {
         </div>
 
         {/* Team Overview */}
-        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.teamPanel}`}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Team Overview</p>
             <Link href="/dashboard/reseller/tree" className="text-[10px] text-[#C9A84C] hover:underline">View Tree →</Link>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-[#f0f7ff] rounded-xl p-4 text-center">
+            <div className={`bg-[#f0f7ff] rounded-xl p-4 text-center ${styles.teamTile} ${styles.teamTileLeft}`}>
               <p className="text-3xl xl:text-4xl font-bold text-[#2563eb]">{leftCount}</p>
               <p className="text-xs text-gray-400 mt-1">Left Team</p>
               <p className="text-[10px] text-[#2563eb] mt-0.5">Members</p>
             </div>
-            <div className="bg-[#fef9ee] rounded-xl p-4 text-center">
+            <div className={`bg-[#fef9ee] rounded-xl p-4 text-center ${styles.teamTile} ${styles.teamTileRight}`}>
               <p className="text-3xl xl:text-4xl font-bold text-[#9a6f1e]">{rightCount}</p>
               <p className="text-xs text-gray-400 mt-1">Right Team</p>
               <p className="text-[10px] text-[#9a6f1e] mt-0.5">Members</p>
@@ -346,7 +627,7 @@ export default function ResellerDashboardPage() {
 
           <div className="border-t border-[#0D1B3E]/5 pt-3 space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Total Downline</span>
+              <span className="text-gray-400">Total Affiliates</span>
               <span className="font-semibold text-[#0D1B3E]">{(leftCount + rightCount).toLocaleString()}</span>
             </div>
             <div className="flex justify-between text-sm">
@@ -366,24 +647,24 @@ export default function ResellerDashboardPage() {
         </div>
 
         {/* Daily Referral Cap + Quick Actions */}
-        <div className="space-y-4">
+        <div className={`space-y-4 ${styles.sideStack}`}>
           {/* Referral cap */}
-          <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+          <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.referralPanel}`}>
             <p className="text-sm font-semibold text-[#0D1B3E] mb-3">Daily Referral Cap</p>
             <div className="flex items-center gap-4">
-              <CircularProgress value={refToday} max={refCap} label="Per Day" />
+              <CircularProgress value={refCapEnabled ? refToday : 0} max={refCap} label={refCapEnabled ? 'Per Day' : 'No Cap'} />
               <div className="flex-1">
-                <p className="text-2xl font-bold text-[#0D1B3E]">{refRemaining}</p>
-                <p className="text-xs text-gray-400">referrals remaining</p>
+                <p className="text-2xl font-bold text-[#0D1B3E]">{refCapEnabled ? refRemaining : '∞'}</p>
+                <p className="text-xs text-gray-400">{refCapEnabled ? 'referrals remaining' : 'unlimited referrals'}</p>
                 <p className="text-[10px] text-gray-300 mt-1">
-                  {refRemaining === 0 ? 'Cap reached. Resets tomorrow.' : `${refToday} used today`}
+                  {refCapEnabled && refRemaining === 0 ? 'Cap reached. Resets tomorrow.' : `${refToday} credited today`}
                 </p>
               </div>
             </div>
           </div>
 
           {/* Quick Actions */}
-          <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-4">
+          <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-4 ${styles.panel} ${styles.quickPanel}`}>
             <p className="text-sm font-semibold text-[#0D1B3E] mb-3">Quick Actions</p>
             <div className="grid grid-cols-3 gap-2">
               {[
@@ -409,10 +690,10 @@ export default function ResellerDashboardPage() {
       </div>
 
       {/* ── Bottom Row ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${styles.bottomGrid}`}>
 
         {/* Earnings Breakdown */}
-        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.earningsPanel}`}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Earnings Breakdown</p>
             <Link href="/dashboard/reseller/commissions" className="text-[10px] text-[#C9A84C] hover:underline">View All →</Link>
@@ -444,7 +725,7 @@ export default function ResellerDashboardPage() {
         </div>
 
         {/* Recent Commissions */}
-        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.commissionsPanel}`}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Recent Commissions</p>
             <Link href="/dashboard/reseller/commissions" className="text-[10px] text-[#C9A84C] hover:underline">View All →</Link>
@@ -480,6 +761,27 @@ export default function ResellerDashboardPage() {
         </div>
       </div>
 
-    </div>
+      </div>
+    </>
   )
+}
+
+const DASHBOARD_SEARCH_ITEMS = [
+  { id: 'nav-dashboard', title: 'Dashboard overview', description: 'Account summary and performance', href: '/dashboard/reseller', keywords: 'home overview account performance', category: 'Page' },
+  { id: 'nav-tree', title: 'Binary Tree', description: 'View your left and right affiliate network', href: '/dashboard/reseller/tree', keywords: 'genealogy left right network team downline', category: 'Page' },
+  { id: 'nav-affiliates', title: 'Affiliates', description: 'View your registered affiliates', href: '/dashboard/reseller/genealogy', keywords: 'referrals members genealogy downline', category: 'Page' },
+  { id: 'nav-rank', title: 'Rank Advancement', description: 'Review PU and rank progress', href: '/dashboard/reseller/points', keywords: 'rank points pu bronze silver gold progress', category: 'Page' },
+  { id: 'nav-wallet', title: 'Wallet & Earnings', description: 'Balances and commission history', href: '/dashboard/reseller/wallet', keywords: 'wallet balance income earnings commission direct referral binary product binary', category: 'Page' },
+  { id: 'nav-payouts', title: 'Payouts', description: 'Track withdrawal and payout status', href: '/dashboard/reseller/payouts', keywords: 'withdraw withdrawal released pending approved rejected cash', category: 'Page' },
+  { id: 'nav-payment', title: 'Payment Method', description: 'Manage your approved payout account', href: '/dashboard/reseller/payment-methods', keywords: 'gcash bank account payment payout method', category: 'Page' },
+  { id: 'nav-orders', title: 'My Orders', description: 'Place and monitor product orders', href: '/dashboard/reseller/orders', keywords: 'orders history products pending processing delivered cancelled supplier', category: 'Page' },
+  { id: 'nav-notifications', title: 'Notifications', description: 'See commissions and account updates', href: '/dashboard/reseller/notifications', keywords: 'alerts updates bell unread activity', category: 'Page' },
+] as const
+
+type GlobalSearchResult = {
+  id: string
+  title: string
+  description: string
+  href: string
+  category: string
 }

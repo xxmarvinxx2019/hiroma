@@ -53,18 +53,19 @@ async function checkSponsorPairingPoints(buyerUserId: string, currentOrderPU: nu
     })
     if (!profile) continue
 
-    let extraData = { rank: 'default', total_pu: 0, daily_product_pairing_cap: 50 }
+    let extraData = { rank: 'default', total_pu: 0, daily_product_pairing_cap: 50, product_binary_cap_enabled: true }
     try {
-      const rows = await prisma.$queryRaw<{ rank: string; total_pu: number; daily_product_pairing_cap: number }[]>`
+      const rows = await prisma.$queryRaw<{ rank: string; total_pu: number; daily_product_pairing_cap: number; product_binary_cap_enabled: boolean }[]>`
         SELECT COALESCE(rp.rank, 'default') as rank, COALESCE(rp.total_pu, 0) as total_pu,
-               COALESCE(p.daily_product_pairing_cap, 50)::int as daily_product_pairing_cap
+               COALESCE(p.daily_product_pairing_cap, 50)::int as daily_product_pairing_cap,
+               COALESCE(p.product_binary_cap_enabled, true) as product_binary_cap_enabled
         FROM reseller_profiles rp LEFT JOIN packages p ON p.id = rp.package_id
         WHERE rp.user_id::text = ${ancestor.user_id}
       `
-      if (rows[0]) extraData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu), daily_product_pairing_cap: Number(rows[0].daily_product_pairing_cap) }
+      if (rows[0]) extraData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu), daily_product_pairing_cap: Number(rows[0].daily_product_pairing_cap), product_binary_cap_enabled: rows[0].product_binary_cap_enabled !== false }
     } catch { /* not migrated yet */ }
 
-    const profileAny    = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number }
+    const profileAny    = { ...profile, ...extraData } as typeof profile & { rank: string; total_pu: number; daily_product_pairing_cap: number; product_binary_cap_enabled: boolean }
     const packagePPV    = Number(profile.package?.point_php_value || 5)
     const activeRank    = profile.package?.id ? await getCurrentRankForReseller(profile.package.id, profileAny.total_pu || 0) : null
     const pointsPerPair = activeRank ? Number(activeRank.pair_income) : packagePPV
@@ -116,7 +117,9 @@ async function checkSponsorPairingPoints(buyerUserId: string, currentOrderPU: nu
     const lastPairDate = profileAny.daily_pairing_date ? new Date(profileAny.daily_pairing_date) : null
     const isToday      = lastPairDate ? lastPairDate >= today : false
     const usedToday    = isToday ? Number(profileAny.daily_pairing_count || 0) : 0
-    const remaining    = Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
+    const remaining    = profileAny.product_binary_cap_enabled
+      ? Math.max(0, (profileAny.daily_product_pairing_cap || 50) - usedToday)
+      : possiblePairs
     const paidPairs     = Math.min(possiblePairs, remaining)
     const overflowPairs = possiblePairs - paidPairs
     const pointsEarned     = paidPairs     * pointsPerPair

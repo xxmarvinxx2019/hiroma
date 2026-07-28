@@ -38,13 +38,13 @@ const COMMISSION_META: Record<string, { label: string; color: string; bg: string
     label: 'Binary Pairing',
     color: '#0D1B3E',
     bg:    '#eef0f8',
-    desc:  'Earned when both your left and right legs match',
+    desc:  'Earned when both your left and right affiliates match',
   },
   multilevel: {
     label: 'Multi-level',
     color: '#2563eb',
     bg:    '#f0f7ff',
-    desc:  'Earnings flowing upline from downline activity',
+    desc:  'Earnings flowing upline from affiliate activity',
   },
   sponsor_point: {
     label: 'Sponsor Point',

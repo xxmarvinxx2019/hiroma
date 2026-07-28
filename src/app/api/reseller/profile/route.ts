@@ -63,19 +63,49 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const updated = await prisma.user.update({
+    const previous = await prisma.user.findUnique({
       where: { id: user.id },
-      data: {
-        full_name: full_name.trim(),
-        mobile:    mobile.trim(),
-        address:   address?.trim() || null,
-        email:     email?.trim().toLowerCase() || null,
-      },
-      select: {
-        id: true, full_name: true, username: true,
-        email: true, mobile: true, address: true,
-      },
+      select: { full_name: true, email: true, mobile: true, address: true },
     })
+    if (!previous) {
+      return NextResponse.json({ error: 'User not found.' }, { status: 404 })
+    }
+
+    const nextProfile = {
+      full_name: full_name.trim(),
+      mobile: mobile.trim(),
+      address: address?.trim() || null,
+      email: email?.trim().toLowerCase() || null,
+    }
+    const changedFields = [
+      previous.full_name !== nextProfile.full_name ? 'name' : null,
+      previous.mobile !== nextProfile.mobile ? 'mobile number' : null,
+      previous.email !== nextProfile.email ? 'email address' : null,
+      previous.address !== nextProfile.address ? 'address' : null,
+    ].filter((field): field is string => Boolean(field))
+
+    const [updated] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: nextProfile,
+        select: {
+          id: true, full_name: true, username: true,
+          email: true, mobile: true, address: true,
+        },
+      }),
+      ...(changedFields.length > 0
+        ? [prisma.notification.create({
+            data: {
+              user_id: user.id,
+              type: 'security_profile_changed',
+              title: 'Account information updated',
+              message: `Your registered ${changedFields.join(', ')} ${changedFields.length === 1 ? 'was' : 'were'} updated. If this was not you, contact Hiroma support immediately.`,
+              entity_type: 'security',
+              action_url: '/dashboard/reseller/profile',
+            },
+          })]
+        : []),
+    ])
 
     return NextResponse.json({ success: true, user: updated })
   } catch (error) {

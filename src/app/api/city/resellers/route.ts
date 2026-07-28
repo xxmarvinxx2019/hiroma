@@ -150,7 +150,6 @@ async function creditDirectReferralBonus(
 // BINARY PAIRING
 // ============================================================
 
-const DAILY_PAIRING_CAP    = 10
 const BINARY_POINT_TO_PESO = 0.50
 
 async function firePointsPairingBonus(
@@ -204,11 +203,22 @@ async function firePointsPairingBonus(
       right_points:        true,
       daily_pairing_count: true,
       daily_pairing_date:  true,
-      package: { select: { pairing_bonus_value: true } },
+      package: { select: { id: true, pairing_bonus_value: true } },
       user:    { select: { status: true } },
     },
   })
   const profileMap = new Map(ancestorProfiles.map(p => [p.user_id, p]))
+  const ancestorPackageIds = [...new Set(ancestorProfiles.map(p => p.package?.id).filter(Boolean))] as string[]
+  const binaryCaps = ancestorPackageIds.length
+    ? await prisma.$queryRaw<{ id: string; enabled: boolean; cap: number }[]>`
+        SELECT id::text,
+               COALESCE(binary_pair_cap_enabled, true) AS enabled,
+               COALESCE(daily_binary_pair_cap, 10)::int AS cap
+        FROM packages
+        WHERE id::text = ANY(${ancestorPackageIds}::text[])
+      `
+    : []
+  const binaryCapMap = new Map(binaryCaps.map(row => [row.id, row]))
 
   let currentLeg = newPosition
 
@@ -239,17 +249,21 @@ async function firePointsPairingBonus(
     if (currentLeg === 'left')  leftPts  += newUserPts
     else                        rightPts += newUserPts
 
-    // Pair fires when BOTH sides have points
-    // pointsPerPair = MIN(ancestor's package, left leg, right leg) — always gets the lowest
+    // A pair always consumes the ancestor account package's configured
+    // registration-binary points from EACH side. Any complete pairs are
+    // processed in this event; unmatched points remain as carryover.
     const matchable     = Math.min(leftPts, rightPts)
-    const pointsPerPair = matchable > 0 ? Math.min(ancestorPkgPts, matchable) : 0
-    const possiblePairs = pointsPerPair > 0 ? 1 : 0
+    const pointsPerPair = ancestorPkgPts
+    const possiblePairs = Math.floor(matchable / pointsPerPair)
 
     console.log(`[BINARY] ${ancestor.user_id} | leg:${currentLeg} | L:${leftPts} R:${rightPts} | ancestorPkg:${ancestorPkgPts} | ppp:${pointsPerPair} | pairs:${possiblePairs}`)
 
     if (possiblePairs > 0) {
       const usedToday = isToday ? Number(profile.daily_pairing_count || 0) : 0  // resets count on new day
-      const remaining = Math.max(0, DAILY_PAIRING_CAP - usedToday)
+      const capConfig = profile.package?.id ? binaryCapMap.get(profile.package.id) : undefined
+      const remaining = capConfig?.enabled === false
+        ? possiblePairs
+        : Math.max(0, Number(capConfig?.cap ?? 10) - usedToday)
 
       const paidPairs     = Math.min(possiblePairs, remaining)
       const overflowPairs = possiblePairs - paidPairs
@@ -258,31 +272,11 @@ async function firePointsPairingBonus(
       const paidEarnings     = paidPairs     * pointsPerPair * BINARY_POINT_TO_PESO
       const overflowEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
 
-      // deduct ancestor's package points from both sides (not matchable)
-      const deduct = pointsPerPair * paidPairs
+      // Paid and cap-overflow pairs are both completed pairs, so both consume
+      // points. Only incomplete points remain as carryover.
+      const deduct = pointsPerPair * possiblePairs
       leftPts  -= deduct
       rightPts -= deduct
-
-      // Cap exceeded → flush overflow earnings to Hiroma
-      if (overflowPairs > 0) {
-        const flushEarnings = overflowPairs * pointsPerPair * BINARY_POINT_TO_PESO
-        if (flushEarnings > 0 && hiromaUser) {
-          await prisma.commission.create({
-            data: {
-              user_id: hiromaUser.id, type: 'binary_pairing',
-              amount: flushEarnings, points: overflowPairs * pointsPerPair,
-              source_user_id: newUserId, overflow_to: hiromaUser.id, is_pair_overflow: true,
-            },
-          })
-          await prisma.wallet.upsert({
-            where:  { user_id: hiromaUser.id },
-            update: { balance: { increment: flushEarnings }, total_earned: { increment: flushEarnings } },
-            create: { user_id: hiromaUser.id, balance: flushEarnings, total_earned: flushEarnings, total_withdrawn: 0 },
-          })
-        }
-        leftPts  -= overflowPairs * pointsPerPair
-        rightPts -= overflowPairs * pointsPerPair
-      }
 
       console.log(`[BINARY] ✅ ${ancestor.user_id} | paid:${paidPairs} overflow:${overflowPairs} | ₱${paidEarnings}`)
 
@@ -488,7 +482,13 @@ export async function POST(req: NextRequest) {
       const isToday    = referrerProfile.last_referral_date
         ? new Date(referrerProfile.last_referral_date) >= today : false
       const dailyCount = isToday ? referrerProfile.daily_referral_count : 0
-      overflowToHiroma = dailyCount >= 10
+      const [capConfig] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+        SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
+               COALESCE(daily_referral_cap, 10)::int AS cap
+        FROM packages
+        WHERE id = ${referrerProfile.package.id}
+      `
+      overflowToHiroma = Boolean(capConfig?.enabled) && dailyCount >= Number(capConfig?.cap || 10)
     }
 
     const [packageProducts, otherSideExists, registrationOwnerProfile] = await Promise.all([
@@ -626,6 +626,8 @@ export async function POST(req: NextRequest) {
           reseller_value: registrationEconomics.resellerValue,
           pin_allocation: registrationPinAllocation,
           registration_profit: registrationProfit,
+          payment_status: 'paid',
+          paid_at: new Date(),
         },
       })
 
@@ -679,7 +681,10 @@ export async function POST(req: NextRequest) {
             where:  { username: 'hiroma' },
             select: { id: true },
           })
-          const totalBonus = Math.min(referrerBonus, referredBonus)
+          // Once the sponsor has reached the daily cap, Hiroma retains the
+          // new member package's full direct-referral value. This includes
+          // both the sponsor-level amount and any higher-package difference.
+          const totalBonus = referredBonus
           if (totalBonus > 0 && hiromaUser) {
             await prisma.commission.create({
               data: { user_id: hiromaUser.id, type: 'direct_referral', amount: totalBonus, source_user_id: referrer.id, is_pair_overflow: true, overflow_to: hiromaUser.id },
@@ -773,7 +778,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success:  true,
       message:  `${full_name} has been registered successfully.`,
-      reseller: { full_name, username: username.trim().toLowerCase() },
+      reseller: { id: newUser.id, full_name, username: username.trim().toLowerCase() },
       package:  packageWithProducts ? (() => {
         const isBranch = registrationOwnerProfile?.dist_level === 'branch'
         const productsTotal = packageWithProducts.products.reduce(

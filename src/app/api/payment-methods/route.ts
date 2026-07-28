@@ -48,12 +48,16 @@ export async function GET(req: NextRequest) {
         ORDER BY pm.created_at DESC
       `)
     } else if (user.role === 'admin') {
+      const allowedRole = ['admin', 'regional', 'provincial', 'city', 'reseller'].includes(roleParam)
+        ? roleParam
+        : ''
       methods = await prisma.$queryRawUnsafe(`
         SELECT pm.*, u.full_name, u.username, u.role
         FROM payment_methods pm
         JOIN users u ON u.id = pm.user_id
         WHERE 1=1
         ${user_id ? `AND pm.user_id = '${user_id}'` : ''}
+        ${allowedRole ? `AND u.role = '${allowedRole}'` : ''}
         ${status !== 'all' ? `AND pm.status = '${status}'` : ''}
         ORDER BY pm.created_at DESC
       `)
@@ -71,17 +75,18 @@ export async function GET(req: NextRequest) {
         ORDER BY pm.created_at DESC
       `)
     } else if (user.role === 'reseller') {
-      // Reseller fetches approved methods of their city dist
-      if (!user_id) return NextResponse.json({ methods: [] })
-      console.log('[PAYMENT METHODS] Reseller fetching for city dist:', user_id)
+      const targetId = user_id || user.id
+      const statusFilter = user_id
+        ? `AND pm.status = 'approved'`
+        : (status !== 'all' ? `AND pm.status = '${status}'` : '')
       methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*
+        SELECT pm.*, u.full_name, u.username, u.role
         FROM payment_methods pm
-        WHERE pm.user_id = '${user_id}'
-        AND pm.status = 'approved'
-        ORDER BY pm.type ASC
+        JOIN users u ON u.id = pm.user_id
+        WHERE pm.user_id = '${targetId}'
+        ${statusFilter}
+        ORDER BY pm.created_at DESC
       `)
-      console.log('[PAYMENT METHODS] Found methods:', methods.length)
     } else {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -114,7 +119,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || !['city', 'provincial', 'regional', 'admin'].includes(user.role)) {
+    if (!user || !['city', 'provincial', 'regional', 'admin', 'reseller'].includes(user.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -124,8 +129,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'type, account_name and account_number are required.' }, { status: 400 })
     }
 
+    if (user.role === 'reseller') {
+      const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-PH')
+      if (normalizeName(account_name) !== normalizeName(user.full_name)) {
+        return NextResponse.json({
+          error: 'Account holder name must exactly match your registered Hiroma full name.',
+        }, { status: 400 })
+      }
+    }
+
     if (!['gcash', 'bank_transfer'].includes(type)) {
       return NextResponse.json({ error: 'Invalid type.' }, { status: 400 })
+    }
+
+    if (type === 'gcash' && !/^09\d{9}$/.test(account_number.trim())) {
+      return NextResponse.json({
+        error: 'GCash mobile number must contain exactly 11 digits and start with 09.',
+      }, { status: 400 })
     }
 
     if (type === 'bank_transfer' && !bank_name) {
@@ -133,25 +153,32 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if already has same type pending or approved
-    const existing: any[] = await prisma.$queryRawUnsafe(`
-      SELECT id, status FROM payment_methods
-      WHERE user_id = '${user.id}' AND type = '${type}'
-      AND status IN ('pending', 'approved')
-      LIMIT 1
-    `)
+    const existing = await prisma.paymentMethod.findFirst({
+      where: {
+        user_id: user.id,
+        type,
+        status: { in: ['pending', 'approved'] },
+      },
+      select: { id: true, status: true },
+    })
 
-    if (existing.length > 0) {
+    if (existing) {
       const label = type === 'gcash' ? 'GCash' : 'Bank Transfer'
       return NextResponse.json({
-        error: `You already have a ${label} method ${existing[0].status === 'pending' ? 'pending approval' : 'approved'}.`,
+        error: `You already have a ${label} method ${existing.status === 'pending' ? 'pending approval' : 'approved'}.`,
       }, { status: 400 })
     }
 
-    const id = crypto.randomUUID()
-    await prisma.$executeRawUnsafe(`
-      INSERT INTO payment_methods (id, user_id, type, account_name, account_number, bank_name, status, created_at, updated_at)
-      VALUES ('${id}', '${user.id}', '${type}', '${account_name.trim()}', '${account_number.trim()}', ${bank_name ? `'${bank_name.trim()}'` : 'NULL'}, '${user.role === 'admin' ? 'approved' : 'pending'}', NOW(), NOW())
-    `)
+    await prisma.paymentMethod.create({
+      data: {
+        user_id: user.id,
+        type,
+        account_name: account_name.trim().replace(/\s+/g, ' '),
+        account_number: account_number.trim(),
+        bank_name: bank_name?.trim() || null,
+        status: user.role === 'admin' ? 'approved' : 'pending',
+      },
+    })
 
     return NextResponse.json({ success: true, message: 'Payment method submitted for approval.' })
   } catch (error) {
@@ -189,7 +216,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || !['city', 'provincial', 'regional', 'admin'].includes(user.role)) {
+    if (!user || !['city', 'provincial', 'regional', 'admin', 'reseller'].includes(user.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 

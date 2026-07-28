@@ -101,7 +101,7 @@ export default function ResellerPointsPage() {
       <div className="bg-[#0D1B3E]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3">
         <p className="text-xs font-medium text-[#0D1B3E] mb-1">How pairing points work</p>
         <p className="text-xs text-gray-500 leading-relaxed">
-          Every time your downlines on <span className="font-medium text-[#0D1B3E]">both sides</span> buy products, you earn points — and points mean cash! 🎉
+          Every time your affiliates on <span className="font-medium text-[#0D1B3E]">both sides</span> buy products, you earn points — and points mean cash! 🎉
           Each pair fired earns you points based on the <span className="font-medium text-[#0D1B3E]">lowest package</span> in the pairing — 1 pair fires for every 2 products sold on each leg. Each point is worth <span className="font-medium text-[#1a7a4a]">₱0.50</span>.
           The more your network sells, the more you earn — up to <span className="font-medium text-[#0D1B3E]">10 pairs daily</span>.
           Points reset every <span className="font-medium text-[#0D1B3E]">{summary?.reset_days || 30} days</span> so keep your team selling! 🚀
@@ -207,7 +207,7 @@ export default function ResellerPointsPage() {
           <div className="px-4 py-12 text-center">
             <p className="text-gray-400 text-sm">No pairing points earned yet.</p>
             <p className="text-gray-300 text-xs mt-1">
-              Points fire when both your left and right legs have product sales. Every 2 products sold on each side = 1 point.
+              Points fire when both your left and right affiliates have product sales. Every 2 products sold on each side = 1 point.
             </p>
           </div>
         ) : (

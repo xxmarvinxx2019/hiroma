@@ -30,12 +30,14 @@ const TYPE_ICON: Record<string, string> = {
 }
 
 export default function AdminPaymentMethodsPage() {
-  const [tab, setTab]           = useState<'own' | 'approvals'>('own')
+  const [tab, setTab]           = useState<'own' | 'approvals' | 'resellers'>('own')
   const [methods, setMethods]   = useState<PaymentMethod[]>([])
   const [loading, setLoading]   = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
   const [acting, setActing]     = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [payoutMode, setPayoutMode] = useState<'cash' | 'check' | 'account'>('cash')
+  const [savingMode, setSavingMode] = useState(false)
 
   // Add method form
   const [showForm, setShowForm]     = useState(false)
@@ -51,7 +53,8 @@ export default function AdminPaymentMethodsPage() {
   const fetchMethods = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams({
-      ...(tab === 'approvals' && statusFilter !== 'all' && { status: statusFilter }),
+      ...(tab !== 'own' && statusFilter !== 'all' && { status: statusFilter }),
+      ...(tab === 'resellers' && { role: 'reseller' }),
     })
     fetch(`/api/payment-methods?${params}`)
       .then((r) => r.json())
@@ -60,16 +63,33 @@ export default function AdminPaymentMethodsPage() {
         if (tab === 'own') {
           // Only admin's own methods
           setMethods(all.filter((m: PaymentMethod) => m.user?.role === 'admin'))
-        } else {
-          // Distributor methods (non-admin)
-          const dist = all.filter((m: PaymentMethod) => m.user?.role !== 'admin')
+        } else if (tab === 'approvals') {
+          const dist = all.filter((m: PaymentMethod) => ['regional', 'provincial', 'city'].includes(m.user?.role))
           setMethods(statusFilter === 'all' ? dist : dist.filter((m: PaymentMethod) => m.status === statusFilter))
+        } else {
+          setMethods(statusFilter === 'all' ? all : all.filter((m: PaymentMethod) => m.status === statusFilter))
         }
       })
       .finally(() => setLoading(false))
   }, [tab, statusFilter])
 
   useEffect(() => { fetchMethods() }, [fetchMethods])
+  useEffect(() => {
+    fetch('/api/reseller/payment-policy').then((r) => r.json()).then((d) => {
+      if (d.mode) setPayoutMode(d.mode)
+    })
+  }, [])
+
+  const savePayoutMode = async (mode: 'cash' | 'check' | 'account') => {
+    setSavingMode(true)
+    const res = await fetch('/api/reseller/payment-policy', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    setSavingMode(false)
+    if (res.ok) setPayoutMode(mode)
+  }
 
   const handleAction = async (id: string, status: 'approved' | 'rejected') => {
     setActing(id)
@@ -128,7 +148,7 @@ export default function AdminPaymentMethodsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Payment Methods</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Manage your own payment details and approve distributor requests</p>
+          <p className="text-sm text-gray-400 mt-0.5">Manage payment details and approve distributor or reseller payout accounts</p>
         </div>
         {tab === 'own' && (
           <button onClick={() => { setShowForm(true); setFormError('') }}
@@ -143,11 +163,12 @@ export default function AdminPaymentMethodsPage() {
         {([
           { key: 'own',       label: '💳 My Payment Methods' },
           { key: 'approvals', label: '✅ Distributor Approvals' },
+          { key: 'resellers', label: '👥 Reseller Approvals' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => { setTab(t.key); setStatusFilter('all') }}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
-            {t.key === 'approvals' && pending > 0 && (
+            {t.key !== 'own' && pending > 0 && (
               <span className="ml-1.5 bg-[#9a6f1e] text-white text-[9px] px-1.5 py-0.5 rounded-full">{pending}</span>
             )}
           </button>
@@ -205,8 +226,30 @@ export default function AdminPaymentMethodsPage() {
       )}
 
       {/* ── APPROVALS TAB ── */}
-      {tab === 'approvals' && (
+      {tab !== 'own' && (
         <>
+          {tab === 'resellers' && (
+            <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 mb-4">
+              <p className="text-sm font-semibold text-[#0D1B3E]">Reseller payout method</p>
+              <p className="text-xs text-gray-400 mt-1 mb-3">
+                Cash or Check disables account submission. Reseller Account lets resellers submit GCash or bank details for approval.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['cash', 'Cash'],
+                  ['check', 'Check'],
+                  ['account', 'Reseller Account'],
+                ] as const).map(([value, label]) => (
+                  <button key={value} onClick={() => savePayoutMode(value)} disabled={savingMode}
+                    className={`px-3 py-2 rounded-lg text-xs border ${
+                      payoutMode === value ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]' : 'bg-white text-gray-500 border-[#0D1B3E]/15'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Summary cards */}
           <div className="grid grid-cols-3 gap-4 mb-4">
             {[
@@ -241,7 +284,7 @@ export default function AdminPaymentMethodsPage() {
           <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="grid px-4 py-2 bg-[#F0F2F8]"
               style={{ gridTemplateColumns: '2fr 1fr 2fr 1fr 1fr' }}>
-              {['Distributor', 'Type', 'Account Details', 'Status', 'Actions'].map((h) => (
+              {[tab === 'resellers' ? 'Reseller' : 'Distributor', 'Type', 'Account Details', 'Status', 'Actions'].map((h) => (
                 <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
               ))}
             </div>

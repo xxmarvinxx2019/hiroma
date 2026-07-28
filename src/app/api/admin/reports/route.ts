@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
       // PIN sales breakdown
       pinSalesByPackage,
       digitalCommissionExpense,
+      adminRegistrationFinancials,
 
       // Product sales breakdown (period)
       productSalesItems,
@@ -204,6 +205,17 @@ export async function GET(req: NextRequest) {
         },
         _sum: { amount: true },
       }),
+      prisma.registrationFinancial.aggregate({
+        where: { city_dist_id: user.id, created_at: periodFilter },
+        _sum: {
+          customer_payment: true,
+          product_acquisition_cost: true,
+          reseller_value: true,
+          pin_allocation: true,
+          registration_profit: true,
+        },
+        _count: { id: true },
+      }),
 
       // Product sales breakdown (period) — distributor orders
       prisma.orderItem.groupBy({
@@ -292,7 +304,7 @@ export async function GET(req: NextRequest) {
     })
 
     // ── PIN sales breakdown by package ──
-    // Package total value = PIN price + (SRP × qty per product)
+    // Customer package value is SRP × quantity. PIN is allocated inside it.
     const pinPackageIds = pinSalesByPackage.map((p) => p.package_id)
     const packageDetails = await prisma.package.findMany({
       where:  { id: { in: pinPackageIds } },
@@ -334,6 +346,12 @@ export async function GET(req: NextRequest) {
     const totalPinsSoldPeriod = pinSalesBreakdown.reduce((s, p) => s + p.pins_sold, 0)
     const totalDigitalCommissionExpense = Number(digitalCommissionExpense._sum.amount || 0)
     const digitalNet = totalPinRevenue - totalDigitalCommissionExpense
+    const adminRegistrationCustomerPayments = Number(adminRegistrationFinancials._sum.customer_payment || 0)
+    const adminRegistrationProductRevenue = Number(adminRegistrationFinancials._sum.reseller_value || 0)
+    const adminRegistrationProductCost = Number(adminRegistrationFinancials._sum.product_acquisition_cost || 0)
+    const adminRegistrationProductProfit = Number(adminRegistrationFinancials._sum.registration_profit || 0)
+    const adminRegistrationPinAllocation = Number(adminRegistrationFinancials._sum.pin_allocation || 0)
+    const adminRegistrationCount = Number(adminRegistrationFinancials._count.id || 0)
 
     // ── Admin cost of goods ──
     const allSoldItems = await prisma.orderItem.findMany({
@@ -346,8 +364,8 @@ export async function GET(req: NextRequest) {
     const totalUnitsSold    = allSoldItems.reduce((s, i) => s + i.quantity, 0)
 
     // ── Overall sales summary ──
-    const totalProductRevenue  = productSalesBreakdown.reduce((s, p) => s + p.revenue, 0)
-    const totalProductCost     = productSalesBreakdown.reduce((s, p) => s + p.cost, 0)
+    const totalProductRevenue  = productSalesBreakdown.reduce((s, p) => s + p.revenue, 0) + adminRegistrationProductRevenue
+    const totalProductCost     = productSalesBreakdown.reduce((s, p) => s + p.cost, 0) + adminRegistrationProductCost
     const totalProductProfit   = totalProductRevenue - totalProductCost
     const totalProductUnitsSold = productSalesBreakdown.reduce((s, p) => s + p.units_sold, 0)
     const overallRevenue       = totalProductRevenue + totalPinRevenue
@@ -413,6 +431,14 @@ export async function GET(req: NextRequest) {
           totalProductRevenue, totalProductCost, totalProductProfit, totalProductUnitsSold,
           totalPinRevenue, totalPinsSoldPeriod, totalDigitalCommissionExpense, digitalNet,
           overallRevenue, overallProfit,
+          adminRegistrations: {
+            count: adminRegistrationCount,
+            customerPayments: adminRegistrationCustomerPayments,
+            productRevenue: adminRegistrationProductRevenue,
+            productCost: adminRegistrationProductCost,
+            productProfit: adminRegistrationProductProfit,
+            pinAllocation: adminRegistrationPinAllocation,
+          },
         },
 
         productSales: {

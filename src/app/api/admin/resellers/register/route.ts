@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     // Check referrer daily cap
     const referrerProfile = !isHiromaNode ? await prisma.resellerProfile.findUnique({
       where:  { user_id: referrer.id },
-      select: { daily_referral_count: true, last_referral_date: true, package: { select: { direct_referral_bonus: true } } },
+      select: { daily_referral_count: true, last_referral_date: true, package: { select: { id: true, direct_referral_bonus: true } } },
     }) : null
 
     let overflowToHiroma = false
@@ -109,14 +109,49 @@ export async function POST(req: NextRequest) {
       const today    = new Date(); today.setHours(0, 0, 0, 0)
       const isToday  = referrerProfile.last_referral_date ? new Date(referrerProfile.last_referral_date) >= today : false
       const count    = isToday ? referrerProfile.daily_referral_count : 0
-      overflowToHiroma = count >= 10
+      const [capConfig] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+        SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
+               COALESCE(daily_referral_cap, 10)::int AS cap
+        FROM packages
+        WHERE id = ${referrerProfile.package.id}
+      `
+      overflowToHiroma = Boolean(capConfig?.enabled) && count >= Number(capConfig?.cap || 10)
     }
 
     // Fetch package products
     const packageProducts = await prisma.packageProduct.findMany({
       where:  { package_id: pin.package_id },
-      select: { product_id: true, quantity: true, product: { select: { name: true } } },
+      select: {
+        product_id: true,
+        quantity: true,
+        product: {
+          select: {
+            name: true,
+            price: true,
+            reseller_price: true,
+            cost_price: true,
+          },
+        },
+      },
     })
+
+    // The customer package price is the SRP product total. The PIN amount is
+    // allocated from that payment; it is never added as a second charge.
+    const registrationEconomics = packageProducts.reduce((totals, item) => {
+      const srp = Number(item.product.price || 0)
+      const resellerValue = Number(item.product.reseller_price) || srp
+      const adminCost = Number(item.product.cost_price || 0)
+      totals.customerPayment += srp * item.quantity
+      totals.resellerValue += resellerValue * item.quantity
+      totals.acquisitionCost += adminCost * item.quantity
+      return totals
+    }, { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 })
+    const registrationPinAllocation = Math.max(
+      0,
+      registrationEconomics.customerPayment - registrationEconomics.resellerValue
+    )
+    const registrationProductProfit =
+      registrationEconomics.resellerValue - registrationEconomics.acquisitionCost
 
     // Check admin's inventory
     const productIds   = packageProducts.map((pp) => pp.product_id)
@@ -186,6 +221,32 @@ export async function POST(req: NextRequest) {
         data:  { status: 'used', used_by: created.id, used_at: new Date() },
       })
 
+      await tx.registrationFinancial.create({
+        data: {
+          pin_id: pin.id,
+          city_dist_id: user.id,
+          reseller_id: created.id,
+          package_id: pin.package_id,
+          customer_payment: registrationEconomics.customerPayment,
+          product_acquisition_cost: registrationEconomics.acquisitionCost,
+          reseller_value: registrationEconomics.resellerValue,
+          pin_allocation: registrationPinAllocation,
+          registration_profit: registrationProductProfit,
+        },
+      })
+
+      for (const item of packageProducts) {
+        await tx.inventory.update({
+          where: {
+            owner_id_product_id: {
+              owner_id: user.id,
+              product_id: item.product_id,
+            },
+          },
+          data: { quantity: { decrement: item.quantity } },
+        })
+      }
+
       await tx.nameCapRegistry.upsert({
         where:  { normalized_name: normalizedName },
         update: { count: { increment: 1 } },
@@ -194,16 +255,6 @@ export async function POST(req: NextRequest) {
 
       return created
     })
-
-    // Post-transaction: deduct inventory
-    try {
-      await Promise.all(packageProducts.map((pp) =>
-        prisma.inventory.updateMany({
-          where: { owner_id: user.id, product_id: pp.product_id },
-          data:  { quantity: { decrement: pp.quantity } },
-        })
-      ))
-    } catch (e) { console.error('[ADMIN REGISTER] Inventory error:', e) }
 
     // Update ancestor counts
     try {
@@ -242,7 +293,10 @@ export async function POST(req: NextRequest) {
 
         if (overflowToHiroma) {
           // Daily cap exceeded — entire bonus goes to Hiroma, source = referrer
-          const totalBonus = earned
+          // Once the sponsor has reached the daily cap, Hiroma retains the
+          // new member package's full direct-referral value. This includes
+          // both the sponsor-level amount and any higher-package difference.
+          const totalBonus = referredBonus
           if (totalBonus > 0 && hiromaUser) {
             await prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'direct_referral', amount: totalBonus, source_user_id: referrer.id, is_pair_overflow: true, overflow_to: hiromaUser.id } })
             await prisma.wallet.upsert({
@@ -299,10 +353,21 @@ export async function POST(req: NextRequest) {
           prisma.user.findFirst({ where: { username: 'hiroma' }, select: { id: true } }),
           prisma.resellerProfile.findMany({
             where:  { user_id: { in: ancestors.map(a => a.user_id) } },
-            select: { user_id: true, left_points: true, right_points: true, daily_pairing_count: true, daily_pairing_date: true, package: { select: { pairing_bonus_value: true } }, user: { select: { status: true } } },
+            select: { user_id: true, left_points: true, right_points: true, daily_pairing_count: true, daily_pairing_date: true, package: { select: { id: true, pairing_bonus_value: true } }, user: { select: { status: true } } },
           }),
         ])
         const profileMap = new Map(ancestorProfiles.map(p => [p.user_id, p]))
+        const ancestorPackageIds = [...new Set(ancestorProfiles.map(p => p.package?.id).filter(Boolean))] as string[]
+        const binaryCaps = ancestorPackageIds.length
+          ? await prisma.$queryRaw<{ id: string; enabled: boolean; cap: number }[]>`
+              SELECT id::text,
+                     COALESCE(binary_pair_cap_enabled, true) AS enabled,
+                     COALESCE(daily_binary_pair_cap, 10)::int AS cap
+              FROM packages
+              WHERE id::text = ANY(${ancestorPackageIds}::text[])
+            `
+          : []
+        const binaryCapMap = new Map(binaryCaps.map(row => [row.id, row]))
         const today = new Date(); today.setHours(0, 0, 0, 0)
         let currentLeg = actual_position as 'left' | 'right'
 
@@ -321,19 +386,27 @@ export async function POST(req: NextRequest) {
           if (currentLeg === 'left') leftPts  += newUserPts
           else                       rightPts += newUserPts
 
-          // Option C: pointsPerPair = MIN(ancestor pkg, new reseller pkg)
-          const pointsPerPair = Math.min(ancestorPkgPts, newUserPts)
-
-          // Pair fires when both sides have any points
+          // Use the ancestor account's configured package threshold for every
+          // pair and process every complete pair available in this event.
           const matchable     = Math.min(leftPts, rightPts)
-          const possiblePairs = matchable > 0 ? 1 : 0
+          const pointsPerPair = ancestorPkgPts
+          const possiblePairs = Math.floor(matchable / pointsPerPair)
 
           if (possiblePairs > 0) {
             const usedToday    = isToday ? Number(profile.daily_pairing_count || 0) : 0
-            const paidPairs    = Math.min(possiblePairs, Math.max(0, 10 - usedToday))
-            const paidEarnings = paidPairs * matchable * 0.50
-            const deduct       = matchable
-            leftPts  -= deduct; rightPts -= deduct
+            const capConfig = profile.package?.id ? binaryCapMap.get(profile.package.id) : undefined
+            const remaining = capConfig?.enabled === false
+              ? possiblePairs
+              : Math.max(0, Number(capConfig?.cap ?? 10) - usedToday)
+            const paidPairs = Math.min(possiblePairs, remaining)
+            const overflowPairs = possiblePairs - paidPairs
+            const paidEarnings = paidPairs * pointsPerPair * 0.50
+            const overflowEarnings = overflowPairs * pointsPerPair * 0.50
+            // Consume all completed pairs, including pairs redirected to
+            // Hiroma after the daily cap. Leave only unmatched carryover.
+            const deduct = possiblePairs * pointsPerPair
+            leftPts -= deduct
+            rightPts -= deduct
 
             const isAncestorActive = profile.user?.status === 'active'
             const pairOps: Promise<any>[] = [
@@ -345,16 +418,36 @@ export async function POST(req: NextRequest) {
             if (paidPairs > 0 && paidEarnings > 0) {
               if (isAncestorActive) {
                 pairOps.push(
-                  prisma.commission.create({ data: { user_id: ancestor.user_id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * matchable, source_user_id: newUser.id, is_pair_overflow: false } }),
+                  prisma.commission.create({ data: { user_id: ancestor.user_id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * pointsPerPair, source_user_id: newUser.id, is_pair_overflow: false } }),
                   prisma.wallet.update({ where: { user_id: ancestor.user_id }, data: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } } })
                 )
               } else if (hiromaUser) {
                 // Deactivated ancestor → flush to Hiroma, record source as deactivated ancestor
                 pairOps.push(
-                  prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * matchable, source_user_id: ancestor.user_id, overflow_to: hiromaUser.id, is_pair_overflow: true } }),
+                  prisma.commission.create({ data: { user_id: hiromaUser.id, type: 'binary_pairing', amount: paidEarnings, points: paidPairs * pointsPerPair, source_user_id: ancestor.user_id, overflow_to: hiromaUser.id, is_pair_overflow: true } }),
                   prisma.wallet.upsert({ where: { user_id: hiromaUser.id }, update: { balance: { increment: paidEarnings }, total_earned: { increment: paidEarnings } }, create: { user_id: hiromaUser.id, balance: paidEarnings, total_earned: paidEarnings, total_withdrawn: 0 } })
                 )
               }
+            }
+            if (overflowPairs > 0 && overflowEarnings > 0 && hiromaUser) {
+              pairOps.push(
+                prisma.commission.create({
+                  data: {
+                    user_id: hiromaUser.id,
+                    type: 'binary_pairing',
+                    amount: overflowEarnings,
+                    points: overflowPairs * pointsPerPair,
+                    source_user_id: newUser.id,
+                    overflow_to: hiromaUser.id,
+                    is_pair_overflow: true,
+                  },
+                }),
+                prisma.wallet.upsert({
+                  where: { user_id: hiromaUser.id },
+                  update: { balance: { increment: overflowEarnings }, total_earned: { increment: overflowEarnings } },
+                  create: { user_id: hiromaUser.id, balance: overflowEarnings, total_earned: overflowEarnings, total_withdrawn: 0 },
+                })
+              )
             }
             await Promise.all(pairOps)
           } else {
@@ -401,12 +494,16 @@ export async function POST(req: NextRequest) {
 return NextResponse.json({
       success:  true,
       message:  `${full_name} has been registered successfully.`,
-      reseller: { full_name, username: cleanUsername },
+      reseller: { id: newUser.id, full_name, username: cleanUsername },
       package:  packageWithProducts ? {
         name:           packageWithProducts.name,
-        pin_price:      Number(packageWithProducts.price),
+        pin_price:      registrationPinAllocation,
+        configured_pin_price: Number(packageWithProducts.price),
         products_total: packageWithProducts.products.reduce((s, p) => s + Number(p.product.price || 0) * p.quantity, 0),
-        total_price:    Number(packageWithProducts.price) + packageWithProducts.products.reduce((s, p) => s + Number(p.product.price || 0) * p.quantity, 0),
+        reseller_value: registrationEconomics.resellerValue,
+        acquisition_cost: registrationEconomics.acquisitionCost,
+        registration_profit: registrationProductProfit,
+        total_price:    registrationEconomics.customerPayment,
         products:       packageWithProducts.products.map((p) => ({ name: p.product.name, type: p.product.type, quantity: p.quantity, srp: Number(p.product.price || 0), subtotal: Number(p.product.price || 0) * p.quantity })),
       } : null,
     })

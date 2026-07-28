@@ -16,10 +16,18 @@ export async function GET() {
     const inventoryCost = (product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) =>
       isBranch ? Number(product.branch_price) || Number(product.cost_price) : Number(product.city_price)
 
-    const now       = new Date()
-    const today     = new Date(); today.setHours(0, 0, 0, 0)
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1)
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    // Business-day boundaries are always Philippine time, even when Vercel runs in UTC.
+    const now = new Date()
+    const manilaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+    const manilaYear = manilaNow.getUTCFullYear()
+    const manilaMonth = manilaNow.getUTCMonth()
+    const manilaDay = manilaNow.getUTCDate()
+    const toUtcFromManilaMidnight = (year: number, month: number, day: number) =>
+      new Date(Date.UTC(year, month, day) - 8 * 60 * 60 * 1000)
+    const today = toUtcFromManilaMidnight(manilaYear, manilaMonth, manilaDay)
+    const tomorrow = toUtcFromManilaMidnight(manilaYear, manilaMonth, manilaDay + 1)
+    const yesterday = toUtcFromManilaMidnight(manilaYear, manilaMonth, manilaDay - 1)
+    const monthStart = toUtcFromManilaMidnight(manilaYear, manilaMonth, 1)
 
     const [
       totalResellers,
@@ -37,7 +45,7 @@ export async function GET() {
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'reseller', created_by: user.id } }),
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, status: 'active' } }),
-      prisma.user.count({ where: { role: 'reseller', created_by: user.id, created_at: { gte: today } } }),
+      prisma.user.count({ where: { role: 'reseller', created_by: user.id, created_at: { gte: today, lt: tomorrow } } }),
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, created_at: { gte: yesterday, lt: today } } }),
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, created_at: { gte: monthStart } } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused' } }),
@@ -65,11 +73,29 @@ export async function GET() {
 
     // ── Today's walk-in order sales ──
     const todayWalkInItems = await prisma.orderItem.findMany({
-      where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: today } } },
+      where:  {
+        order: {
+          seller_id: user.id,
+          status: 'delivered',
+          OR: [
+            { delivered_at: { gte: today, lt: tomorrow } },
+            { delivered_at: null, created_at: { gte: today, lt: tomorrow } },
+          ],
+        },
+      },
       select: { quantity: true, subtotal: true },
     })
     const yesterdayWalkInItems = await prisma.orderItem.findMany({
-      where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: yesterday, lt: today } } },
+      where:  {
+        order: {
+          seller_id: user.id,
+          status: 'delivered',
+          OR: [
+            { delivered_at: { gte: yesterday, lt: today } },
+            { delivered_at: null, created_at: { gte: yesterday, lt: today } },
+          ],
+        },
+      },
       select: { quantity: true, subtotal: true },
     })
     const salesRevenueToday     = todayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
@@ -78,7 +104,7 @@ export async function GET() {
 
     // ── Today's PINs used (reseller registrations today) ──
     const pinsUsedToday = await prisma.pin.count({
-      where: { city_dist_id: user.id, status: 'used', used_at: { gte: today } },
+      where: { city_dist_id: user.id, status: 'used', used_at: { gte: today, lt: tomorrow } },
     })
 
     // ── All-time product order sales ──
@@ -87,14 +113,22 @@ export async function GET() {
       select: {
         items: {
           select: {
-            quantity: true, subtotal: true,
+            quantity: true, subtotal: true, unit_acquisition_cost: true,
             product: { select: { cost_price: true, city_price: true, branch_price: true, name: true } },
           },
         },
       },
     })
     const orderRevenue   = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
-    const orderCost      = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + inventoryCost(i.product) * i.quantity, 0), 0)
+    const orderCost      = deliveredOrders.reduce(
+      (s, o) => s + o.items.reduce(
+        (ss, i) => ss + (i.unit_acquisition_cost == null
+          ? inventoryCost(i.product)
+          : Number(i.unit_acquisition_cost)) * i.quantity,
+        0
+      ),
+      0
+    )
     const orderUnitsSold = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
 
     // ── Product movement (top products sold) ──
@@ -218,7 +252,16 @@ export async function GET() {
       const label = d.toLocaleDateString('en-PH', { month: 'short' })
 
       const mItems = await prisma.orderItem.findMany({
-        where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: start, lte: end } } },
+        where:  {
+          order: {
+            seller_id: user.id,
+            status: 'delivered',
+            OR: [
+              { delivered_at: { gte: start, lte: end } },
+              { delivered_at: null, created_at: { gte: start, lte: end } },
+            ],
+          },
+        },
         select: { subtotal: true },
       })
       const mResellers = await prisma.user.count({
