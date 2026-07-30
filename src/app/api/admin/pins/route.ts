@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
+import { PinStatus, Prisma } from '@prisma/client'
+import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 // ── Generate unique PIN code ──
+function calculateUpgradeSnapshot(products: Array<{ quantity: number; product: { price: unknown; reseller_price: unknown; city_price: unknown; cost_price: unknown } }>) {
+  return products.reduce((total, item) => {
+    const srp = Number(item.product.price || 0)
+    const reseller = Number(item.product.reseller_price || srp)
+    const city = Number(item.product.city_price || item.product.cost_price || 0)
+    total.customerPayment += srp * item.quantity
+    total.resellerValue += reseller * item.quantity
+    total.acquisitionCost += city * item.quantity
+    return total
+  }, { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 })
+}
 function generatePinCode(packageName: string): string {
   const prefix = 'HRM'
   const year = new Date().getFullYear()
@@ -30,12 +44,16 @@ export async function GET(req: NextRequest) {
     const dateFrom      = searchParams.get('from')          || ''
     const dateTo        = searchParams.get('to')            || ''
 
+    if (status !== 'all' && !Object.values(PinStatus).includes(status as PinStatus)) {
+      return NextResponse.json({ error: 'Invalid PIN status.' }, { status: 400 })
+    }
+
     const fromDate = dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0, 0, 0, 0))
     const toDate   = dateTo   ? new Date(dateTo + 'T23:59:59') : new Date(new Date().setHours(23, 59, 59, 999))
 
-    const where: any = {
+    const where: Prisma.PinWhereInput = {
       created_at: { gte: fromDate, lte: toDate },
-      ...(status !== 'all' && { status }),
+      ...(status !== 'all' && { status: status as PinStatus }),
       ...(cityDistId && { city_dist_id: cityDistId }),
       ...(search && {
         OR: [
@@ -56,7 +74,7 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id: true, pin_code: true, status: true,
+          id: true, pin_code: true, status: true, pin_type: true, upgrade_from_package_id: true, pin_allocation_snapshot: true,
           created_at: true, used_at: true,
           package:          { select: { name: true, price: true } },
           city_distributor: { select: { full_name: true, username: true } },
@@ -99,11 +117,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { package_id, city_dist_id, quantity } = await req.json()
+    const { package_id, city_dist_id, quantity, pin_type = 'registration', upgrade_from_package_id } = await req.json()
 
     if (!package_id || !city_dist_id || !quantity) {
       return NextResponse.json({ error: 'All fields are required.' }, { status: 400 })
     }
+    if (pin_type !== 'registration' && pin_type !== 'upgrade') return NextResponse.json({ error: 'Invalid PIN type.' }, { status: 400 })
+    if (pin_type === 'upgrade' && !upgrade_from_package_id) return NextResponse.json({ error: "Select the reseller's current package for an upgrade PIN." }, { status: 400 })
 
     if (quantity < 1 || quantity > 50) {
       return NextResponse.json(
@@ -119,10 +139,12 @@ export async function POST(req: NextRequest) {
         name: true,
         price: true,
         is_active: true,
+        direct_referral_bonus: true,
+        pairing_bonus_value: true,
         products: {
           select: {
             quantity: true,
-            product: { select: { price: true, reseller_price: true } },
+            product: { select: { price: true, reseller_price: true, city_price: true, cost_price: true } },
           },
         },
       },
@@ -133,6 +155,34 @@ export async function POST(req: NextRequest) {
     }
     if (!pkg.is_active) {
       return NextResponse.json({ error: 'Cannot generate PINs for an inactive package.' }, { status: 400 })
+    }
+    // The Admin selects only the origin and target packages. The price is
+    // computed and snapshotted now, so later package-price edits are safe.
+    const targetEconomics = pkg.products.length > 0 ? calculatePackageEconomics(pkg.products) : { pinAllocation: Number(pkg.price) }
+    const targetSnapshot = calculateUpgradeSnapshot(pkg.products)
+    let sourcePackageName: string | null = null
+    let unitPinPrice = Number(targetEconomics.pinAllocation)
+    let upgradeSnapshot: { customerPayment: number; resellerValue: number; acquisitionCost: number; directAllocation: number; binaryAllocation: number; pointsDifference: number } | null = null
+    if (pin_type === 'upgrade') {
+      const sourcePkg = await prisma.package.findUnique({
+        where: { id: upgrade_from_package_id },
+        select: { name: true, direct_referral_bonus: true, pairing_bonus_value: true, products: { select: { quantity: true, product: { select: { price: true, reseller_price: true, city_price: true, cost_price: true } } } } },
+      })
+      if (!sourcePkg) return NextResponse.json({ error: 'Current package was not found.' }, { status: 404 })
+      const sourceEconomics = sourcePkg.products.length > 0 ? calculatePackageEconomics(sourcePkg.products) : { pinAllocation: 0 }
+      const sourceSnapshot = calculateUpgradeSnapshot(sourcePkg.products)
+      unitPinPrice = Number(targetEconomics.pinAllocation) - Number(sourceEconomics.pinAllocation)
+      const pointsDifference = Number(pkg.pairing_bonus_value) - Number(sourcePkg.pairing_bonus_value)
+      if (unitPinPrice <= 0 || pointsDifference <= 0) return NextResponse.json({ error: 'Upgrade PIN requires a higher target package.' }, { status: 400 })
+      sourcePackageName = sourcePkg.name
+      upgradeSnapshot = {
+        customerPayment: targetSnapshot.customerPayment - sourceSnapshot.customerPayment,
+        resellerValue: targetSnapshot.resellerValue - sourceSnapshot.resellerValue,
+        acquisitionCost: targetSnapshot.acquisitionCost - sourceSnapshot.acquisitionCost,
+        directAllocation: Math.max(0, Number(pkg.direct_referral_bonus) - Number(sourcePkg.direct_referral_bonus)),
+        binaryAllocation: Math.max(0, Number(pkg.pairing_bonus_value) * 0.5 - Number(sourcePkg.pairing_bonus_value) * 0.5),
+        pointsDifference,
+      }
     }
 
     // ── Generate unique PIN codes ──
@@ -150,9 +200,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const unitPinPrice = pkg.products.length > 0
-      ? calculatePackageEconomics(pkg.products).pinAllocation
-      : Number(pkg.price)
     const totalAmount = unitPinPrice * quantity
 
     // ── Create PINs + record as a sale order ──
@@ -166,6 +213,15 @@ export async function POST(req: NextRequest) {
           city_dist_id,
           status: 'unused',
           generated_by: user.id,
+          pin_type,
+          upgrade_from_package_id: pin_type === 'upgrade' ? upgrade_from_package_id : null,
+          pin_allocation_snapshot: unitPinPrice,
+          upgrade_customer_payment_snapshot: upgradeSnapshot?.customerPayment ?? null,
+          upgrade_reseller_value_snapshot: upgradeSnapshot?.resellerValue ?? null,
+          upgrade_acquisition_cost_snapshot: upgradeSnapshot?.acquisitionCost ?? null,
+          upgrade_direct_allocation_snapshot: upgradeSnapshot?.directAllocation ?? null,
+          upgrade_binary_allocation_snapshot: upgradeSnapshot?.binaryAllocation ?? null,
+          upgrade_points_difference_snapshot: upgradeSnapshot?.pointsDifference ?? null,
         })),
       })
 
@@ -194,7 +250,7 @@ export async function POST(req: NextRequest) {
       activity_type: 'pin_generated',
       category:      'pin',
       description:   `Generated ${pinCodes.length} PIN(s) for ${pkg.name} package`,
-      metadata:      { quantity: pinCodes.length, package: pkg.name, city_dist_id },
+      metadata:      { quantity: pinCodes.length, package: pkg.name, city_dist_id, pin_type, upgrade_from_package_id: pin_type === 'upgrade' ? upgrade_from_package_id : null, pin_allocation_snapshot: unitPinPrice },
       risk_level:    'low',
       status:        'normal',
     })
@@ -205,10 +261,8 @@ return NextResponse.json({
     })
   } catch (error) {
     console.error('[GENERATE PINS ERROR]', error)
-    return NextResponse.json(
-      { error: 'Something went wrong. Please check server logs.' },
-      { status: 500 }
-    )
+    const detail = error instanceof Error ? error.message : 'Unknown server error'
+    return NextResponse.json({ error: 'PIN generation failed: ' + detail }, { status: 500 })
   }
 }
 // ── PATCH — cancel PINs (single or bulk) ──
@@ -225,6 +279,10 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'pin_ids array is required.' }, { status: 400 })
     }
 
+    if (!pin_ids.every((id): id is string => typeof id === 'string' && UUID_PATTERN.test(id))) {
+      return NextResponse.json({ error: 'pin_ids must contain valid PIN identifiers.' }, { status: 400 })
+    }
+
     // Only unused PINs can be cancelled
     const pins = await prisma.pin.findMany({
       where: { id: { in: pin_ids } },
@@ -238,16 +296,15 @@ export async function PATCH(req: NextRequest) {
       }, { status: 400 })
     }
 
-    // Use unsafeRaw to bypass stale Prisma enum for 'cancelled'
-    const idList = pin_ids.map((id: string) => `'${id}'`).join(',')
-    await prisma.$executeRawUnsafe(
-      `UPDATE pins SET status = 'cancelled' WHERE id IN (${idList}) AND status = 'unused'`
-    )
+    const result = await prisma.pin.updateMany({
+      where: { id: { in: pin_ids }, status: 'unused' },
+      data: { status: 'cancelled' },
+    })
 
     return NextResponse.json({
       success: true,
-      message: `${pin_ids.length} PIN${pin_ids.length > 1 ? 's' : ''} cancelled successfully.`,
-      cancelled: pin_ids.length,
+      message: `${result.count} PIN${result.count > 1 ? 's' : ''} cancelled successfully.`,
+      cancelled: result.count,
     })
   } catch (error) {
     console.error('[CANCEL PINS ERROR]', error)

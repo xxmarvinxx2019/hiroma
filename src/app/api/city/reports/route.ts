@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-const REPORT_PERIODS = ['today', 'this_week', 'this_month', 'this_year', 'all_time'] as const
+const REPORT_PERIODS = ['today', 'yesterday', 'this_week', 'this_month', 'this_year', 'all_time', 'custom'] as const
 type ReportPeriod = (typeof REPORT_PERIODS)[number]
 
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -11,16 +11,14 @@ function manilaBoundary(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month, day) - MANILA_OFFSET_MS)
 }
 
-function resolveReportPeriod(requested: string | null) {
+function resolveReportPeriod(request: NextRequest) {
+  const requested = request.nextUrl.searchParams.get('period')
   const period: ReportPeriod = REPORT_PERIODS.includes(requested as ReportPeriod)
     ? requested as ReportPeriod
     : 'today'
   const labels: Record<ReportPeriod, string> = {
-    today: 'Today',
-    this_week: 'This Week',
-    this_month: 'This Month',
-    this_year: 'This Year',
-    all_time: 'All Time',
+    today: 'Today', yesterday: 'Yesterday', this_week: 'This Week',
+    this_month: 'This Month', this_year: 'This Year', all_time: 'All Time', custom: 'Custom Range',
   }
   if (period === 'all_time') return { period, label: labels[period], start: null, end: null }
 
@@ -28,27 +26,26 @@ function resolveReportPeriod(requested: string | null) {
   const year = manilaNow.getUTCFullYear()
   const month = manilaNow.getUTCMonth()
   const day = manilaNow.getUTCDate()
-  let start: Date
-  let end: Date
-
-  if (period === 'today') {
-    start = manilaBoundary(year, month, day)
-    end = manilaBoundary(year, month, day + 1)
-  } else if (period === 'this_week') {
-    const mondayOffset = (manilaNow.getUTCDay() + 6) % 7
-    start = manilaBoundary(year, month, day - mondayOffset)
-    end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000)
-  } else if (period === 'this_month') {
-    start = manilaBoundary(year, month, 1)
-    end = manilaBoundary(year, month + 1, 1)
-  } else {
-    start = manilaBoundary(year, 0, 1)
-    end = manilaBoundary(year + 1, 0, 1)
+  if (period === 'custom') {
+    const parseDate = (value: string | null) => {
+      const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      return match ? manilaBoundary(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
+    }
+    const start = parseDate(request.nextUrl.searchParams.get('start'))
+    const endDay = parseDate(request.nextUrl.searchParams.get('end'))
+    if (!start || !endDay || endDay < start) return { period: 'all_time' as const, label: 'All Time', start: null, end: null }
+    return { period, label: labels[period], start, end: new Date(endDay.getTime() + 24 * 60 * 60 * 1000) }
   }
-
-  return { period, label: labels[period], start, end }
+  if (period === 'today') return { period, label: labels[period], start: manilaBoundary(year, month, day), end: manilaBoundary(year, month, day + 1) }
+  if (period === 'yesterday') return { period, label: labels[period], start: manilaBoundary(year, month, day - 1), end: manilaBoundary(year, month, day) }
+  if (period === 'this_week') {
+    const mondayOffset = (manilaNow.getUTCDay() + 6) % 7
+    const start = manilaBoundary(year, month, day - mondayOffset)
+    return { period, label: labels[period], start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
+  }
+  if (period === 'this_month') return { period, label: labels[period], start: manilaBoundary(year, month, 1), end: manilaBoundary(year, month + 1, 1) }
+  return { period, label: labels[period], start: manilaBoundary(year, 0, 1), end: manilaBoundary(year + 1, 0, 1) }
 }
-
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -56,7 +53,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const selectedPeriod = resolveReportPeriod(req.nextUrl.searchParams.get('period'))
+    const selectedPeriod = resolveReportPeriod(req)
     const dateFilter = selectedPeriod.start && selectedPeriod.end
       ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
       : undefined
@@ -168,6 +165,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true,
           used_at: true,
+          reseller_profile: { select: { user_id: true } },
           package: {
             select: {
               id: true,
@@ -244,6 +242,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    let ledgerFormulaMismatches = 0
+    let legacyReconstructedRows = 0
+    let unclassifiedUsedPins = 0
     const packageMap = new Map<string, {
       id: string
       name: string
@@ -277,12 +278,19 @@ export async function GET(req: NextRequest) {
       current.pin_allocation += Number(snapshot.pin_allocation)
       current.reseller_value += Number(snapshot.reseller_value)
       current.cost += Number(snapshot.product_acquisition_cost)
-      current.profit += Number(snapshot.registration_profit)
+      const calculatedProfit = Number(snapshot.reseller_value) - Number(snapshot.product_acquisition_cost)
+      if (Math.abs(Number(snapshot.registration_profit) - calculatedProfit) > 0.009) ledgerFormulaMismatches += 1
+      current.profit += calculatedProfit
       packageMap.set(snapshot.package_id, current)
     }
     const snapshottedPinIds = new Set(registrationSnapshots.map((snapshot) => snapshot.pin_id))
     for (const pin of registrations) {
       if (snapshottedPinIds.has(pin.id)) continue
+      if (!pin.reseller_profile) {
+        unclassifiedUsedPins += 1
+        continue
+      }
+      legacyReconstructedRows += 1
       const revenue = pin.package.products.reduce(
         (sum, item) => sum + Number(item.product.price || 0) * item.quantity,
         0
@@ -377,12 +385,18 @@ export async function GET(req: NextRequest) {
       member_sales: memberSales,
       non_member_sales: nonMemberSales,
       registrations: registrationSummary,
+      financial_integrity: {
+        ledger_rows: registrationSnapshots.length,
+        legacy_reconstructed_rows: legacyReconstructedRows,
+        unclassified_used_pins: unclassifiedUsedPins,
+        ledger_formula_mismatches: ledgerFormulaMismatches,
+      },
       products: [...productMap.values()].sort((a, b) => b.revenue - a.revenue),
       packages: [...packageMap.values()].sort((a, b) => b.revenue - a.revenue),
       notes: {
         sales_basis: 'Orders delivered within the selected period',
         collection_basis: 'Product and registration payments collected within the selected period',
-        registration_basis: 'City/Branch product revenue is reseller value; PIN allocation is a remittance payable to Hiroma and is not City/Branch revenue',
+        registration_basis: 'City/Branch product revenue is reseller value; PIN allocation was prepaid when the PIN was purchased, is consumed on registration, and is not City/Branch revenue, cost, or profit',
         cost_basis: `Historical ${isBranch ? 'Branch' : 'City Distributor'} acquisition price captured when each order was created`,
         registration_data_source: registrationLedgerAvailable
           ? 'Financial ledger snapshots'

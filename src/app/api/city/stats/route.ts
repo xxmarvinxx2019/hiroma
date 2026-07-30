@@ -1,8 +1,54 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
-export async function GET() {
+const STATS_PERIODS = ['today', 'yesterday', 'this_week', 'this_month', 'this_year', 'all_time', 'custom'] as const
+type StatsPeriod = (typeof STATS_PERIODS)[number]
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
+
+function manilaBoundary(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month, day) - MANILA_OFFSET_MS)
+}
+
+function resolveStatsPeriod(request: NextRequest) {
+  const requested = request.nextUrl.searchParams.get('period')
+  const period: StatsPeriod = STATS_PERIODS.includes(requested as StatsPeriod)
+    ? requested as StatsPeriod
+    : 'all_time'
+  const labels: Record<StatsPeriod, string> = {
+    today: 'Today', yesterday: 'Yesterday', this_week: 'This Week',
+    this_month: 'This Month', this_year: 'This Year', all_time: 'All Time', custom: 'Custom Range',
+  }
+  if (period === 'all_time') return { period, label: labels[period], start: null, end: null }
+
+  const now = new Date(Date.now() + MANILA_OFFSET_MS)
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const day = now.getUTCDate()
+  if (period === 'custom') {
+    const startValue = request.nextUrl.searchParams.get('start')
+    const endValue = request.nextUrl.searchParams.get('end')
+    const parseDate = (value: string | null) => {
+      const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      return match ? manilaBoundary(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
+    }
+    const start = parseDate(startValue)
+    const endDay = parseDate(endValue)
+    if (!start || !endDay || endDay < start) return { period: 'all_time' as const, label: 'All Time', start: null, end: null }
+    return { period, label: labels[period], start, end: new Date(endDay.getTime() + 24 * 60 * 60 * 1000) }
+  }
+  if (period === 'today') return { period, label: labels[period], start: manilaBoundary(year, month, day), end: manilaBoundary(year, month, day + 1) }
+  if (period === 'yesterday') return { period, label: labels[period], start: manilaBoundary(year, month, day - 1), end: manilaBoundary(year, month, day) }
+  if (period === 'this_week') {
+    const mondayOffset = (now.getUTCDay() + 6) % 7
+    const start = manilaBoundary(year, month, day - mondayOffset)
+    return { period, label: labels[period], start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
+  }
+  if (period === 'this_month') return { period, label: labels[period], start: manilaBoundary(year, month, 1), end: manilaBoundary(year, month + 1, 1) }
+  return { period, label: labels[period], start: manilaBoundary(year, 0, 1), end: manilaBoundary(year + 1, 0, 1) }
+}
+
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'city') {
@@ -13,8 +59,12 @@ export async function GET() {
       select: { dist_level: true },
     })
     const isBranch = profile?.dist_level === 'branch'
+    const selectedPeriod = resolveStatsPeriod(req)
+    const dateFilter = selectedPeriod.start && selectedPeriod.end
+      ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
+      : undefined
     const inventoryCost = (product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) =>
-      isBranch ? Number(product.branch_price) || Number(product.cost_price) : Number(product.city_price)
+      isBranch ? Number(product.branch_price) || Number(product.cost_price) : Number(product.city_price) || Number(product.cost_price)
 
     // Business-day boundaries are always Philippine time, even when Vercel runs in UTC.
     const now = new Date()
@@ -109,8 +159,19 @@ export async function GET() {
 
     // ── All-time product order sales ──
     const deliveredOrders = await prisma.order.findMany({
-      where:  { seller_id: user.id, status: 'delivered' },
+      where:  {
+        seller_id: user.id,
+        status: 'delivered',
+        ...(dateFilter ? {
+          OR: [
+            { delivered_at: dateFilter },
+            { delivered_at: null, created_at: dateFilter },
+          ],
+        } : {}),
+      },
       select: {
+        is_non_member_sale: true,
+        buyer: { select: { role: true } },
         items: {
           select: {
             quantity: true, subtotal: true, unit_acquisition_cost: true,
@@ -130,7 +191,34 @@ export async function GET() {
       0
     )
     const orderUnitsSold = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
+    const orderProfit = orderRevenue - orderCost
 
+    // Keep product orders separate from package registrations. A product order is
+    // revenue for the City Distributor; a package registration also contains a
+    // prepaid PIN allocation is excluded from City revenue, cost, and profit.
+    const summarizeProductOrders = (orders: typeof deliveredOrders) => orders.reduce(
+      (summary, order) => {
+        for (const item of order.items) {
+          const revenue = Number(item.subtotal || 0)
+          const unitCost = item.unit_acquisition_cost == null
+            ? inventoryCost(item.product)
+            : Number(item.unit_acquisition_cost)
+          summary.revenue += revenue
+          summary.cost += unitCost * item.quantity
+          summary.units += item.quantity
+        }
+        return summary
+      },
+      { revenue: 0, cost: 0, profit: 0, units: 0 }
+    )
+    const resellerProductOrders = summarizeProductOrders(
+      deliveredOrders.filter(order => !order.is_non_member_sale && order.buyer.role === 'reseller')
+    )
+    const walkInProductOrders = summarizeProductOrders(
+      deliveredOrders.filter(order => order.is_non_member_sale || order.buyer.role !== 'reseller')
+    )
+    resellerProductOrders.profit = resellerProductOrders.revenue - resellerProductOrders.cost
+    walkInProductOrders.profit = walkInProductOrders.revenue - walkInProductOrders.cost
     // ── Product movement (top products sold) ──
     const productMovement: Record<string, { name: string; qty: number; revenue: number }> = {}
     for (const order of deliveredOrders) {
@@ -145,13 +233,15 @@ export async function GET() {
 
     // ── Package (PIN) sales from reseller registrations ──
     const registrationSnapshots = await prisma.registrationFinancial.findMany({
-      where: { city_dist_id: user.id },
+      where: { city_dist_id: user.id, ...(dateFilter ? { created_at: dateFilter } : {}) },
       select: {
+        pin_id: true,
         package_id: true,
         customer_payment: true,
         product_acquisition_cost: true,
         reseller_value: true,
         pin_allocation: true,
+        registration_profit: true,
       },
     }).catch((error) => {
       console.warn('[CITY STATS] Registration ledger unavailable; using legacy PIN calculations.', error)
@@ -163,12 +253,21 @@ export async function GET() {
       product_acquisition_cost: Number(row.product_acquisition_cost),
       reseller_value: Number(row.reseller_value),
       pin_allocation: Number(row.pin_allocation),
+      registration_profit: Number(row.registration_profit),
     }))
-    if (registrationRows.length === 0) {
+    let ledgerFormulaMismatches = registrationRows.filter((row) =>
+      Math.abs(row.registration_profit - (row.reseller_value - row.product_acquisition_cost)) > 0.009
+    ).length
+    let legacyRegistrationRows = 0
+    let unclassifiedUsedPins = 0
+    {
+      const snapshottedPinIds = new Set(registrationSnapshots.map((row) => row.pin_id))
       const legacyRegistrations = await prisma.pin.findMany({
-        where: { city_dist_id: user.id, status: 'used' },
+        where: { city_dist_id: user.id, status: 'used', ...(dateFilter ? { used_at: dateFilter } : {}) },
         select: {
+          id: true,
           package_id: true,
+          reseller_profile: { select: { user_id: true } },
           package: {
             select: {
               products: {
@@ -190,6 +289,12 @@ export async function GET() {
         },
       })
       for (const pin of legacyRegistrations) {
+        if (snapshottedPinIds.has(pin.id)) continue
+        if (!pin.reseller_profile) {
+          unclassifiedUsedPins += 1
+          continue
+        }
+        legacyRegistrationRows += 1
         const customerPayment = pin.package.products.reduce(
           (sum, item) => sum + Number(item.product.price || 0) * item.quantity,
           0
@@ -208,6 +313,7 @@ export async function GET() {
           product_acquisition_cost: productAcquisitionCost,
           reseller_value: resellerValue,
           pin_allocation: Math.max(0, customerPayment - resellerValue),
+          registration_profit: resellerValue - productAcquisitionCost,
         })
       }
     }
@@ -243,16 +349,21 @@ export async function GET() {
       packageUnitsSold += (pkg?.products || []).reduce((sum, item) => sum + item.quantity, 0)
     }
 
-    // ── Monthly revenue (last 6 months) ──
+    // Monthly table: every row is intersected with the selected reporting range.
     const monthlyRevenue: { month: string; revenue: number; resellers: number }[] = []
     for (let i = 5; i >= 0; i--) {
-      const d     = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const start = new Date(d.getFullYear(), d.getMonth(), 1)
-      const end   = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const monthStartDate = new Date(d.getFullYear(), d.getMonth(), 1)
+      const monthEndDate = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
       const label = d.toLocaleDateString('en-PH', { month: 'short' })
-
+      const start = dateFilter ? new Date(Math.max(monthStartDate.getTime(), dateFilter.gte.getTime())) : monthStartDate
+      const end = dateFilter ? new Date(Math.min(monthEndDate.getTime(), dateFilter.lt.getTime() - 1)) : monthEndDate
+      if (end < start) {
+        monthlyRevenue.push({ month: label, revenue: 0, resellers: 0 })
+        continue
+      }
       const mItems = await prisma.orderItem.findMany({
-        where:  {
+        where: {
           order: {
             seller_id: user.id,
             status: 'delivered',
@@ -268,12 +379,11 @@ export async function GET() {
         where: { role: 'reseller', created_by: user.id, created_at: { gte: start, lte: end } },
       })
       monthlyRevenue.push({
-        month:     label,
-        revenue:   mItems.reduce((s, i) => s + Number(i.subtotal || 0), 0),
+        month: label,
+        revenue: mItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
         resellers: mResellers,
       })
     }
-
     // ── Recent orders (walk-in) ──
     const recentOrders = await prisma.order.findMany({
       where:   { seller_id: user.id },
@@ -286,11 +396,17 @@ export async function GET() {
       },
     })
 
-    const totalRevenue   = orderRevenue + packageRevenue
-    const totalCost      = orderCost    + packageCost
-    const totalProfit    = totalRevenue - totalCost
+    const registrationProductProfit = packageRevenue - packageCost
+    const combinedProductRevenue = orderRevenue + packageRevenue
+    const combinedProductCost = orderCost + packageCost
+    const combinedProductProfit = orderProfit + registrationProductProfit
+    const totalCustomerCashCollected = orderRevenue + packageCustomerPayments
+    // Legacy aliases retained for existing dashboard consumers. They refer only
+    // to recognized product value and must not be presented as total cash collected.
+    const totalRevenue = combinedProductRevenue
+    const totalCost = combinedProductCost
+    const totalProfit = combinedProductProfit
     const totalUnitsSold = orderUnitsSold + packageUnitsSold
-
     // ── Top earners among resellers ──
     const topEarners = (await prisma.resellerProfile.findMany({
       where: { city_dist_id: user.id, user: { status: 'active' } },
@@ -311,6 +427,18 @@ export async function GET() {
 
     return NextResponse.json({
       stats: {
+        financialIntegrity: {
+          ledger_rows: registrationSnapshots.length,
+          legacy_reconstructed_rows: legacyRegistrationRows,
+          unclassified_used_pins: unclassifiedUsedPins,
+          ledger_formula_mismatches: ledgerFormulaMismatches,
+        },
+        period: {
+          value: selectedPeriod.period,
+          label: selectedPeriod.label,
+          start: selectedPeriod.start?.toISOString() || null,
+          end: selectedPeriod.end?.toISOString() || null,
+        },
         accountType: profile?.dist_level || 'city',
         isStaff: Boolean(user.is_staff),
         staffPermissions: user.permissions || [],
@@ -340,12 +468,21 @@ export async function GET() {
         totalUnitsSold,
         orderRevenue,
         orderCost,
+        orderProfit,
         orderUnitsSold,
+        resellerProductOrders,
+        walkInProductOrders,
+        registrationCount: registrationRows.length,
         packageRevenue,
         packageCost,
         packagePinRemittance,
         packageCustomerPayments,
         packageUnitsSold,
+        registrationProductProfit,
+        combinedProductRevenue,
+        combinedProductCost,
+        combinedProductProfit,
+        totalCustomerCashCollected,
         // Lists
         topProducts,
         packageBreakdown: Object.values(packageBreakdown).sort((a, b) => b.count - a.count),

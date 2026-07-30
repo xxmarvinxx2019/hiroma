@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import { Role } from '@prisma/client'
 
 // ── GET ──
 export async function GET(req: NextRequest) {
@@ -13,7 +15,13 @@ export async function GET(req: NextRequest) {
     const status    = searchParams.get('status')  || 'all'
     const roleParam = searchParams.get('role')    || ''
 
-    let methods: any[]
+    const allowedStatuses = ['pending', 'approved', 'rejected']
+    const requestedStatus = allowedStatuses.includes(status) ? status : undefined
+    let methods: Array<{
+      id: string; type: string; account_name: string; account_number: string; bank_name: string | null
+      status: string; created_at: Date | null; updated_at: Date | null
+      user: { full_name: string; username: string; role: Role }
+    }>
 
     // Special case: role=admin — return admin's approved payment methods
     // Used by city dist on PIN request page to know where to send payment
@@ -23,14 +31,11 @@ export async function GET(req: NextRequest) {
         select: { id: true },
       })
       if (!adminUser) return NextResponse.json({ methods: [] })
-      methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*, u.full_name, u.username, u.role
-        FROM payment_methods pm
-        JOIN users u ON u.id = pm.user_id
-        WHERE pm.user_id = '${adminUser.id}'
-        AND pm.status = 'approved'
-        ORDER BY pm.created_at DESC
-      `)
+      methods = await prisma.paymentMethod.findMany({
+        where: { user_id: adminUser.id, status: 'approved' },
+        orderBy: { created_at: 'desc' },
+        include: { user: { select: { full_name: true, username: true, role: true } } },
+      })
       return NextResponse.json({ methods })
     }
 
@@ -38,61 +43,45 @@ export async function GET(req: NextRequest) {
       // If user_id param — return that user's approved methods (supplier's methods)
       // Otherwise — return own methods
       const targetId = user_id || user.id
-      const statusFilter = user_id ? `AND pm.status = 'approved'` : (status !== 'all' ? `AND pm.status = '${status}'` : '')
-      methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*, u.full_name, u.username, u.role
-        FROM payment_methods pm
-        JOIN users u ON u.id = pm.user_id
-        WHERE pm.user_id = '${targetId}'
-        ${statusFilter}
-        ORDER BY pm.created_at DESC
-      `)
+      methods = await prisma.paymentMethod.findMany({
+        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
+        orderBy: { created_at: 'desc' },
+        include: { user: { select: { full_name: true, username: true, role: true } } },
+      })
     } else if (user.role === 'admin') {
-      const allowedRole = ['admin', 'regional', 'provincial', 'city', 'reseller'].includes(roleParam)
-        ? roleParam
-        : ''
-      methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*, u.full_name, u.username, u.role
-        FROM payment_methods pm
-        JOIN users u ON u.id = pm.user_id
-        WHERE 1=1
-        ${user_id ? `AND pm.user_id = '${user_id}'` : ''}
-        ${allowedRole ? `AND u.role = '${allowedRole}'` : ''}
-        ${status !== 'all' ? `AND pm.status = '${status}'` : ''}
-        ORDER BY pm.created_at DESC
-      `)
+      const allowedRole = Object.values(Role).includes(roleParam as Role)
+        ? roleParam as Role
+        : undefined
+      methods = await prisma.paymentMethod.findMany({
+        where: {
+          ...(user_id ? { user_id } : {}),
+          ...(allowedRole ? { user: { is: { role: allowedRole } } } : {}),
+          ...(requestedStatus ? { status: requestedStatus } : {}),
+        },
+        orderBy: { created_at: 'desc' },
+        include: { user: { select: { full_name: true, username: true, role: true } } },
+      })
     } else if (user.role === 'provincial' || user.role === 'regional') {
       // If user_id param provided — fetch that user's approved methods (e.g. supplier's methods)
       // Otherwise — fetch own methods
       const targetId = user_id || user.id
-      const statusFilter = user_id ? `AND pm.status = 'approved'` : (status !== 'all' ? `AND pm.status = '${status}'` : '')
-      methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*, u.full_name, u.username, u.role
-        FROM payment_methods pm
-        JOIN users u ON u.id = pm.user_id
-        WHERE pm.user_id = '${targetId}'
-        ${statusFilter}
-        ORDER BY pm.created_at DESC
-      `)
+      methods = await prisma.paymentMethod.findMany({
+        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
+        orderBy: { created_at: 'desc' },
+        include: { user: { select: { full_name: true, username: true, role: true } } },
+      })
     } else if (user.role === 'reseller') {
-      const targetId = user_id || user.id
-      const statusFilter = user_id
-        ? `AND pm.status = 'approved'`
-        : (status !== 'all' ? `AND pm.status = '${status}'` : '')
-      methods = await prisma.$queryRawUnsafe(`
-        SELECT pm.*, u.full_name, u.username, u.role
-        FROM payment_methods pm
-        JOIN users u ON u.id = pm.user_id
-        WHERE pm.user_id = '${targetId}'
-        ${statusFilter}
-        ORDER BY pm.created_at DESC
-      `)
+      methods = await prisma.paymentMethod.findMany({
+        where: { user_id: user.id, ...(requestedStatus ? { status: requestedStatus } : {}) },
+        orderBy: { created_at: 'desc' },
+        include: { user: { select: { full_name: true, username: true, role: true } } },
+      })
     } else {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Format user info
-    const formatted = methods.map((m: any) => ({
+    const formatted = methods.map((m) => ({
       id:             m.id,
       type:           m.type,
       account_name:   m.account_name,
@@ -101,11 +90,7 @@ export async function GET(req: NextRequest) {
       status:         m.status,
       created_at:     m.created_at,
       updated_at:     m.updated_at,
-      user: m.full_name ? {
-        full_name: m.full_name,
-        username:  m.username,
-        role:      m.role,
-      } : undefined,
+      user: m.user,
     }))
 
     return NextResponse.json({ methods: formatted })
@@ -123,7 +108,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { type, account_name, account_number, bank_name } = await req.json()
+    const { type, account_name, account_number, bank_name, security_pin } = await req.json()
+
+    if (user.role === 'reseller') {
+      const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+      if (!pinVerification.valid) {
+        return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+      }
+    }
 
     if (!type || !account_name || !account_number) {
       return NextResponse.json({ error: 'type, account_name and account_number are required.' }, { status: 400 })
@@ -201,9 +193,10 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'id and valid status required.' }, { status: 400 })
     }
 
-    await prisma.$executeRawUnsafe(`
-      UPDATE payment_methods SET status = '${status}', updated_at = NOW() WHERE id = '${id}'
-    `)
+    await prisma.paymentMethod.update({
+      where: { id },
+      data: { status },
+    })
 
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -220,12 +213,19 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { id } = await req.json()
+    const { id, security_pin } = await req.json()
     if (!id) return NextResponse.json({ error: 'id required.' }, { status: 400 })
 
-    await prisma.$executeRawUnsafe(`
-      DELETE FROM payment_methods WHERE id = '${id}' AND user_id = '${user.id}'
-    `)
+    if (user.role === 'reseller') {
+      const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+      if (!pinVerification.valid) {
+        return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+      }
+    }
+
+    await prisma.paymentMethod.deleteMany({
+      where: { id, user_id: user.id },
+    })
 
     return NextResponse.json({ success: true })
   } catch (error) {

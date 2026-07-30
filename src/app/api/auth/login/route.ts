@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
 import {
   verifyPassword, signToken, setAuthCookie,
-  getDashboardRoute, JWTPayload, UserRole,
+  getDashboardRoute, JWTPayload, UserRole, setTwoFactorChallengeCookie,
 } from '@/app/lib/auth'
 import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 
@@ -19,9 +19,10 @@ export async function POST(req: NextRequest) {
     let user
     try {
       user = await prisma.user.findUnique({ where: { username: username.trim().toLowerCase() } })
-    } catch (dbError: any) {
-      console.error('[LOGIN DB ERROR]', { message: dbError?.message, code: dbError?.code, stack: dbError?.stack?.split('\n').slice(0, 3) })
-      return NextResponse.json({ error: `Database error: ${dbError?.message || 'Unknown DB error'}` }, { status: 500 })
+    } catch (dbError: unknown) {
+      console.error('[LOGIN DB ERROR]', dbError)
+      // Database details can reveal schema and infrastructure information.
+      return NextResponse.json({ error: 'Unable to sign in right now. Please try again.' }, { status: 500 })
     }
 
     if (!user) {
@@ -69,6 +70,17 @@ export async function POST(req: NextRequest) {
         status:        'failed',
       })
       return NextResponse.json({ error: 'Invalid username or password.' }, { status: 401 })
+    }
+
+    if (user.role === 'reseller' && user.two_factor_enabled && user.two_factor_pin_hash) {
+      const challenge = await signToken({
+        id: user.id,
+        username: user.username,
+        role: 'reseller',
+        full_name: user.full_name,
+      })
+      await setTwoFactorChallengeCookie(challenge)
+      return NextResponse.json({ success: true, requires_pin: true })
     }
 
     const staffProfile = user.role === 'staff'
@@ -123,8 +135,8 @@ export async function POST(req: NextRequest) {
       user:    { id: user.id, username: user.username, full_name: user.full_name, role: user.role },
       redirect: getDashboardRoute(owner.role as UserRole),
     })
-  } catch (error: any) {
-    console.error('[LOGIN ERROR]', { message: error?.message, code: error?.code, stack: error?.stack?.split('\n').slice(0, 5) })
-    return NextResponse.json({ error: `Something went wrong: ${error?.message || 'Unknown error'}` }, { status: 500 })
+  } catch (error: unknown) {
+    console.error('[LOGIN ERROR]', error)
+    return NextResponse.json({ error: 'Unable to sign in right now. Please try again.' }, { status: 500 })
   }
 }

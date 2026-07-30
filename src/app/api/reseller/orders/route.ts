@@ -75,12 +75,13 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const summary = { total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0 }
+    const summary = { total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       const count = row._count.status
       summary.total += count
       if (row.status === 'pending')    summary.pending    = count
       if (row.status === 'processing') summary.processing = count
+      if (row.status === 'ready_for_pickup') summary.ready_for_pickup = count
       if (row.status === 'delivered')  summary.delivered  = count
       if (row.status === 'cancelled')  summary.cancelled  = count
     }
@@ -158,9 +159,9 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
     let total_amount = 0
 
-    const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
+    const orderItems = items.map((item: { product_id: string; quantity: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.reseller_price || product.price)
+      const unit_price = Number(product.reseller_price) || Number(product.price)
       const unit_acquisition_cost = sellerIsBranch
         ? Number(product.branch_price) || Number(product.cost_price)
         : Number(product.city_price) || Number(product.cost_price)

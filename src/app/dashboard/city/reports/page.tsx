@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-type ReportPeriod = 'today' | 'this_week' | 'this_month' | 'this_year' | 'all_time'
+type ReportPeriod = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 type SalesSummary = { orders: number; units: number; revenue: number; cost: number; profit: number }
 type Breakdown = { id: string; name: string; units: number; revenue: number; cost: number; profit: number }
 
 interface ReportData {
   account: { type: 'city' | 'branch'; coverage_area: string }
   period: { value: ReportPeriod; label: string; start: string | null; end: string | null }
+  financial_integrity: { ledger_rows: number; legacy_reconstructed_rows: number; unclassified_used_pins: number; ledger_formula_mismatches: number }
   liquidation: {
     gross_revenue: number
     total_cost: number
@@ -55,11 +56,13 @@ interface ReportData {
 }
 
 const periods: { value: ReportPeriod; label: string }[] = [
-  { value: 'today', label: 'Daily — Today' },
-  { value: 'this_week', label: 'Weekly — This Week' },
-  { value: 'this_month', label: 'Monthly — This Month' },
-  { value: 'this_year', label: 'Yearly — This Year' },
+  { value: 'today', label: 'Daily - Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'this_week', label: 'Weekly - This Week' },
+  { value: 'this_month', label: 'Monthly - This Month' },
+  { value: 'this_year', label: 'Yearly - This Year' },
   { value: 'all_time', label: 'All Time' },
+  { value: 'custom', label: 'Custom Range' },
 ]
 
 const peso = (value: number) => `₱${Number(value || 0).toLocaleString('en-PH', {
@@ -100,6 +103,8 @@ function BreakdownLine({ label, value, emphasize, color }: {
 
 export default function CityReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>('today')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [report, setReport] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -108,7 +113,12 @@ export default function CityReportsPage() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`/api/city/reports?period=${period}`, { credentials: 'same-origin' })
+const query = new URLSearchParams({ period: period === 'custom' && (!customStart || !customEnd) ? 'all_time' : period })
+      if (period === 'custom' && customStart && customEnd) {
+        query.set('start', customStart)
+        query.set('end', customEnd)
+      }
+      const response = await fetch(`/api/city/reports?${query.toString()}`, { credentials: 'same-origin' })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to generate the report.')
       setReport(data)
@@ -118,9 +128,18 @@ export default function CityReportsPage() {
     } finally {
       setLoading(false)
     }
-  }, [period])
+  }, [period, customStart, customEnd])
 
-  useEffect(() => { loadReport() }, [loadReport])
+useEffect(() => { loadReport() }, [loadReport])
+
+  const selectPeriod = (nextPeriod: ReportPeriod) => {
+    if (nextPeriod === 'custom' && (!customStart || !customEnd)) {
+      const todayValue = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+      setCustomStart(todayValue)
+      setCustomEnd(todayValue)
+    }
+    setPeriod(nextPeriod)
+  }
 
   return (
     <div className="p-5 md:p-8 max-w-7xl mx-auto">
@@ -131,14 +150,20 @@ export default function CityReportsPage() {
             Revenue, collection, costs, and profit for daily business liquidation.
           </p>
         </div>
-        <div className="w-full md:w-60">
-          <label className="block text-xs text-gray-400 mb-1.5">Report period</label>
-          <select value={period} onChange={(event) => setPeriod(event.target.value as ReportPeriod)}
-            className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
-            {periods.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+<div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-end gap-2">
+          <div className="w-full md:w-60">
+            <label className="block text-xs text-gray-400 mb-1.5">Report period</label>
+            <select value={period} onChange={(event) => selectPeriod(event.target.value as ReportPeriod)}
+              className="w-full bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
+              {periods.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          {period === 'custom' && <>
+            <input aria-label="Custom report start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm text-[#0D1B3E]" />
+            <input aria-label="Custom report end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.target.value)} className="bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm text-[#0D1B3E]" />
+          </>}
         </div>
       </div>
 
@@ -151,6 +176,13 @@ export default function CityReportsPage() {
         </div>
       ) : (
         <>
+          {(report.financial_integrity.legacy_reconstructed_rows > 0 || report.financial_integrity.unclassified_used_pins > 0 || report.financial_integrity.ledger_formula_mismatches > 0) && (
+            <div className="bg-[#fff3f3] border border-[#e8b3b3] rounded-xl px-4 py-3 mb-5 text-xs text-[#9d3030]">
+              <p className="font-bold">Financial integrity attention required</p>
+              <p className="mt-1">Ledger rows: {report.financial_integrity.ledger_rows}; reconstructed legacy registrations: {report.financial_integrity.legacy_reconstructed_rows}; unclassified used PINs excluded: {report.financial_integrity.unclassified_used_pins}; formula mismatches: {report.financial_integrity.ledger_formula_mismatches}.</p>
+              <p className="mt-1">Audit and backfill each legacy row before treating it as an immutable historical financial record.</p>
+            </div>
+          )}
           <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-xl px-4 py-3 mb-5 text-xs text-[#7a6428]">
             {report.period.label} · {report.account.type === 'branch' ? 'Branch' : 'City Distributor'}
             {report.account.coverage_area ? ` · ${report.account.coverage_area}` : ''}
@@ -158,7 +190,7 @@ export default function CityReportsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <MetricCard label="Gross Revenue" value={peso(report.liquidation.gross_revenue)}
-              detail="Product revenue only; PIN remittance excluded" color="#1a7a4a" />
+              detail="Product revenue only; prepaid PIN allocation excluded" color="#1a7a4a" />
             <MetricCard label="Total Cost" value={peso(report.liquidation.total_cost)}
               detail={report.notes.cost_basis} color="#dc4444" />
             <MetricCard label="Net Profit" value={peso(report.liquidation.net_profit)}
@@ -191,7 +223,7 @@ export default function CityReportsPage() {
                 <span className="text-gray-400">Customer cash collected</span><span className="text-right">{peso(report.registrations.customer_payment)}</span>
                 <span className="text-gray-400">Product revenue</span><span className="text-right">{peso(report.registrations.revenue)}</span>
                 <span className="text-gray-400">Product acquisition</span><span className="text-right">{peso(report.registrations.acquisition_cost)}</span>
-                <span className="text-gray-400">PIN payable to Hiroma</span><span className="text-right">{peso(report.registrations.pin_allocation)}</span>
+                <span className="text-gray-400">Prepaid PIN allocation consumed</span><span className="text-right">{peso(report.registrations.pin_allocation)}</span>
                 <span className="text-gray-400">Profit</span><span className="text-right font-semibold text-[#1a7a4a]">{peso(report.registrations.profit)}</span>
               </div>
             </div>
@@ -244,7 +276,7 @@ export default function CityReportsPage() {
                 <div className="space-y-2.5 text-xs">
                   <BreakdownLine label="Product cash collected" value={peso(report.liquidation.collected_product_cash)} />
                   <BreakdownLine label="Registration cash collected" value={peso(report.registrations.customer_payment)} />
-                  <BreakdownLine label="PIN payable to Hiroma" value={peso(report.registrations.pin_allocation)} />
+                  <BreakdownLine label="Prepaid PIN allocation consumed" value={peso(report.registrations.pin_allocation)} />
                   <BreakdownLine label="Outstanding product sales" value={peso(report.liquidation.outstanding_product_sales)} />
                   <BreakdownLine label="Total cash collected" value={peso(report.liquidation.collected_cash_total)}
                     emphasize color="#9a7418" />
@@ -255,7 +287,7 @@ export default function CityReportsPage() {
             <div className="px-5 py-3 bg-[#fef9ee] border-t border-[#C9A84C]/20 text-[11px] text-[#7a6428]">
               Net profit reconciliation: {peso(report.member_sales.profit)} member sales + {peso(report.non_member_sales.profit)}
               {' '}non-member sales + {peso(report.registrations.profit)} registrations = {peso(report.liquidation.net_profit)}.
-              Registration cash includes {peso(report.registrations.pin_allocation)} payable to Hiroma and is not counted as City/Branch revenue.
+              Registration cash includes {peso(report.registrations.pin_allocation)} already paid when the PIN was purchased and is not counted as City/Branch revenue, cost, or profit.
             </div>
           </div>
 
@@ -291,7 +323,7 @@ export default function CityReportsPage() {
               </div>
               <table className="w-full min-w-[600px] text-xs">
                 <thead className="bg-[#F0F2F8] text-gray-400">
-                  <tr>{['Package', 'Count', 'Product Revenue', 'PIN Payable', 'Profit'].map((heading) =>
+                  <tr>{['Package', 'Count', 'Product Revenue', 'Prepaid PIN Allocation', 'Profit'].map((heading) =>
                     <th key={heading} className="text-left font-medium px-4 py-3">{heading}</th>)}</tr>
                 </thead>
                 <tbody>

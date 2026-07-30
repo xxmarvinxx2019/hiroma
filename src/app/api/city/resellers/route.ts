@@ -98,6 +98,10 @@ async function updateAncestorCounts(
   await Promise.all(updates)
 }
 
+function ledgerAmount(value: unknown): number {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : 0
+}
 async function creditDirectReferralBonus(
   referrerId:        string,
   newUserId:         string,
@@ -325,15 +329,18 @@ async function firePointsPairingBonus(
       }
       await Promise.all(writeOps)
 
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO pairing_logs (id, member_id, left_points_used, right_points_used, pairs_created, commission, date_created)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
-        ancestor.user_id,
-        currentLeg === 'left'  ? deduct : 0,
-        currentLeg === 'right' ? deduct : 0,
-        paidPairs,
-        paidEarnings
-      )
+      await prisma.$executeRaw`
+        INSERT INTO pairing_logs (id, member_id, left_points_used, right_points_used, pairs_created, commission, date_created)
+        VALUES (
+          gen_random_uuid(),
+          ${ancestor.user_id},
+          ${currentLeg === 'left' ? deduct : 0},
+          ${currentLeg === 'right' ? deduct : 0},
+          ${paidPairs},
+          ${paidEarnings},
+          NOW()
+        )
+      `
 
       await prisma.resellerProfile.update({
         where: { user_id: ancestor.user_id },
@@ -554,6 +561,11 @@ export async function POST(req: NextRequest) {
     )
     const registrationProfit =
       registrationEconomics.resellerValue - registrationEconomics.acquisitionCost
+    const packageSnapshot = await prisma.package.findUnique({
+      where: { id: pin.package_id },
+      select: { name: true, direct_referral_bonus: true, pairing_bonus_value: true },
+    })
+    if (!packageSnapshot) return NextResponse.json({ error: 'Package configuration was not found.' }, { status: 400 })
 
     const hashedPassword = await hashPassword(password)
 
@@ -621,11 +633,18 @@ export async function POST(req: NextRequest) {
           city_dist_id: user.id,
           reseller_id: created.id,
           package_id: pin.package_id,
-          customer_payment: registrationEconomics.customerPayment,
-          product_acquisition_cost: registrationEconomics.acquisitionCost,
-          reseller_value: registrationEconomics.resellerValue,
-          pin_allocation: registrationPinAllocation,
-          registration_profit: registrationProfit,
+          customer_payment: ledgerAmount(registrationEconomics.customerPayment),
+          product_acquisition_cost: ledgerAmount(registrationEconomics.acquisitionCost),
+          reseller_value: ledgerAmount(registrationEconomics.resellerValue),
+          pin_allocation: ledgerAmount(registrationPinAllocation),
+          registration_profit: ledgerAmount(registrationProfit),
+          package_name_snapshot: packageSnapshot.name,
+          direct_referral_allocation: ledgerAmount(packageSnapshot.direct_referral_bonus),
+          binary_commission_allocation: ledgerAmount(packageSnapshot.pairing_bonus_value) * 0.5,
+          binary_points_per_pair: Math.round(ledgerAmount(packageSnapshot.pairing_bonus_value)),
+          binary_point_peso_rate: 0.5,
+          registration_channel: 'city',
+          allocation_snapshot_source: 'registration',
           payment_status: 'paid',
           paid_at: new Date(),
         },
@@ -818,7 +837,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('[REGISTER RESELLER ERROR]', error?.message || error)
     return NextResponse.json(
-      { error: `Registration failed: ${error?.message || 'Please try again.'}` },
+      { error: 'Registration failed. Please try again.' },
       { status: 500 }
     )
   }

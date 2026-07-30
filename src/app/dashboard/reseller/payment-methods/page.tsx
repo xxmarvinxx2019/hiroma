@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import SecurityPinModal from '@/app/components/ui/SecurityPinModal'
 
 type Mode = 'cash' | 'check' | 'account'
 type Method = {
@@ -20,6 +21,9 @@ export default function ResellerPaymentMethodsPage() {
   const [message, setMessage] = useState('')
   const [registeredName, setRegisteredName] = useState('')
   const [form, setForm] = useState({ type: 'gcash', account_name: '', account_number: '', bank_name: '' })
+  const [securityPinEnabled, setSecurityPinEnabled] = useState(false)
+  const [pinAction, setPinAction] = useState<'submit' | 'remove' | null>(null)
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -39,10 +43,12 @@ export default function ResellerPaymentMethodsPage() {
       fetch('/api/reseller/payment-policy').then((r) => r.json()),
       fetch('/api/payment-methods').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([policy, methodData, authData]) => {
+      fetch('/api/reseller/security-pin').then((r) => r.json()),
+    ]).then(([policy, methodData, authData, securityData]) => {
       setMode(policy.mode || 'cash')
       setMethods(methodData.methods || [])
       setRegisteredName(authData.user?.full_name || '')
+      setSecurityPinEnabled(Boolean(securityData.enabled))
       setLoading(false)
     })
   }, [])
@@ -52,6 +58,24 @@ export default function ResellerPaymentMethodsPage() {
     registeredName && normalizeName(form.account_name) === normalizeName(registeredName)
   )
   const gcashNumberValid = form.type !== 'gcash' || /^09\d{9}$/.test(form.account_number)
+
+  const submitPaymentMethod = async (securityPin = ''): Promise<string | null> => {
+    setSaving(true)
+    const res = await fetch('/api/payment-methods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, security_pin: securityPin }),
+    })
+    const data = await res.json()
+    setSaving(false)
+    if (!res.ok) return data.error || 'Unable to save payment method.'
+
+    setMessage('Payment method submitted for admin approval.')
+    setForm({ type: 'gcash', account_name: '', account_number: '', bank_name: '' })
+    setPinAction(null)
+    load()
+    return null
+  }
 
   const submit = async () => {
     setMessage('')
@@ -67,28 +91,38 @@ export default function ResellerPaymentMethodsPage() {
       setMessage('GCash mobile number must contain exactly 11 digits and start with 09.')
       return
     }
+    if (securityPinEnabled) {
+      setPinAction('submit')
+      return
+    }
+    const error = await submitPaymentMethod()
+    if (error) setMessage(error)
+  }
+
+  const removePaymentMethod = async (id: string, securityPin = ''): Promise<string | null> => {
     setSaving(true)
     const res = await fetch('/api/payment-methods', {
-      method: 'POST',
+      method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ id, security_pin: securityPin }),
     })
     const data = await res.json()
     setSaving(false)
-    setMessage(res.ok ? 'Payment method submitted for admin approval.' : data.error || 'Unable to save payment method.')
-    if (res.ok) {
-      setForm({ type: 'gcash', account_name: '', account_number: '', bank_name: '' })
-      load()
-    }
+    if (!res.ok) return data.error || 'Unable to remove payment method.'
+
+    setPendingRemoveId(null)
+    setPinAction(null)
+    load()
+    return null
   }
 
   const remove = async (id: string) => {
-    await fetch('/api/payment-methods', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    load()
+    if (securityPinEnabled) {
+      setPendingRemoveId(id)
+      setPinAction('remove')
+      return
+    }
+    await removePaymentMethod(id)
   }
 
   return (
@@ -203,6 +237,22 @@ export default function ResellerPaymentMethodsPage() {
             </div>
           ))}
       </div>
+      {pinAction && (
+        <SecurityPinModal
+          key={pinAction}
+          title={pinAction === 'submit' ? 'Confirm payout account' : 'Remove payout account'}
+          description={pinAction === 'submit'
+            ? 'Enter your security PIN to submit this payout account for approval.'
+            : 'Enter your security PIN to remove this payout account.'}
+          confirmLabel={pinAction === 'submit' ? 'Submit for approval' : 'Remove account'}
+          loading={saving}
+          onClose={() => { if (!saving) { setPinAction(null); setPendingRemoveId(null) } }}
+          onConfirm={async (pin) => {
+            if (pinAction === 'submit') return submitPaymentMethod(pin)
+            return pendingRemoveId ? removePaymentMethod(pendingRemoveId, pin) : 'No payout account was selected.'
+          }}
+        />
+      )}
     </div>
   )
 }

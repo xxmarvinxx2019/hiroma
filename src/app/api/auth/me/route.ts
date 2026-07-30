@@ -23,6 +23,7 @@ export async function GET() {
         full_name: true,
         email: true,
         mobile: true,
+        profile_photo: true,
         role: true,
         status: true,
         address: true,

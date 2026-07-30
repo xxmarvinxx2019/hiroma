@@ -19,7 +19,6 @@ export interface Notification {
 export function useNotifications(userId?: string, previewLimit = 5) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const [mounted, setMounted] = useState(false)
   const [toast, setToast] = useState<Notification | null>(null)
   const latestIdRef = useRef<string | null>(null)
   const initializedRef = useRef(false)
@@ -47,12 +46,14 @@ export function useNotifications(userId?: string, previewLimit = 5) {
   }, [userId, previewLimit])
 
   useEffect(() => {
-    setMounted(true)
-    loadNotifications()
+    // Defer the initial fetch so state is updated from an external callback,
+    // not synchronously while React is setting up this effect.
+    const initialLoad = window.setTimeout(() => { void loadNotifications() }, 0)
     const timer = window.setInterval(loadNotifications, 15_000)
     const refreshOnFocus = () => loadNotifications()
     window.addEventListener('focus', refreshOnFocus)
     return () => {
+      window.clearTimeout(initialLoad)
       window.clearInterval(timer)
       window.removeEventListener('focus', refreshOnFocus)
     }
@@ -90,7 +91,7 @@ export function useNotifications(userId?: string, previewLimit = 5) {
     toast,
     markAllRead,
     markOneRead,
-    mounted,
+    mounted: true,
     refresh: loadNotifications,
   }
 }

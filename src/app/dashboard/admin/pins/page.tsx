@@ -37,7 +37,7 @@ export default function PinsPage() {
   const [meta, setMeta]               = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
   const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, cancelled: 0})
   const [showForm, setShowForm]       = useState(false)
-  const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1' })
+  const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '' })
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -122,18 +122,18 @@ export default function PinsPage() {
   useEffect(() => { fetchPins() }, [fetchPins])
 
   const handleGenerate = async () => {
-    if (!form.package_id || !form.city_dist_id || !form.quantity) {
+    if (!form.package_id || !form.city_dist_id || !form.quantity || (form.pin_type === 'upgrade' && !form.upgrade_from_package_id)) {
       setFormError('All fields are required.'); return
     }
     setFormLoading(true); setFormError(''); setFormSuccess('')
-    const res  = await fetch('/api/admin/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package_id: form.package_id, city_dist_id: form.city_dist_id, quantity: parseInt(form.quantity) }) })
+    const res  = await fetch('/api/admin/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package_id: form.package_id, city_dist_id: form.city_dist_id, quantity: parseInt(form.quantity), pin_type: form.pin_type, upgrade_from_package_id: form.pin_type === 'upgrade' ? form.upgrade_from_package_id : undefined }) })
     const data = await res.json()
     if (!res.ok) { setFormError(data.error || 'Failed'); setFormLoading(false); return }
     const pins = data.pins || data.pin_codes || []
     setGeneratedPins(pins)
     setFormLoading(false)
     setShowForm(false)
-    setForm({ package_id: '', city_dist_id: '', quantity: '1' })
+    setForm({ package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '' })
     setShowSuccessModal(true)
     fetchPins() // fetch after modal is shown
   }
@@ -343,6 +343,25 @@ export default function PinsPage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">PIN purpose</label>
+                <select value={form.pin_type} onChange={e => setForm({ ...form, pin_type: e.target.value, package_id: '', upgrade_from_package_id: '' })}
+                  className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
+                  <option value="registration">New reseller registration PIN</option>
+                  <option value="upgrade">Package upgrade PIN</option>
+                </select>
+                <p className="mt-1 text-[10px] text-gray-400">Upgrade PIN value is computed automatically from the current package to the target package.</p>
+              </div>
+              {form.pin_type === 'upgrade' && (
+                <div>
+                  <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Reseller’s current package</label>
+                  <select value={form.upgrade_from_package_id} onChange={e => setForm({ ...form, upgrade_from_package_id: e.target.value })}
+                    className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
+                    <option value="">Select current package...</option>
+                    {packages.filter(p => p.id !== form.package_id).map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
+                  </select>
+                </div>
+              )}
               {/* Package */}
               <div>
                 <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Package</label>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 
 // ── GET reseller profile ──
 export async function GET() {
@@ -18,6 +19,7 @@ export async function GET() {
         username:  true,
         email:     true,
         mobile:    true,
+        profile_photo: true,
         address:   true,
         status:    true,
         created_at: true,
@@ -47,10 +49,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { full_name, email, mobile, address } = await req.json()
+    const { full_name, email, mobile, address, profile_photo, security_pin } = await req.json()
+    const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+    if (!pinVerification.valid) {
+      return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+    }
 
     if (!full_name?.trim() || !mobile?.trim()) {
       return NextResponse.json({ error: 'Full name and mobile are required.' }, { status: 400 })
+    }
+
+    if (profile_photo !== null && profile_photo !== undefined) {
+      const validPhoto = typeof profile_photo === 'string'
+        && /^data:image\/(jpeg|png|webp);base64,/i.test(profile_photo)
+        && profile_photo.length <= 1_500_000
+      if (!validPhoto) {
+        return NextResponse.json({ error: 'Use a JPEG, PNG, or WebP profile photo up to 1 MB.' }, { status: 400 })
+      }
     }
 
     // Check email uniqueness
@@ -65,7 +80,7 @@ export async function PATCH(req: NextRequest) {
 
     const previous = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { full_name: true, email: true, mobile: true, address: true },
+      select: { full_name: true, email: true, mobile: true, address: true, profile_photo: true },
     })
     if (!previous) {
       return NextResponse.json({ error: 'User not found.' }, { status: 404 })
@@ -76,12 +91,14 @@ export async function PATCH(req: NextRequest) {
       mobile: mobile.trim(),
       address: address?.trim() || null,
       email: email?.trim().toLowerCase() || null,
+      profile_photo: profile_photo === undefined ? previous.profile_photo : profile_photo,
     }
     const changedFields = [
       previous.full_name !== nextProfile.full_name ? 'name' : null,
       previous.mobile !== nextProfile.mobile ? 'mobile number' : null,
       previous.email !== nextProfile.email ? 'email address' : null,
       previous.address !== nextProfile.address ? 'address' : null,
+      previous.profile_photo !== nextProfile.profile_photo ? 'profile photo' : null,
     ].filter((field): field is string => Boolean(field))
 
     const [updated] = await prisma.$transaction([
@@ -90,7 +107,7 @@ export async function PATCH(req: NextRequest) {
         data: nextProfile,
         select: {
           id: true, full_name: true, username: true,
-          email: true, mobile: true, address: true,
+          email: true, mobile: true, address: true, profile_photo: true,
         },
       }),
       ...(changedFields.length > 0
