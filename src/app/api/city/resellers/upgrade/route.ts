@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { Prisma } from '@prisma/client'
 
 // ============================================================
 // PATCH — upgrade reseller package
@@ -27,25 +28,22 @@ export async function PATCH(req: NextRequest) {
     const resellerProfile = await prisma.resellerProfile.findUnique({
       where:  { user_id: reseller_id },
       select: {
-        user_id:    true,
-        package_id: true,
-        package: { select: { pairing_bonus_value: true, name: true } },
+        user_id: true, package_id: true, city_dist_id: true,
+        package: { select: { pairing_bonus_value: true, direct_referral_bonus: true, name: true, products: { select: { product_id: true, quantity: true } } } },
       },
     })
 
-    if (!resellerProfile) {
-      return NextResponse.json({ error: 'Reseller not found.' }, { status: 404 })
-    }
+    if (!resellerProfile) return NextResponse.json({ error: 'Reseller not found.' }, { status: 404 })
+    if (resellerProfile.city_dist_id !== user.id) return NextResponse.json({ error: 'This reseller is not registered under your City Distributor account.' }, { status: 403 })
 
     // Validate new PIN
     const pin = await prisma.pin.findUnique({
       where:  { id: new_pin_id },
       select: {
-        id:          true,
-        status:      true,
-        city_dist_id: true,
-        package_id:  true,
-        package: { select: { pairing_bonus_value: true, name: true } },
+        id: true, status: true, city_dist_id: true, package_id: true, pin_type: true, upgrade_from_package_id: true,
+        pin_allocation_snapshot: true, upgrade_customer_payment_snapshot: true, upgrade_reseller_value_snapshot: true,
+        upgrade_acquisition_cost_snapshot: true, upgrade_direct_allocation_snapshot: true, upgrade_binary_allocation_snapshot: true, upgrade_points_difference_snapshot: true,
+        package: { select: { pairing_bonus_value: true, direct_referral_bonus: true, name: true, products: { select: { product_id: true, quantity: true } } } },
       },
     })
 
@@ -56,6 +54,10 @@ export async function PATCH(req: NextRequest) {
     if (pin.city_dist_id !== user.id) {
       return NextResponse.json({ error: 'This PIN does not belong to your account.' }, { status: 400 })
     }
+
+    if (pin.pin_type !== 'upgrade') return NextResponse.json({ error: 'A dedicated Upgrade PIN is required.' }, { status: 400 })
+    if (pin.upgrade_from_package_id !== resellerProfile.package_id) return NextResponse.json({ error: 'This Upgrade PIN does not match the current package.' }, { status: 400 })
+    if (pin.upgrade_customer_payment_snapshot == null || pin.upgrade_reseller_value_snapshot == null || pin.upgrade_acquisition_cost_snapshot == null || pin.upgrade_binary_allocation_snapshot == null || pin.upgrade_points_difference_snapshot == null) return NextResponse.json({ error: 'This Upgrade PIN has no complete financial snapshot.' }, { status: 400 })
 
     const oldPts = Number(resellerProfile.package?.pairing_bonus_value || 0)
     const newPts = Number(pin.package?.pairing_bonus_value || 0)
@@ -73,19 +75,28 @@ export async function PATCH(req: NextRequest) {
 
     console.log(`[UPGRADE] ${reseller_id} | ${resellerProfile.package?.name}(${oldPts}pts) → ${pin.package?.name}(${newPts}pts) | diff: +${diffPts}pts`)
 
-    // Update reseller profile with new package + mark PIN as used
+    // Release only products newly added by the target package. Registrations
+    // and upgrades never add Product Binary PU or Rank PU.
+    const oldQty = new Map(resellerProfile.package!.products.map(item => [item.product_id, item.quantity]))
+    const extraProducts = pin.package!.products.map(item => ({ product_id: item.product_id, quantity: item.quantity - (oldQty.get(item.product_id) || 0) })).filter(item => item.quantity > 0)
+    const stock = extraProducts.length ? await prisma.inventory.findMany({ where: { owner_id: user.id, product_id: { in: extraProducts.map(item => item.product_id) } }, select: { product_id: true, quantity: true } }) : []
+    if (extraProducts.some(item => (stock.find(row => row.product_id === item.product_id)?.quantity || 0) < item.quantity)) return NextResponse.json({ error: 'Insufficient City inventory for the additional upgrade products.' }, { status: 400 })
+
     await prisma.$transaction(async (tx) => {
-      await tx.resellerProfile.update({
-        where: { user_id: reseller_id },
-        data:  { package_id: pin.package_id },
-      })
-
-      await tx.pin.update({
-        where: { id: new_pin_id },
-        data:  { status: 'used', used_by: reseller_id, used_at: new Date() },
-      })
+      const now = new Date()
+      const financial = await tx.upgradeFinancial.create({ data: {
+        upgrade_pin_id: pin.id, city_dist_id: user.id, reseller_id, from_package_id: resellerProfile.package_id, to_package_id: pin.package_id,
+        customer_payment: new Prisma.Decimal(pin.upgrade_customer_payment_snapshot!), reseller_value: new Prisma.Decimal(pin.upgrade_reseller_value_snapshot!), product_acquisition_cost: new Prisma.Decimal(pin.upgrade_acquisition_cost_snapshot!), pin_allocation: new Prisma.Decimal(pin.pin_allocation_snapshot!),
+        registration_profit: new Prisma.Decimal(Number(pin.upgrade_reseller_value_snapshot) - Number(pin.upgrade_acquisition_cost_snapshot)),
+        direct_referral_allocation: new Prisma.Decimal(pin.upgrade_direct_allocation_snapshot || 0), direct_referral_paid: new Prisma.Decimal(0), direct_referral_retained: new Prisma.Decimal(pin.upgrade_direct_allocation_snapshot || 0),
+        binary_commission_allocation: new Prisma.Decimal(pin.upgrade_binary_allocation_snapshot!), binary_points_difference: Number(pin.upgrade_points_difference_snapshot),
+        from_package_name_snapshot: resellerProfile.package!.name, to_package_name_snapshot: pin.package!.name, paid_at: now,
+      }})
+      await tx.binaryReserveLot.create({ data: { registration_financial_id: null as any, upgrade_financial_id: financial.id, original_amount: new Prisma.Decimal(pin.upgrade_binary_allocation_snapshot!), remaining_amount: new Prisma.Decimal(pin.upgrade_binary_allocation_snapshot!), snapshot_source: 'upgrade_pin_snapshot', allocated_at: now } })
+      await tx.resellerProfile.update({ where: { user_id: reseller_id }, data: { package_id: pin.package_id } })
+      await tx.pin.update({ where: { id: new_pin_id }, data: { status: 'used', used_by: reseller_id, used_at: now } })
+      for (const item of extraProducts) await tx.inventory.update({ where: { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } }, data: { quantity: { decrement: item.quantity } } })
     })
-
     // Fire pairing bonus with DIFFERENCE points only
     const resellerNode = await prisma.binaryTreeNode.findUnique({
       where:  { user_id: reseller_id },
@@ -269,15 +280,18 @@ async function fireUpgradePairingBonus(
       }
 
       // Log pairing event
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO pairing_logs (id, member_id, left_points_used, right_points_used, pairs_created, commission, date_created)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
-        ancestor.user_id,
-        leg === 'left'  ? deduct : 0,
-        leg === 'right' ? deduct : 0,
-        paidPairs,
-        paidEarnings
-      )
+      await prisma.$executeRaw`
+        INSERT INTO pairing_logs (id, member_id, left_points_used, right_points_used, pairs_created, commission, date_created)
+        VALUES (
+          gen_random_uuid(),
+          ${ancestor.user_id},
+          ${leg === 'left' ? deduct : 0},
+          ${leg === 'right' ? deduct : 0},
+          ${paidPairs},
+          ${paidEarnings},
+          NOW()
+        )
+      `
 
       await prisma.resellerProfile.update({
         where: { user_id: ancestor.user_id },

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { deleteAuthCookie } from '@/app/lib/auth'
+import { deleteAuthCookie, deleteTwoFactorChallengeCookie } from '@/app/lib/auth'
 
 export async function POST() {
   try {
     // ── Delete the auth cookie ──
-    await deleteAuthCookie()
+    await Promise.all([deleteAuthCookie(), deleteTwoFactorChallengeCookie()])
 
     return NextResponse.json({
       success: true,

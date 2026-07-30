@@ -5,9 +5,15 @@ import { jwtVerify } from 'jose'
 // CONFIG
 // ============================================================
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'hiroma_super_secret_jwt_key_2026'
-)
+const jwtSecret = process.env.JWT_SECRET
+
+// Never fall back to a known signing key. A predictable fallback would let an
+// attacker forge a valid session cookie in any environment missing JWT_SECRET.
+if (!jwtSecret || jwtSecret.length < 32) {
+  throw new Error('JWT_SECRET must be configured with at least 32 characters.')
+}
+
+const JWT_SECRET = new TextEncoder().encode(jwtSecret)
 
 const COOKIE_NAME = 'hiroma_token'
 

@@ -31,11 +31,14 @@ export interface JWTPayload {
 // CONFIG
 // ============================================================
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'hiroma_super_secret_jwt_key_2026'
-)
+const jwtSecret = process.env.JWT_SECRET
+if (!jwtSecret || jwtSecret.length < 32) {
+  throw new Error('JWT_SECRET must be configured with at least 32 characters.')
+}
+const JWT_SECRET = new TextEncoder().encode(jwtSecret)
 
 const COOKIE_NAME = 'hiroma_token'
+const TWO_FACTOR_CHALLENGE_COOKIE = 'hiroma_two_factor_challenge'
 // No COOKIE_MAX_AGE — session cookie expires when browser closes
 
 // ============================================================
@@ -121,6 +124,28 @@ export async function getAuthCookie(): Promise<string | null> {
 export async function deleteAuthCookie(): Promise<void> {
   const cookieStore = await cookies()
   cookieStore.delete(COOKIE_NAME)
+}
+
+export async function setTwoFactorChallengeCookie(token: string): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.set(TWO_FACTOR_CHALLENGE_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 5,
+    path: '/api/auth',
+  })
+}
+
+export async function getTwoFactorChallenge(): Promise<JWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(TWO_FACTOR_CHALLENGE_COOKIE)?.value
+  return token ? verifyToken(token) : null
+}
+
+export async function deleteTwoFactorChallengeCookie(): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.delete(TWO_FACTOR_CHALLENGE_COOKIE)
 }
 
 // ============================================================

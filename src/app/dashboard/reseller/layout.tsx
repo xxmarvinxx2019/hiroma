@@ -8,7 +8,7 @@ import { useAutoLogout } from '@/app/hooks/useAutoLogout'
 import NotificationBell from '@/app/components/ui/NotificationBell'
 import styles from './reseller-theme.module.css'
 
-type ThemePreference = 'off' | 'on' | 'automatic'
+type ThemeName = 'default' | 'modern'
 
 const navItems = [
   {
@@ -50,12 +50,12 @@ function Sidebar({
   theme,
   onThemeChange,
 }: {
-  user: { full_name: string; username: string } | null
+  user: { full_name: string; username: string; profile_photo?: string | null } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
-  theme: ThemePreference
-  onThemeChange: (theme: ThemePreference) => void
+  theme: ThemeName
+  onThemeChange: (theme: ThemeName) => void
 }) {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const isActive = (href: string) => {
@@ -118,10 +118,10 @@ function Sidebar({
           aria-expanded={themeMenuOpen}
           aria-haspopup="menu"
         >
-          <span className="w-5 text-center text-base" aria-hidden="true">☾</span>
-          <span className="flex-1">Dark mode</span>
+          <span className="w-5 text-center text-base" aria-hidden="true">✦</span>
+          <span className="flex-1">Themes</span>
           <span className="text-[10px] font-semibold uppercase text-[#C9A84C]">
-            {theme === 'automatic' ? 'Auto' : theme}
+            {theme === 'modern' ? 'On' : 'Off'}
           </span>
         </button>
 
@@ -129,7 +129,7 @@ function Sidebar({
           <>
             <button
               type="button"
-              aria-label="Close dark mode menu"
+              aria-label="Close themes menu"
               className="fixed inset-0 z-40 cursor-default"
               onClick={() => setThemeMenuOpen(false)}
             />
@@ -137,10 +137,23 @@ function Sidebar({
               role="menu"
               className="absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#13244a] p-1.5 shadow-2xl"
             >
-              {([
-                ['off', 'Off', 'Use Hiroma light display'],
-                ['on', 'On', 'Use Hiroma navy display'],
-                ['automatic', 'Automatic', 'Follow this device setting'],
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={theme === 'modern'}
+                onClick={() => onThemeChange(theme === 'modern' ? 'default' : 'modern')}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/5"
+              >
+                <span>
+                  <span className="block text-xs font-semibold text-white">Themes</span>
+                  <span className="block text-[10px] text-white/40">Turn on to choose a dashboard theme.</span>
+                </span>
+                <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${theme === 'modern' ? 'bg-emerald-500' : 'bg-white/20'}`}>
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-[left] ${theme === 'modern' ? 'left-[18px]' : 'left-0.5'}`} />
+                </span>
+              </button>
+              {theme === 'modern' && ([
+                ['modern', 'Modern', 'Premium Hiroma navy display'],
               ] as const).map(([value, label, description]) => (
                 <button
                   key={value}
@@ -176,10 +189,8 @@ function Sidebar({
       {/* User Footer */}
       <div className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0">
         <div className="flex items-center gap-2.5 mb-2">
-          <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#C9A84C] text-xs font-bold">
-              {user?.full_name?.charAt(0) || 'R'}
-            </span>
+          <div className="w-7 h-7 overflow-hidden rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
+            {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'R'}</span>}
           </div>
           <div className="overflow-hidden">
             <p className="text-white text-xs font-medium truncate">{user?.full_name || 'Reseller'}</p>
@@ -210,35 +221,43 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
   })
   const [sidebarOpen, setSidebarOpen]     = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ id: string; full_name: string; username: string } | null>(null)
-  const [theme, setTheme] = useState<ThemePreference>('off')
-  const [systemDark, setSystemDark] = useState(false)
+  const [user, setUser] = useState<{ id: string; full_name: string; username: string; profile_photo?: string | null } | null>(null)
+  // Keep the server and first browser render identical. The saved browser
+  // preference is applied only after hydration.
+  const [theme, setTheme] = useState<ThemeName>('default')
 
   useEffect(() => {
     const stored = window.localStorage.getItem('hiroma-reseller-theme')
-    if (stored === 'off' || stored === 'on' || stored === 'automatic') {
-      setTheme(stored)
+    if (stored === 'modern' || stored === 'on') setTheme('modern')
+    const syncSavedTheme = (event: Event) => {
+      const nextTheme = (event as CustomEvent<ThemeName>).detail
+      if (nextTheme === 'default' || nextTheme === 'modern') setTheme(nextTheme)
     }
-
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const syncSystemTheme = () => setSystemDark(media.matches)
-    syncSystemTheme()
-    media.addEventListener('change', syncSystemTheme)
-    return () => media.removeEventListener('change', syncSystemTheme)
+    window.addEventListener('hiroma-reseller-theme-change', syncSavedTheme)
+    return () => {
+      window.removeEventListener('hiroma-reseller-theme-change', syncSavedTheme)
+    }
   }, [])
 
-  const handleThemeChange = (preference: ThemePreference) => {
-    setTheme(preference)
-    window.localStorage.setItem('hiroma-reseller-theme', preference)
+  const handleThemeChange = (nextTheme: ThemeName) => {
+    setTheme(nextTheme)
+    window.localStorage.setItem('hiroma-reseller-theme', nextTheme)
   }
 
-  const darkMode = theme === 'on' || (theme === 'automatic' && systemDark)
+  const modernTheme = theme === 'modern'
 
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => { if (data.user) setUser(data.user) })
       .catch(() => router.push('/login'))
+
+    const syncProfilePhoto = (event: Event) => {
+      const profilePhoto = (event as CustomEvent<string | null>).detail
+      setUser((current) => current ? { ...current, profile_photo: profilePhoto } : current)
+    }
+    window.addEventListener('hiroma-reseller-profile-photo-change', syncProfilePhoto)
+    return () => window.removeEventListener('hiroma-reseller-profile-photo-change', syncProfilePhoto)
   }, [router])
 
   const handleLogout = async () => {
@@ -257,13 +276,13 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
   return (
     <div
-      className={`${styles.shell} ${darkMode ? styles.dark : ''}`}
-      data-reseller-theme={darkMode ? 'dark' : 'light'}
+      className={`${styles.shell} ${modernTheme ? styles.dark : ''}`}
+      data-reseller-theme={modernTheme ? 'modern' : 'default'}
       style={{
         display: 'flex',
         height: '100vh',
         overflow: 'hidden',
-        background: darkMode ? '#050D20' : '#F0F2F8',
+        background: modernTheme ? '#050D20' : '#F0F2F8',
       }}
     >
       {/* Inactivity warning */}
@@ -339,10 +358,8 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
             <div className="relative">
               <button
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
-                <span className="text-[#C9A84C] text-xs font-bold">
-                  {user?.full_name?.charAt(0) || 'R'}
-                </span>
+                className="w-8 h-8 overflow-hidden rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
+                {user?.profile_photo ? <img src={user.profile_photo} alt="Profile" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'R'}</span>}
               </button>
               {profileMenuOpen && (
                 <>
@@ -357,6 +374,14 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
                         className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
                         <span className="text-base">👤</span>
                         <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                      </Link>
+                      <Link href="/dashboard/reseller/settings" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <svg aria-hidden="true" className="h-4 w-4 text-[#7c5dba]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.325 4.317a1.5 1.5 0 013.35 0 1.5 1.5 0 002.253.976 1.5 1.5 0 012.9 1.676 1.5 1.5 0 00.976 2.253 1.5 1.5 0 010 3.35 1.5 1.5 0 00-.976 2.253 1.5 1.5 0 01-2.9 1.676 1.5 1.5 0 00-2.253.976 1.5 1.5 0 01-3.35 0 1.5 1.5 0 00-2.253-.976 1.5 1.5 0 01-2.9-1.676 1.5 1.5 0 00-.976-2.253 1.5 1.5 0 010-3.35 1.5 1.5 0 00.976-2.253 1.5 1.5 0 012.9-1.676 1.5 1.5 0 002.253-.976z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15.25a3.25 3.25 0 100-6.5 3.25 3.25 0 000 6.5z" />
+                        </svg>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Settings</span>
                       </Link>
                     </div>
                     <div className="border-t border-[#0D1B3E]/8 py-1">

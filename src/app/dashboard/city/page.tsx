@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
 interface Stats {
+  period: { value: CityStatsPeriod; label: string; start: string | null; end: string | null }
+  financialIntegrity: { ledger_rows: number; legacy_reconstructed_rows: number; unclassified_used_pins: number; ledger_formula_mismatches: number }
   accountType: string
   isStaff: boolean
   staffPermissions: string[]
@@ -30,12 +32,21 @@ interface Stats {
   totalUnitsSold: number
   orderRevenue: number
   orderCost: number
+  orderProfit: number
   orderUnitsSold: number
+  resellerProductOrders: { revenue: number; cost: number; profit: number; units: number }
+  walkInProductOrders: { revenue: number; cost: number; profit: number; units: number }
+  registrationCount: number
   packageRevenue: number
   packageCost: number
   packagePinRemittance: number
   packageCustomerPayments: number
   packageUnitsSold: number
+  registrationProductProfit: number
+  combinedProductRevenue: number
+  combinedProductCost: number
+  combinedProductProfit: number
+  totalCustomerCashCollected: number
   topProducts: { name: string; qty: number; revenue: number }[]
   packageBreakdown: { name: string; count: number; revenue: number }[]
   monthlyRevenue: { month: string; revenue: number; resellers: number }[]
@@ -85,18 +96,37 @@ function StatCard({ label, value, sub, color, icon, badge }: {
 }
 
 type ReportTab = 'overview' | 'sales' | 'products' | 'packages' | 'pins' | 'inventory'
+type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 
 export default function CityDashboardPage() {
   const [stats, setStats]     = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab]         = useState<ReportTab>('overview')
+  const [period, setPeriod]   = useState<CityStatsPeriod>('all_time')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
 
-  useEffect(() => {
-    fetch('/api/city/stats')
+useEffect(() => {
+    const query = new URLSearchParams({ period: period === 'custom' && (!customStart || !customEnd) ? 'all_time' : period })
+    if (period === 'custom' && customStart && customEnd) {
+      query.set('start', customStart)
+      query.set('end', customEnd)
+    }
+    setLoading(true)
+    fetch(`/api/city/stats?${query.toString()}`)
       .then(r => r.json())
       .then(d => setStats(d.stats))
       .finally(() => setLoading(false))
-  }, [])
+  }, [period, customStart, customEnd])
+
+  const selectPeriod = (nextPeriod: CityStatsPeriod) => {
+    if (nextPeriod === 'custom' && (!customStart || !customEnd)) {
+      const todayValue = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+      setCustomStart(todayValue)
+      setCustomEnd(todayValue)
+    }
+    setPeriod(nextPeriod)
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -156,6 +186,40 @@ export default function CityDashboardPage() {
       </div>
 
       {/* ══ OVERVIEW ══ */}
+      <div className="bg-white border border-[#0D1B3E]/8 rounded-xl px-4 py-3 flex flex-col lg:flex-row lg:items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-[#0D1B3E]">Sales reporting period</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Applies to Sales, Products, and Packages. Inventory and available PIN stock stay live.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={period} onChange={(event) => selectPeriod(event.target.value as CityStatsPeriod)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-3 py-2 text-xs font-semibold text-[#0D1B3E] outline-none">
+            <option value="today">Daily — Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="this_week">Weekly — This Week</option>
+            <option value="this_month">Monthly — This Month</option>
+            <option value="this_year">Yearly — This Year</option>
+            <option value="all_time">All Time</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          {period === 'custom' && <>
+            <input aria-label="Custom start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-2 py-2 text-xs text-[#0D1B3E]" />
+            <span className="text-xs text-gray-400">to</span>
+            <input aria-label="Custom end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.target.value)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-2 py-2 text-xs text-[#0D1B3E]" />
+          </>}
+          <span className="text-[11px] font-semibold text-[#1a7a4a] whitespace-nowrap">{stats.period.label}</span>
+        </div>
+      </div>
+      {(stats.financialIntegrity.legacy_reconstructed_rows > 0 || stats.financialIntegrity.unclassified_used_pins > 0 || stats.financialIntegrity.ledger_formula_mismatches > 0) ? (
+        <div className="rounded-xl border border-[#e8b3b3] bg-[#fff3f3] px-4 py-3 text-xs text-[#9d3030]">
+          <p className="font-bold">Financial integrity attention required</p>
+          <p className="mt-1">Ledger rows: {stats.financialIntegrity.ledger_rows}. Legacy registration rows reconstructed: {stats.financialIntegrity.legacy_reconstructed_rows}. Unclassified used PINs excluded from registration profit: {stats.financialIntegrity.unclassified_used_pins}. Formula mismatches: {stats.financialIntegrity.ledger_formula_mismatches}.</p>
+          <p className="mt-1">Totals remain transparent, but each legacy/reconstructed row should be audited and backfilled before relying on it as an immutable historical financial record.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-[#b9e3c8] bg-[#f1fbf4] px-4 py-3 text-xs text-[#187443]">
+          <span className="font-bold">Financial integrity check passed.</span> Every included registration has one ledger record and its stored profit matches product value less City product cost.
+        </div>
+      )}
       {tab === 'overview' && (
         <>
           {/* Today's KPIs */}
@@ -289,7 +353,7 @@ export default function CityDashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               { label: 'Walk-in Sales Revenue', value: stats.orderRevenue,   cost: stats.orderCost,   units: stats.orderUnitsSold,   icon: '🛒', color: '#2563eb' },
-              { label: 'Registration Product Sales', value: stats.packageRevenue, cost: stats.packageCost, units: stats.packageUnitsSold, icon: '🎁', color: '#C9A84C', extra: `PIN remittance: ${fmt(stats.packagePinRemittance)}` },
+              { label: 'Registration Product Sales', value: stats.packageRevenue, cost: stats.packageCost, units: stats.packageUnitsSold, icon: '🎁', color: '#C9A84C', extra: `Prepaid PIN allocation: ${fmt(stats.packagePinRemittance)}` },
               { label: 'Total Profit',          value: stats.totalProfit,    cost: stats.totalCost,   units: stats.totalUnitsSold,   icon: '📈', color: '#1a7a4a' },
             ].map(s => (
               <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
@@ -312,50 +376,76 @@ export default function CityDashboardPage() {
       {/* ══ SALES REPORT ══ */}
       {tab === 'sales' && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Revenue"    value={fmt(stats.totalRevenue)}    color="#1a7a4a" icon="💰" sub="Walk-in + Package" />
-            <StatCard label="Total Cost"       value={fmt(stats.totalCost)}       color="#e05252" icon="🏷️" sub="Cost of goods" />
-            <StatCard label="Total Profit"     value={fmt(stats.totalProfit)}      color="#2563eb" icon="📈" sub="Revenue minus cost" />
-            <StatCard label="Total Units Sold" value={stats.totalUnitsSold.toLocaleString()} color="#C9A84C" icon="📦" sub="All channels" />
+          <div className="bg-[#fffaf0] border border-[#e8c66a]/60 rounded-2xl px-5 py-4">
+            <p className="text-sm font-bold text-[#0D1B3E]">City Distributor income summary</p>
+            <p className="text-xs text-[#80611f] mt-1">{stats.period.label}: only three income channels are counted: reseller repeat orders, non-member/SRP sales, and new reseller registrations.</p>
+            <p className="text-[11px] text-[#80611f] mt-1">Prices and costs are recorded as historical transaction snapshots. Changes in Admin price settings apply only to future orders and registrations.</p>
           </div>
 
-          {/* Monthly breakdown table */}
-          <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-              <p className="text-sm font-bold text-[#0D1B3E]">Monthly Sales Overview</p>
-            </div>
-            <div className="grid grid-cols-3 px-5 py-2 bg-[#f8f9fc]">
-              {['Month', 'Revenue', 'New Resellers'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
-            </div>
-            {stats.monthlyRevenue.map((m, i) => (
-              <div key={i} className="grid grid-cols-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
-                <p className="text-xs font-semibold text-[#0D1B3E]">{m.month}</p>
-                <p className="text-xs font-bold text-[#1a7a4a]">{fmt(m.revenue)}</p>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs font-semibold text-[#C9A84C]">{m.resellers}</p>
-                  <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-[#C9A84C]"
-                      style={{ width: `${Math.min(100, (m.resellers / (Math.max(...stats.monthlyRevenue.map(x => x.resellers)) || 1)) * 100)}%` }} />
+          <section>
+            <p className="text-base font-bold text-[#0D1B3E] mb-1">Where the City Distributor earns</p>
+            <p className="text-xs text-gray-400 mb-3">Every card shows the sales amount, product cost, and the profit generated by that channel.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { title: '1. Reseller Repeat Orders', revenue: stats.resellerProductOrders.revenue, cost: stats.resellerProductOrders.cost, profit: stats.resellerProductOrders.profit, units: stats.resellerProductOrders.units, color: '#2563eb', description: 'Products sold to existing reseller accounts at reseller price.' },
+                { title: '2. Non-member / SRP Sales', revenue: stats.walkInProductOrders.revenue, cost: stats.walkInProductOrders.cost, profit: stats.walkInProductOrders.profit, units: stats.walkInProductOrders.units, color: '#C9A84C', description: 'Walk-in or non-member products sold at SRP price.' },
+                { title: '3. New Reseller Registrations', revenue: stats.packageRevenue, cost: stats.packageCost, profit: stats.registrationProductProfit, units: stats.packageUnitsSold, color: '#1a7a4a', description: 'City product value inside new reseller packages. PIN allocation is excluded from City income.' },
+              ].map(channel => (
+                <div key={channel.title} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `3px solid ${channel.color}` }}>
+                  <p className="text-sm font-bold text-[#0D1B3E]">{channel.title}</p>
+                  <p className="text-[11px] text-gray-400 min-h-8 mt-1">{channel.description}</p>
+                  <div className="mt-4 space-y-2 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-400">Sales value</span><span className="font-semibold text-[#0D1B3E]">{fmt(channel.revenue)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Product cost</span><span className="font-semibold text-[#e05252]">{fmt(channel.cost)}</span></div>
+                    <div className="pt-2 border-t border-[#0D1B3E]/8 flex justify-between"><span className="font-semibold text-[#0D1B3E]">Profit</span><span className="font-bold" style={{ color: channel.color }}>{fmt(channel.profit)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Units released</span><span className="font-semibold text-[#0D1B3E]">{channel.units.toLocaleString()}</span></div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-[#f3fbf6] border border-[#1a7a4a]/30 rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[#1a7a4a]/15">
+              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Reseller repeat-order profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.resellerProductOrders.profit)}</p></div>
+              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Non-member/SRP profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.walkInProductOrders.profit)}</p></div>
+              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Registration profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.registrationProductProfit)}</p></div>
+              <div className="p-5 bg-[#e2f5e9]"><p className="text-[10px] uppercase tracking-wide text-[#1a7a4a] font-semibold">Total City Gross Profit</p><p className="text-2xl font-bold text-[#08703c] mt-2">{fmt(stats.combinedProductProfit)}</p><p className="text-[10px] text-[#1a7a4a] mt-1">Before operating expenses or refunds</p></div>
+            </div>
+            <div className="px-5 py-3 bg-white/60 text-xs text-[#53627e]"><span className="font-semibold text-[#0D1B3E]">Formula:</span> reseller repeat-order profit + non-member/SRP profit + registration profit = Total City Gross Profit.</div>
+          </section>
+
+          <details className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden group">
+            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-sm font-bold text-[#0D1B3E]">Registration cash and PIN reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
+            <div className="border-t border-[#0D1B3E]/8 px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+              <div><p className="text-gray-400">Package cash collected</p><p className="font-bold text-[#2563eb] mt-1">{fmt(stats.packageCustomerPayments)}</p></div>
+              <div><p className="text-gray-400">City product value</p><p className="font-bold text-[#C9A84C] mt-1">{fmt(stats.packageRevenue)}</p></div>
+              <div><p className="text-gray-400">Prepaid PIN allocation</p><p className="font-bold text-[#9a6f1e] mt-1">{fmt(stats.packagePinRemittance)}</p></div>
+              <div><p className="text-gray-400">Formula</p><p className="font-medium text-[#0D1B3E] mt-1">Cash collected = City product value + PIN allocation</p></div>
+            </div>
+          </details>
+
+          <details className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden group">
+            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-sm font-bold text-[#0D1B3E]">Monthly delivered product-sales reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
+            <div className="border-t border-[#0D1B3E]/8">
+              <div className="grid grid-cols-3 px-5 py-2 bg-[#f8f9fc]">{['Month', 'Delivered Product Revenue', 'New Reseller Registrations'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}</div>
+              {stats.monthlyRevenue.map((m, i) => <div key={i} className="grid grid-cols-3 px-5 py-3 border-b border-[#0D1B3E]/5"><p className="text-xs font-semibold text-[#0D1B3E]">{m.month}</p><p className="text-xs font-bold text-[#1a7a4a]">{fmt(m.revenue)}</p><p className="text-xs font-semibold text-[#C9A84C]">{m.resellers}</p></div>)}
+            </div>
+          </details>
         </>
       )}
-
       {/* ══ PRODUCT MOVEMENT ══ */}
       {tab === 'products' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <StatCard label="Walk-in Revenue"  value={fmt(stats.orderRevenue)}              color="#2563eb" icon="🛒" sub={`${stats.orderUnitsSold} units`} />
-            <StatCard label="Walk-in Cost"     value={fmt(stats.orderCost)}                 color="#e05252" icon="🏷️" sub="City price cost" />
-            <StatCard label="Walk-in Profit"   value={fmt(stats.orderRevenue - stats.orderCost)} color="#1a7a4a" icon="📈" sub="Revenue minus cost" />
+            <StatCard label="Delivered Product Revenue"  value={fmt(stats.orderRevenue)}              color="#2563eb" icon="🛒" sub={`${stats.orderUnitsSold} units`} />
+            <StatCard label="Delivered Product Cost"     value={fmt(stats.orderCost)}                 color="#e05252" icon="🏷️" sub="City price cost" />
+            <StatCard label="Delivered Product Profit"   value={fmt(stats.orderProfit)} color="#1a7a4a" icon="📈" sub="Product margin, not cash collected" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
               <p className="text-sm font-bold text-[#0D1B3E]">Product Movement</p>
-              <p className="text-xs text-gray-400 mt-0.5">Based on delivered walk-in orders</p>
+              <p className="text-xs text-gray-400 mt-0.5">Based on all delivered product orders; reseller registrations are excluded.</p>
             </div>
             <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
               {['Product', 'Units Sold', 'Revenue', 'Share'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
@@ -392,7 +482,7 @@ export default function CityDashboardPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <StatCard label="Total PINs Used"    value={stats.usedPins}                    color="#1a7a4a" icon="✅" sub="Reseller registrations" />
-            <StatCard label="Package Revenue"    value={fmt(stats.packageRevenue)}        color="#C9A84C" icon="🎁" sub="From PIN packages (SRP)" />
+            <StatCard label="City Product Allocation"    value={fmt(stats.packageRevenue)}        color="#C9A84C" icon="🎁" sub="Excludes prepaid PIN allocation" />
             <StatCard label="Package Units Sold" value={stats.packageUnitsSold.toLocaleString()} color="#2563eb" icon="📦" sub="Products in packages" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
@@ -401,7 +491,7 @@ export default function CityDashboardPage() {
               <p className="text-xs text-gray-400 mt-0.5">Packages used by resellers you registered</p>
             </div>
             <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
-              {['Package', 'PINs Used', 'Revenue', 'Share'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
+              {['Package', 'PINs Used', 'City Product Allocation', 'Share'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
             </div>
             {stats.packageBreakdown.length === 0 ? (
               <p className="text-center text-gray-400 text-sm py-10">No packages used yet</p>

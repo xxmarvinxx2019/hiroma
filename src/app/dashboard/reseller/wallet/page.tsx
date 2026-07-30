@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
+import SecurityPinModal from '@/app/components/ui/SecurityPinModal'
 
 // ============================================================
 // TYPES
@@ -28,6 +29,7 @@ interface Commission {
   points: number | null
   is_pair_overflow: boolean
   created_at: string
+  balance_after_credit: number
   source_user: { full_name: string; username: string } | null
 }
 
@@ -45,6 +47,7 @@ interface Payout {
 }
 
 const PAGE_SIZE = 10
+type CommissionFilter = 'all' | 'direct_referral' | 'binary_pairing' | 'sponsor_point'
 
 const COMMISSION_ICONS: Record<string, string> = {
   direct_referral: '👥',
@@ -77,6 +80,14 @@ function fmt(n: number) {
   return '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function formatCreditedAt(value: string) {
+  return new Intl.DateTimeFormat('en-PH', {
+    timeZone: 'Asia/Manila',
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(value))
+}
+
 // ============================================================
 // PAYOUT MODAL
 // ============================================================
@@ -95,6 +106,8 @@ function PayoutModal({
   const [reference, setReference] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]         = useState('')
+  const [securityPinEnabled, setSecurityPinEnabled] = useState(false)
+  const [showSecurityPinModal, setShowSecurityPinModal] = useState(false)
   const [mode, setMode] = useState<'cash' | 'check' | 'account'>('cash')
   const [methods, setMethods] = useState<Array<{ id: string; type: string; bank_name: string | null; account_number: string }>>([])
 
@@ -102,31 +115,51 @@ function PayoutModal({
     Promise.all([
       fetch('/api/reseller/payment-policy').then((r) => r.json()),
       fetch('/api/payment-methods?status=approved').then((r) => r.json()),
-    ]).then(([policy, methodData]) => {
+      fetch('/api/reseller/security-pin').then((r) => r.json()),
+    ]).then(([policy, methodData, securityData]) => {
       const nextMode = policy.mode || 'cash'
       setMode(nextMode)
       setMethods(methodData.methods || [])
+      setSecurityPinEnabled(Boolean(securityData.enabled))
       if (nextMode !== 'account') setMethod(nextMode)
     })
   }, [])
 
-  const handleSubmit = async () => {
+  const validatePayout = () => {
     setError('')
-    if (!amount || parseFloat(amount) <= 0) { setError('Enter a valid amount.'); return }
-    if (parseFloat(amount) < 500) { setError('Minimum payout request is ₱500.00.'); return }
-    if (parseFloat(amount) > balance)        { setError('Amount exceeds your balance.'); return }
-    if (!method)                             { setError('Select an approved payment method.'); return }
+    if (!amount || parseFloat(amount) <= 0) return 'Enter a valid amount.'
+    if (parseFloat(amount) < 500) return 'Minimum payout request is ₱500.00.'
+    if (parseFloat(amount) > balance) return 'Amount exceeds your balance.'
+    if (!method) return 'Select an approved payment method.'
+    return null
+  }
 
+  const submitPayout = async (securityPin = ''): Promise<string | null> => {
     setSubmitting(true)
     const res = await fetch('/api/reseller/wallet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: parseFloat(amount), payment_method: method, payment_reference: reference }),
+      body: JSON.stringify({ amount: parseFloat(amount), payment_method: method, payment_reference: reference, security_pin: securityPin }),
     })
     const data = await res.json()
     setSubmitting(false)
-    if (res.ok) onSuccess()
-    else setError(data.error || 'Something went wrong.')
+    if (res.ok) {
+      setShowSecurityPinModal(false)
+      onSuccess()
+      return null
+    }
+    return data.error || 'Something went wrong.'
+  }
+
+  const handleSubmit = async () => {
+    const validationError = validatePayout()
+    if (validationError) { setError(validationError); return }
+    if (securityPinEnabled) {
+      setShowSecurityPinModal(true)
+      return
+    }
+    const submitError = await submitPayout()
+    if (submitError) setError(submitError)
   }
 
   return (
@@ -231,6 +264,16 @@ function PayoutModal({
           </div>
         </div>
       </div>
+      {showSecurityPinModal && (
+        <SecurityPinModal
+          title="Confirm payout request"
+          description="Enter your security PIN before submitting this payout request."
+          confirmLabel="Submit request"
+          loading={submitting}
+          onClose={() => { if (!submitting) setShowSecurityPinModal(false) }}
+          onConfirm={submitPayout}
+        />
+      )}
     </div>
   )
 }
@@ -247,6 +290,7 @@ export default function ResellerWalletPage() {
   const [meta, setMeta]                   = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]             = useState(true)
   const [tab, setTab]                     = useState<'commissions' | 'payouts'>('commissions')
+  const [commissionFilter, setCommissionFilter] = useState<CommissionFilter>('all')
   const [page, setPage]                   = useState(1)
   const [showPayout, setShowPayout]       = useState(false)
 
@@ -255,6 +299,7 @@ export default function ResellerWalletPage() {
   const fetchData = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams({ tab, page: String(page), pageSize: String(PAGE_SIZE) })
+    if (tab === 'commissions' && commissionFilter !== 'all') params.set('commissionType', commissionFilter)
     fetch(`/api/reseller/wallet?${params}`)
       .then((r) => r.json())
       .then((data) => {
@@ -265,7 +310,13 @@ export default function ResellerWalletPage() {
         if (data.meta)               setMeta(data.meta)
       })
       .finally(() => setLoading(false))
-  }, [tab, page])
+  }, [tab, page, commissionFilter])
+
+  const selectCommissionFilter = (type: CommissionFilter) => {
+    setTab('commissions')
+    setCommissionFilter(type)
+    setPage(1)
+  }
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -313,7 +364,11 @@ export default function ResellerWalletPage() {
           <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Earnings Breakdown</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {Object.entries(commissionSummary).filter(([type]) => type !== 'multilevel').map(([type, data]) => (
-              <div key={type} className="commissionSummaryCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
+              <button key={type} type="button" onClick={() => selectCommissionFilter(type as CommissionFilter)}
+                aria-pressed={commissionFilter === type}
+                className={`commissionSummaryCard bg-white rounded-xl border p-4 text-left hover:border-[#C9A84C]/60 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/40 ${
+                  commissionFilter === type ? 'border-[#C9A84C] ring-1 ring-[#C9A84C]/30' : 'border-[#0D1B3E]/8'
+                }`}
                 style={{ borderTop: `2px solid ${COMMISSION_COLORS[type] || '#9ca3af'}` }}>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-400 uppercase tracking-wide">{COMMISSION_LABELS[type] || type}</p>
@@ -321,7 +376,7 @@ export default function ResellerWalletPage() {
                 </div>
                 <p className="text-xl font-bold" style={{ color: COMMISSION_COLORS[type] || '#0D1B3E' }}>{fmt(data.amount)}</p>
                 <p className="text-[10px] text-gray-400 mt-1">{data.count} transaction{data.count !== 1 ? 's' : ''}</p>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -350,8 +405,24 @@ export default function ResellerWalletPage() {
         {/* Commission history */}
         {tab === 'commissions' && (
           <>
-            <div className="grid grid-cols-4 px-4 py-2 bg-[#F0F2F8]">
-              {['Type', 'Source', 'Amount', 'Date'].map((h) => (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#0D1B3E]/8 px-4 py-3">
+              <div>
+                <p className="text-xs font-semibold text-[#0D1B3E]">
+                  {commissionFilter === 'all' ? 'All commission transactions' : `${COMMISSION_LABELS[commissionFilter]} transactions`}
+                </p>
+                <p className="text-[10px] text-gray-400">Select an earnings card above to filter this history.</p>
+              </div>
+              {commissionFilter !== 'all' && (
+                <button type="button" onClick={() => selectCommissionFilter('all')}
+                  className="rounded-lg border border-[#0D1B3E]/15 px-3 py-1.5 text-xs font-medium text-[#0D1B3E] hover:border-[#C9A84C] hover:text-[#9a6f1e]">
+                  Show all
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+            <div className="min-w-[720px]">
+            <div className="grid grid-cols-5 px-4 py-2 bg-[#F0F2F8]">
+              {['Type', 'Source', 'Amount', 'Updated Balance', 'Credited At'].map((h) => (
                 <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
               ))}
             </div>
@@ -364,7 +435,7 @@ export default function ResellerWalletPage() {
               <p className="text-center text-gray-400 text-sm py-12">No commissions yet.</p>
             ) : (
               commissions.map((c) => (
-                <div key={c.id} className="grid grid-cols-4 px-4 py-3 border-b border-[#0D1B3E]/5 items-center hover:bg-[#F0F2F8]/50 transition-colors">
+                <div key={c.id} className="grid grid-cols-5 px-4 py-3 border-b border-[#0D1B3E]/5 items-center hover:bg-[#F0F2F8]/50 transition-colors">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COMMISSION_COLORS[c.type] }} />
                     <div>
@@ -388,9 +459,20 @@ export default function ResellerWalletPage() {
                     <p className="text-xs font-semibold text-[#0D1B3E]">{fmt(Number(c.amount))}</p>
                     {c.points && <p className="text-[10px] text-[#1a7a4a]">+{c.points} pts</p>}
                   </div>
-                  <p className="text-xs text-gray-400">{new Date(c.created_at).toLocaleDateString('en-PH')}</p>
+                  <div>
+                    <p className="text-xs font-semibold text-[#1a7a4a]">{fmt(Number(c.balance_after_credit))}</p>
+                    <p className="text-[10px] text-gray-400">After this credit</p>
+                  </div>
+                  <p className="text-xs text-gray-400">{formatCreditedAt(c.created_at)}</p>
                 </div>
               ))
+            )}
+            </div>
+            </div>
+            {!loading && commissions.length > 0 && (
+              <p className="border-t border-[#0D1B3E]/5 bg-[#f8f9fc] px-4 py-2 text-[10px] text-gray-400">
+                Updated balance is the accumulated commission balance immediately after each credit. Released payouts are listed separately and reduce the available balance above.
+              </p>
             )}
           </>
         )}

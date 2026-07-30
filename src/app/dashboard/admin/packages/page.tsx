@@ -583,6 +583,17 @@ export default function PackagesPage() {
                 )}
               </div>
 
+              {editPkg && packages.filter(pkg => pkg.id !== editPkg.id && Number(pkg.price) < (parseFloat(form.price) || 0)).length > 0 && (
+                <div className="rounded-lg border border-[#C9A84C]/40 bg-[#fff8e6] px-3 py-2.5">
+                  <p className="text-xs font-semibold text-[#0D1B3E]">Automatic Upgrade PIN fees</p>
+                  <p className="mt-0.5 text-[10px] text-gray-500">Reference only. Admin generates the dedicated Upgrade PIN in PIN Manager; its fee and economics are locked automatically when issued.</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    {packages.filter(pkg => pkg.id !== editPkg.id && Number(pkg.price) < (parseFloat(form.price) || 0)).map(pkg => (
+                      <p key={pkg.id} className="flex justify-between"><span>{pkg.name} → {form.name || editPkg.name}</span><span className="font-semibold text-[#1a7a4a]">₱{Math.max(0, (parseFloat(form.price) || 0) - Number(pkg.price)).toLocaleString()}</span></p>
+                    ))}
+                  </div>
+                </div>
+              )}
               {formError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   <p className="text-red-500 text-xs">{formError}</p>

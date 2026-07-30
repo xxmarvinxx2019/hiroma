@@ -152,6 +152,11 @@ export async function POST(req: NextRequest) {
     )
     const registrationProductProfit =
       registrationEconomics.resellerValue - registrationEconomics.acquisitionCost
+    const packageSnapshot = await prisma.package.findUnique({
+      where: { id: pin.package_id },
+      select: { name: true, direct_referral_bonus: true, pairing_bonus_value: true },
+    })
+    if (!packageSnapshot) return NextResponse.json({ error: 'Package configuration was not found.' }, { status: 400 })
 
     // Check admin's inventory
     const productIds   = packageProducts.map((pp) => pp.product_id)
@@ -232,6 +237,13 @@ export async function POST(req: NextRequest) {
           reseller_value: registrationEconomics.resellerValue,
           pin_allocation: registrationPinAllocation,
           registration_profit: registrationProductProfit,
+          package_name_snapshot: packageSnapshot.name,
+          direct_referral_allocation: Number(packageSnapshot.direct_referral_bonus),
+          binary_commission_allocation: Number(packageSnapshot.pairing_bonus_value) * 0.5,
+          binary_points_per_pair: Math.round(Number(packageSnapshot.pairing_bonus_value)),
+          binary_point_peso_rate: 0.5,
+          registration_channel: 'admin_direct',
+          allocation_snapshot_source: 'registration',
         },
       })
 
@@ -509,6 +521,6 @@ return NextResponse.json({
     })
   } catch (error: any) {
     console.error('[ADMIN REGISTER RESELLER ERROR]', error?.message || error)
-    return NextResponse.json({ error: `Registration failed: ${error?.message || 'Please try again.'}` }, { status: 500 })
+    return NextResponse.json({ error: 'Registration failed. Please try again.' }, { status: 500 })
   }
 }

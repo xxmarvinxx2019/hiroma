@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import SecurityPinModal from '@/app/components/ui/SecurityPinModal'
 
 // ============================================================
 // TYPES
@@ -12,6 +13,7 @@ interface ResellerUser {
   username: string
   email: string | null
   mobile: string
+  profile_photo: string | null
   address: string | null
   status: string
   created_at: string
@@ -72,11 +74,17 @@ export default function ResellerProfilePage() {
   const [profileSaving, setProfileSaving]   = useState(false)
   const [profileSuccess, setProfileSuccess] = useState('')
   const [profileError, setProfileError]     = useState('')
+  const [profilePhoto, setProfilePhoto]     = useState<string | null>(null)
+  const [profilePhotoChanged, setProfilePhotoChanged] = useState(false)
+  const [photoProcessing, setPhotoProcessing] = useState(false)
+  const [photoError, setPhotoError]         = useState('')
 
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
   const [passwordSaving, setPasswordSaving]   = useState(false)
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [passwordError, setPasswordError]     = useState('')
+  const [securityPinEnabled, setSecurityPinEnabled] = useState(false)
+  const [pinAction, setPinAction] = useState<'profile' | 'password' | null>(null)
 
   useEffect(() => {
     fetch('/api/reseller/profile')
@@ -90,28 +98,116 @@ export default function ResellerProfilePage() {
             mobile:    data.user.mobile    || '',
             address:   data.user.address   || '',
           })
+          setProfilePhoto(data.user.profile_photo || null)
         }
       })
       .finally(() => setLoading(false))
   }, [])
 
-  const handleProfileSave = async () => {
+  useEffect(() => {
+    fetch('/api/reseller/security-pin')
+      .then((response) => response.json())
+      .then((data) => setSecurityPinEnabled(Boolean(data.enabled)))
+      .catch(() => setSecurityPinEnabled(false))
+  }, [])
+
+  const saveProfile = async (securityPin = ''): Promise<string | null> => {
     setProfileSaving(true)
     setProfileError('')
     setProfileSuccess('')
     const res = await fetch('/api/reseller/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profileForm),
+      body: JSON.stringify({
+        ...profileForm,
+        ...(profilePhotoChanged ? { profile_photo: profilePhoto } : {}),
+        security_pin: securityPin,
+      }),
     })
     const data = await res.json()
     setProfileSaving(false)
     if (res.ok) {
       setProfileSuccess('Profile updated successfully.')
       if (data.user) setUser((prev) => prev ? { ...prev, ...data.user } : prev)
-    } else {
-      setProfileError(data.error || 'Something went wrong.')
+      setProfilePhoto(data.user?.profile_photo ?? null)
+      setProfilePhotoChanged(false)
+      window.dispatchEvent(new CustomEvent('hiroma-reseller-profile-photo-change', { detail: data.user?.profile_photo ?? null }))
+      setPinAction(null)
+      return null
     }
+    return data.error || 'Something went wrong.'
+  }
+
+  const handleProfileSave = async () => {
+    if (securityPinEnabled) {
+      setPinAction('profile')
+      return
+    }
+    const error = await saveProfile()
+    if (error) setProfileError(error)
+  }
+
+  const handlePhotoChange = async (file: File | undefined) => {
+    setPhotoError('')
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10_000_000) {
+      setPhotoError('Choose a JPEG, PNG, or WebP image up to 10 MB.')
+      return
+    }
+    setPhotoProcessing(true)
+    try {
+      const bitmap = await createImageBitmap(file)
+      const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Canvas is unavailable.')
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      bitmap.close()
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.78))
+      if (!blob || blob.size > 400 * 1024) throw new Error('Unable to compress this image below 400 KB.')
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Invalid image result.'))
+        reader.onerror = () => reject(new Error('Unable to read the compressed image.'))
+        reader.readAsDataURL(blob)
+      })
+      setProfilePhoto(dataUrl)
+      setProfilePhotoChanged(true)
+    } catch {
+      setPhotoError('Unable to process that image. Please choose another JPEG, PNG, or WebP photo.')
+    } finally {
+      setPhotoProcessing(false)
+    }
+  }
+
+  const savePassword = async (securityPin = ''): Promise<string | null> => {
+    setPasswordError('')
+    setPasswordSuccess('')
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      return 'New passwords do not match.'
+    }
+    setPasswordSaving(true)
+    const res = await fetch('/api/reseller/profile/password', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_password: passwordForm.current_password,
+        new_password:     passwordForm.new_password,
+      security_pin:      securityPin,
+      }),
+    })
+    const data = await res.json()
+    setPasswordSaving(false)
+    if (res.ok) {
+      setPasswordSuccess('Password changed successfully.')
+      setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+      setPinAction(null)
+      return null
+    }
+    return data.error || 'Something went wrong.'
   }
 
   const handlePasswordSave = async () => {
@@ -121,23 +217,12 @@ export default function ResellerProfilePage() {
       setPasswordError('New passwords do not match.')
       return
     }
-    setPasswordSaving(true)
-    const res = await fetch('/api/reseller/profile/password', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        current_password: passwordForm.current_password,
-        new_password:     passwordForm.new_password,
-      }),
-    })
-    const data = await res.json()
-    setPasswordSaving(false)
-    if (res.ok) {
-      setPasswordSuccess('Password changed successfully.')
-      setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
-    } else {
-      setPasswordError(data.error || 'Something went wrong.')
+    if (securityPinEnabled) {
+      setPinAction('password')
+      return
     }
+    const error = await savePassword()
+    if (error) setPasswordError(error)
   }
 
   if (loading) {
@@ -193,6 +278,27 @@ export default function ResellerProfilePage() {
 
       {/* Personal Information */}
       <Section title="Personal Information" desc="Update your name, contact details, and address">
+        <div className="mb-5 flex flex-wrap items-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 border-[#C9A84C]/40 bg-[#0D1B3E]/5">
+            {profilePhoto ? (
+              <img src={profilePhoto} alt="Profile preview" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-xl font-semibold text-[#C9A84C]">{profileForm.full_name.charAt(0) || 'R'}</span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-[#0D1B3E]">Profile photo</p>
+            <p className="mt-0.5 text-xs text-gray-400">JPEG, PNG, or WebP up to 10 MB. Automatically resized and compressed.</p>
+            <div className="mt-2 flex items-center gap-3">
+              <label className="cursor-pointer text-xs font-medium text-[#C9A84C] hover:underline">
+                {photoProcessing ? 'Compressing...' : profilePhoto ? 'Change photo' : 'Add photo'}
+                <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoProcessing} className="sr-only" onChange={(event) => handlePhotoChange(event.target.files?.[0])} />
+              </label>
+              {profilePhoto && <button type="button" onClick={() => { setProfilePhoto(null); setProfilePhotoChanged(true) }} className="text-xs font-medium text-gray-500 hover:text-[#a03030]">Remove</button>}
+            </div>
+            {photoError && <p className="mt-2 text-xs text-[#a03030]">{photoError}</p>}
+          </div>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <InputField
             label="Full Name" value={profileForm.full_name}
@@ -222,9 +328,8 @@ export default function ResellerProfilePage() {
         {profileError && (
           <p className="mt-3 text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{profileError}</p>
         )}
-
         <div className="mt-4 flex justify-end">
-          <button onClick={handleProfileSave} disabled={profileSaving}
+          <button onClick={handleProfileSave} disabled={profileSaving || photoProcessing}
             className="bg-[#0D1B3E] text-white text-sm px-5 py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50">
             {profileSaving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -266,6 +371,23 @@ export default function ResellerProfilePage() {
         </div>
       </Section>
 
+      {pinAction && (
+        <SecurityPinModal
+          key={pinAction}
+          title={pinAction === 'profile' ? 'Confirm profile changes' : 'Confirm password change'}
+          description={pinAction === 'profile'
+            ? 'Enter your security PIN before saving account information.'
+            : 'Enter your security PIN before changing your password.'}
+          confirmLabel={pinAction === 'profile' ? 'Save changes' : 'Update password'}
+          loading={pinAction === 'profile' ? profileSaving : passwordSaving}
+          onClose={() => { if (!profileSaving && !passwordSaving) setPinAction(null) }}
+          onConfirm={async (pin) => {
+            const error = pinAction === 'profile' ? await saveProfile(pin) : await savePassword(pin)
+            if (error) return error
+            return null
+          }}
+        />
+      )}
     </div>
   )
 }

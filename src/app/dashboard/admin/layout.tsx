@@ -36,6 +36,7 @@ const navItems = [
       { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑' },
       { label: 'Commissions',       href: '/dashboard/admin/commissions', icon: '💰' },
       { label: 'Reports',            href: '/dashboard/admin/reports',     icon: '📈' },
+      { label: 'Report Testing',     href: '/dashboard/admin/report-testing', icon: '🧪' },
       { label: 'Flushout/Overflow',  href: '/dashboard/admin/flushout',    icon: '⚡' },
     ],
   },

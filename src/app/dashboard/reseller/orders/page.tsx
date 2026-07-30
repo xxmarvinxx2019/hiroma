@@ -68,8 +68,17 @@ const PAGE_SIZE = 15
 const STATUS_COLORS: Record<string, string> = {
   pending:    'bg-[#fef9ee] text-[#9a6f1e]',
   processing: 'bg-[#eef0f8] text-[#0D1B3E]',
+  ready_for_pickup: 'bg-[#f0f7ff] text-[#2563eb]',
   delivered:  'bg-[#e8f7ef] text-[#1a7a4a]',
   cancelled:  'bg-[#fdecea] text-[#a03030]',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Order Placed',
+  processing: 'Processing',
+  ready_for_pickup: 'Ready for Pickup',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
 }
 
 const PAYMENT_LABEL: Record<string, string> = {
@@ -450,7 +459,7 @@ export default function ResellerOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   const [summary, setSummary] = useState({
-    total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0,
+    total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0,
   })
 
   useEffect(() => { setPage(1) }, [statusFilter, typeFilter])
@@ -501,11 +510,12 @@ export default function ResellerOrdersPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
         {[
           { label: 'Total',      value: summary.total,      accent: '#0D1B3E' },
           { label: 'Pending',    value: summary.pending,    accent: '#C9A84C' },
           { label: 'Processing', value: summary.processing, accent: '#0D1B3E' },
+          { label: 'Ready for Pickup', value: summary.ready_for_pickup, accent: '#2563eb' },
           { label: 'Delivered',  value: summary.delivered,  accent: '#1a7a4a' },
           { label: 'Cancelled',  value: summary.cancelled,  accent: '#e05252' },
         ].map((s) => (
@@ -523,7 +533,7 @@ export default function ResellerOrdersPage() {
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
           <div className="flex gap-1 flex-wrap">
-            {(['all', 'pending', 'processing', 'delivered', 'cancelled'] as const).map((f) => (
+            {(['all', 'pending', 'processing', 'ready_for_pickup', 'delivered', 'cancelled'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
@@ -594,8 +604,8 @@ export default function ResellerOrdersPage() {
                 </div>
 
                 {/* Status */}
-                <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${STATUS_COLORS[order.status]}`}>
-                  {order.status}
+                <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${STATUS_COLORS[order.status]}`}>
+                  {STATUS_LABELS[order.status] || order.status}
                 </span>
 
                 {/* Actions */}
@@ -769,24 +779,27 @@ export default function ResellerOrdersPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="relative grid grid-cols-3">
-                    <div className="absolute top-5 left-[16.66%] right-[16.66%] h-1 bg-[#e6e8ef] rounded-full" />
+                  <div className="relative grid grid-cols-4">
+                    <div className="absolute top-5 left-[12.5%] right-[12.5%] h-1 bg-[#e6e8ef] rounded-full" />
                     <div
-                      className="absolute top-5 left-[16.66%] h-1 bg-gradient-to-r from-[#C9A84C] to-[#dfc36f] rounded-full transition-all"
+                      className="absolute top-5 left-[12.5%] h-1 bg-gradient-to-r from-[#C9A84C] to-[#dfc36f] rounded-full transition-all"
                       style={{
                         width: selectedOrder.status === 'pending'
                           ? '0%'
                           : selectedOrder.status === 'processing'
-                            ? '33.34%'
-                            : '66.68%',
+                            ? '25%'
+                            : selectedOrder.status === 'ready_for_pickup'
+                              ? '50%'
+                              : '75%',
                       }}
                     />
                     {([
                       ['pending', 'Order Placed', '✓'],
                       ['processing', 'Processing', '📦'],
+                      ['ready_for_pickup', 'Ready for Pickup', '🏪'],
                       ['delivered', 'Delivered', '✓'],
                     ] as const).map(([step, label, icon]) => {
-                      const sequence = ['pending', 'processing', 'delivered']
+                      const sequence = ['pending', 'processing', 'ready_for_pickup', 'delivered']
                       const reached = sequence.indexOf(step) <= sequence.indexOf(selectedOrder.status)
                       const current = step === selectedOrder.status
                       return (
@@ -798,7 +811,7 @@ export default function ResellerOrdersPage() {
                           </div>
                           <p className={`text-xs mt-2 font-semibold ${reached ? 'text-[#0D1B3E]' : 'text-gray-300'}`}>{label}</p>
                           <p className="text-[9px] text-gray-400 mt-0.5">
-                            {step === 'pending' ? 'Received' : step === 'processing' ? 'Being prepared' : 'Completed'}
+                            {step === 'pending' ? 'Received' : step === 'processing' ? 'Being prepared' : step === 'ready_for_pickup' ? 'Pay & collect' : 'Completed'}
                           </p>
                         </div>
                       )

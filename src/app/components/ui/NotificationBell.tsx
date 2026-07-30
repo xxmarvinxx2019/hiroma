@@ -27,7 +27,7 @@ function NotificationToast({ notification }: { notification: Notification }) {
   if (!notification.action_url) return null
   return (
     <Link href={notification.action_url}
-      className="fixed bottom-5 right-5 z-[9999] w-80 rounded-2xl border border-[#0D1B3E]/10 bg-white p-4 shadow-2xl">
+      className="fixed bottom-4 left-3 right-3 z-[9999] w-auto rounded-2xl border border-[#0D1B3E]/10 bg-white p-4 shadow-2xl md:bottom-5 md:left-auto md:right-5 md:w-80">
       <div className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#C9A84C]/15 text-xl">
           {notificationIcon(notification.type)}
@@ -78,7 +78,7 @@ export default function NotificationBell({ userId, role }: { userId?: string; ro
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-11 z-50 w-80 overflow-hidden rounded-2xl border border-[#0D1B3E]/10 bg-white shadow-2xl">
+            <div className="fixed left-3 right-3 top-16 z-50 flex max-h-[calc(100dvh-5rem)] w-auto flex-col overflow-hidden rounded-2xl border border-[#0D1B3E]/10 bg-white shadow-2xl md:absolute md:left-auto md:right-0 md:top-11 md:w-80 md:max-h-[min(32rem,calc(100vh-5rem))]">
               <div className="flex items-center justify-between border-b border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-3">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-bold text-[#0D1B3E]">Notifications</p>
@@ -95,7 +95,7 @@ export default function NotificationBell({ userId, role }: { userId?: string; ro
                 )}
               </div>
 
-              <div>
+              <div className="flex-1 overflow-y-auto overscroll-contain">
                 {notifications.length === 0 ? (
                   <div className="flex flex-col items-center py-10">
                     <span className="mb-2 text-3xl">🔔</span>
@@ -133,11 +133,11 @@ export default function NotificationBell({ userId, role }: { userId?: string; ro
 
               {allHref ? (
                 <Link href={allHref} onClick={() => setOpen(false)}
-                  className="block border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-3 text-center text-xs font-semibold text-[#0D1B3E] hover:text-[#9a6f1e]">
+                  className="block shrink-0 border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-3 text-center text-xs font-semibold text-[#0D1B3E] hover:text-[#9a6f1e]">
                   See all notifications
                 </Link>
               ) : (
-                <div className="border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-2 text-center text-[10px] text-gray-400">
+                <div className="shrink-0 border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-4 py-2 text-center text-[10px] text-gray-400">
                   Showing the latest 5 notifications
                 </div>
               )}

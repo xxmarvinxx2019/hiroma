@@ -131,9 +131,9 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
     let total_amount = 0
 
-    const orderItems = items.map((item: { product_id: string; quantity: number; unit_price?: number }) => {
+    const orderItems = items.map((item: { product_id: string; quantity: number }) => {
       const product    = productMap.get(item.product_id)!
-      const unit_price = item.unit_price ?? Number(product.regional_price || product.price)
+      const unit_price = Number(product.regional_price) || Number(product.price)
       const subtotal   = unit_price * item.quantity
       total_amount    += subtotal
       return { product_id: item.product_id, quantity: item.quantity, unit_price, subtotal }

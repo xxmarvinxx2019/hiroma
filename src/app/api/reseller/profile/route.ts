@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import { getProfilePhotoDisplayUrl, removeProfilePhoto, uploadProfilePhoto } from '@/app/lib/profilePhoto'
 
 // ── GET reseller profile ──
 export async function GET() {
@@ -18,6 +20,7 @@ export async function GET() {
         username:  true,
         email:     true,
         mobile:    true,
+        profile_photo: true,
         address:   true,
         status:    true,
         created_at: true,
@@ -32,7 +35,9 @@ export async function GET() {
       },
     })
 
-    return NextResponse.json({ user: data })
+    return NextResponse.json({
+      user: data ? { ...data, profile_photo: await getProfilePhotoDisplayUrl(data.profile_photo) } : data,
+    })
   } catch (error) {
     console.error('[RESELLER PROFILE GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
@@ -47,7 +52,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { full_name, email, mobile, address } = await req.json()
+    const { full_name, email, mobile, address, profile_photo, security_pin } = await req.json()
+    const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+    if (!pinVerification.valid) {
+      return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+    }
 
     if (!full_name?.trim() || !mobile?.trim()) {
       return NextResponse.json({ error: 'Full name and mobile are required.' }, { status: 400 })
@@ -65,10 +74,20 @@ export async function PATCH(req: NextRequest) {
 
     const previous = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { full_name: true, email: true, mobile: true, address: true },
+      select: { full_name: true, email: true, mobile: true, address: true, profile_photo: true },
     })
     if (!previous) {
       return NextResponse.json({ error: 'User not found.' }, { status: 404 })
+    }
+
+    let storedProfilePhoto = previous.profile_photo
+    if (profile_photo === null) {
+      storedProfilePhoto = null
+    } else if (profile_photo !== undefined) {
+      if (typeof profile_photo !== 'string' || !profile_photo.startsWith('data:image/')) {
+        return NextResponse.json({ error: 'Invalid profile photo upload.' }, { status: 400 })
+      }
+      storedProfilePhoto = await uploadProfilePhoto(user.id, profile_photo)
     }
 
     const nextProfile = {
@@ -76,12 +95,14 @@ export async function PATCH(req: NextRequest) {
       mobile: mobile.trim(),
       address: address?.trim() || null,
       email: email?.trim().toLowerCase() || null,
+      profile_photo: storedProfilePhoto,
     }
     const changedFields = [
       previous.full_name !== nextProfile.full_name ? 'name' : null,
       previous.mobile !== nextProfile.mobile ? 'mobile number' : null,
       previous.email !== nextProfile.email ? 'email address' : null,
       previous.address !== nextProfile.address ? 'address' : null,
+      previous.profile_photo !== nextProfile.profile_photo ? 'profile photo' : null,
     ].filter((field): field is string => Boolean(field))
 
     const [updated] = await prisma.$transaction([
@@ -90,7 +111,7 @@ export async function PATCH(req: NextRequest) {
         data: nextProfile,
         select: {
           id: true, full_name: true, username: true,
-          email: true, mobile: true, address: true,
+          email: true, mobile: true, address: true, profile_photo: true,
         },
       }),
       ...(changedFields.length > 0
@@ -107,7 +128,12 @@ export async function PATCH(req: NextRequest) {
         : []),
     ])
 
-    return NextResponse.json({ success: true, user: updated })
+    if (profile_photo === null) await removeProfilePhoto(previous.profile_photo)
+
+    return NextResponse.json({
+      success: true,
+      user: { ...updated, profile_photo: await getProfilePhotoDisplayUrl(updated.profile_photo) },
+    })
   } catch (error) {
     console.error('[RESELLER PROFILE PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

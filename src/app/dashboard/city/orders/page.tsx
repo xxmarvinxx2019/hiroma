@@ -60,20 +60,22 @@ const PAGE_SIZE = 15
 const STATUS_COLORS: Record<string, string> = {
   pending:    'bg-[#fef9ee] text-[#9a6f1e]',
   processing: 'bg-[#eef0f8] text-[#0D1B3E]',
+  ready_for_pickup: 'bg-[#f0f7ff] text-[#2563eb]',
   delivered:  'bg-[#e8f7ef] text-[#1a7a4a]',
   cancelled:  'bg-[#fdecea] text-[#a03030]',
 }
 
 const STATUS_NEXT: Record<string, string[]> = {
   pending:    ['processing', 'cancelled'],
-  processing: ['delivered',  'cancelled'],
+  processing: ['ready_for_pickup', 'cancelled'],
+  ready_for_pickup: ['delivered', 'cancelled'],
   delivered:  [],
   cancelled:  [],
 }
 
 // Orders must be paid before moving to processing
 function canProcess(order: any) {
-  return order.payment_status === 'paid'
+  return order.payment_method === 'cash_on_pickup' || order.payment_status === 'paid'
 }
 
 const PAYMENT_LABEL: Record<string, string> = {
@@ -529,7 +531,7 @@ export default function CityOrdersPage() {
   const [supplier, setSupplier]             = useState<Supplier | null>(null)
   const [showCreate, setShowCreate]         = useState(false)
   const [showResellerOrder, setShowResellerOrder] = useState(false)
-  const [summary, setSummary]               = useState({ total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0 })
+  const [summary, setSummary]               = useState({ total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 })
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -642,11 +644,12 @@ export default function CityOrdersPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
         {[
           { label: 'Total',      value: summary.total,      accent: '#0D1B3E' },
           { label: 'Pending',    value: summary.pending,    accent: '#C9A84C' },
           { label: 'Processing', value: summary.processing, accent: '#0D1B3E' },
+          { label: 'Ready for Pickup', value: summary.ready_for_pickup, accent: '#2563eb' },
           { label: 'Delivered',  value: summary.delivered,  accent: '#1a7a4a' },
           { label: 'Cancelled',  value: summary.cancelled,  accent: '#e05252' },
         ].map((s) => (
@@ -663,7 +666,7 @@ export default function CityOrdersPage() {
             placeholder={tab === 'my_orders' ? 'Search supplier...' : 'Search any reseller...'}
             className="flex-1 min-w-[180px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
           <div className="flex gap-1 flex-wrap">
-            {(['all', 'pending', 'processing', 'delivered', 'cancelled'] as const).map((f) => (
+            {(['all', 'pending', 'processing', 'ready_for_pickup', 'delivered', 'cancelled'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>{f}</button>
             ))}
@@ -741,7 +744,7 @@ export default function CityOrdersPage() {
                   </div>
 
                   {/* Status */}
-                  <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${STATUS_COLORS[order.status] || ''}`}>{order.status}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${STATUS_COLORS[order.status] || ''}`}>{order.status === 'ready_for_pickup' ? 'Ready for Pickup' : order.status}</span>
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
@@ -770,12 +773,14 @@ export default function CityOrdersPage() {
                       <button key={next}
                         disabled={updatingId === order.id || (next === 'processing' && !canProcess(order))}
                         onClick={() => next === 'cancelled' ? setCancelConfirm(order.id) : handleStatusUpdate(order.id, next)}
-                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
-                        title={next === 'processing' && !canProcess(order) ? 'Mark as paid first' : next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : next === 'ready_for_pickup' ? 'bg-[#f0f7ff] hover:bg-[#2563eb]' : next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        title={next === 'processing' && !canProcess(order) ? 'Mark as paid first' : next === 'processing' ? 'Mark Processing' : next === 'ready_for_pickup' ? 'Mark Ready for Pickup' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
                         {next === 'cancelled' ? (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         ) : next === 'delivered' ? (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#1a7a4a] group-hover:text-white"><path d="M5 13l4 4L19 7"/></svg>
+                        ) : next === 'ready_for_pickup' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#2563eb] group-hover:text-white"><path d="M3 9l2-5h14l2 5"/><path d="M5 9v10h14V9"/><path d="M9 19v-6h6v6"/></svg>
                         ) : (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                         )}

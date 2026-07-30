@@ -3,6 +3,8 @@ import { getCurrentUser } from '@/app/lib/auth'
 import { getCutoffDays, getNextCutoffDate, getPayoutDateMap, getPayoutDateFromCutoff } from '@/app/api/admin/settings/route'
 import prisma from '@/app/lib/prisma'
 import { getResellerPayoutMode } from '@/app/lib/resellerPayoutPolicy'
+import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import { CommissionType } from '@prisma/client'
 
 // ── GET wallet balance + commission history + payout history ──
 export async function GET(req: NextRequest) {
@@ -16,8 +18,16 @@ export async function GET(req: NextRequest) {
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '10'))
     const tab      = searchParams.get('tab') || 'commissions' // commissions | payouts
+    const requestedCommissionType = searchParams.get('commissionType')
+    const commissionType = requestedCommissionType && Object.values(CommissionType).includes(requestedCommissionType as CommissionType)
+      ? requestedCommissionType as CommissionType
+      : null
+    const commissionWhere = {
+      user_id: user.id,
+      ...(commissionType ? { type: commissionType } : {}),
+    }
 
-    const [wallet, commissionSummary, payouts, commissions, totalCount] = await Promise.all([
+    const [wallet, commissionSummary, payouts, commissions, allCommissionCredits, totalCount] = await Promise.all([
 
       // Wallet
       prisma.wallet.findUnique({
@@ -56,8 +66,8 @@ export async function GET(req: NextRequest) {
 
       // Commission history
       tab === 'commissions' ? prisma.commission.findMany({
-        where:   { user_id: user.id },
-        orderBy: { created_at: 'desc' },
+        where:   commissionWhere,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
@@ -71,11 +81,31 @@ export async function GET(req: NextRequest) {
         },
       }) : Promise.resolve([]),
 
+      // The complete credit ledger lets each paginated commission row show the
+      // balance immediately after that credit, rather than only the live balance.
+      tab === 'commissions' ? prisma.commission.findMany({
+        where:   { user_id: user.id },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+        select:  { id: true, amount: true },
+      }) : Promise.resolve([]),
+
       // Total count for pagination
       tab === 'commissions'
-        ? prisma.commission.count({ where: { user_id: user.id } })
+        ? prisma.commission.count({ where: commissionWhere })
         : prisma.payout.count({ where: { user_id: user.id } }),
     ])
+
+    const balanceAfterCredit = new Map<string, number>()
+    let runningCreditBalance = 0
+    for (const credit of allCommissionCredits) {
+      runningCreditBalance += Number(credit.amount)
+      balanceAfterCredit.set(credit.id, runningCreditBalance)
+    }
+
+    const commissionsWithBalances = commissions.map((commission) => ({
+      ...commission,
+      balance_after_credit: balanceAfterCredit.get(commission.id) || 0,
+    }))
 
     // Shape commission summary
     const summary = {
@@ -115,7 +145,7 @@ export async function GET(req: NextRequest) {
         total_withdrawn: Number(wallet?.total_withdrawn || 0),
       },
       commission_summary: summary,
-      commissions,
+      commissions: commissionsWithBalances,
       payouts,
       meta: {
         total:      totalCount,
@@ -138,7 +168,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { amount, payment_method, payment_reference } = await req.json()
+    const { amount, payment_method, payment_reference, security_pin } = await req.json()
+    const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+    if (!pinVerification.valid) {
+      return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+    }
     const payoutMode = await getResellerPayoutMode()
 
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {

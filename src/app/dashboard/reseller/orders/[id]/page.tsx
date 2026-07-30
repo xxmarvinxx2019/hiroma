@@ -39,7 +39,7 @@ interface OrderDetail {
 const STATUS_STEPS = [
   { key: 'pending',    label: 'Order Placed',  icon: '📋', desc: 'Your order has been received and is awaiting confirmation.' },
   { key: 'processing', label: 'Processing',    icon: '⚙️', desc: 'Your order is being prepared by the seller.' },
-  { key: 'packed',     label: 'Packed',        icon: '📦', desc: 'Your order has been packed and is ready for delivery.' },
+  { key: 'ready_for_pickup', label: 'Ready for Pickup', icon: '🏪', desc: 'Your order is ready. Pay on pickup and collect it from your city distributor.' },
   { key: 'delivered',  label: 'Delivered',     icon: '✅', desc: 'Your order has been delivered successfully.' },
 ]
 

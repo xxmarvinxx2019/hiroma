@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, verifyPassword, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -9,7 +10,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { current_password, new_password } = await req.json()
+    const { current_password, new_password, security_pin } = await req.json()
+    const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+    if (!pinVerification.valid) {
+      return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+    }
 
     if (!current_password || !new_password) {
       return NextResponse.json({ error: 'Both fields are required.' }, { status: 400 })

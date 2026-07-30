@@ -172,12 +172,13 @@ export async function GET(req: NextRequest) {
       isBuyer ? resolveSupplier(user.id) : Promise.resolve(null),
     ])
 
-    const summary = { total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0 }
+    const summary = { total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       const count = row._count.status
       summary.total     += count
       if (row.status === 'pending')    summary.pending    = count
       if (row.status === 'processing') summary.processing = count
+      if (row.status === 'ready_for_pickup') summary.ready_for_pickup = count
       if (row.status === 'delivered')  summary.delivered  = count
       if (row.status === 'cancelled')  summary.cancelled  = count
     }
@@ -550,7 +551,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { order_id, status, payment_status } = await req.json()
-    const allowed = ['pending', 'processing', 'delivered', 'cancelled']
+    const allowed = ['pending', 'processing', 'ready_for_pickup', 'delivered', 'cancelled']
 
     if (!order_id || (!status && !payment_status)) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
@@ -580,11 +581,30 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
     }
 
+    if (status && status !== order.status) {
+      const validTransitions: Record<string, string[]> = {
+        pending: ['processing', 'cancelled'],
+        processing: ['ready_for_pickup', 'cancelled'],
+        ready_for_pickup: ['delivered', 'cancelled'],
+      }
+      if (!validTransitions[order.status]?.includes(status)) {
+        return NextResponse.json({ error: 'Invalid order status transition.' }, { status: 400 })
+      }
+    }
+
+    if (status === 'processing' && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid') {
+      return NextResponse.json({ error: 'Confirm payment before processing this order.' }, { status: 400 })
+    }
+
     if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled') {
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
     }
 
     let buyerIsReseller = false
+
+    const cashCollectedAtPickup = status === 'delivered'
+      && order.payment_method === 'cash_on_pickup'
+      && order.payment_status !== 'paid'
 
     const updated = await prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.order.update({
@@ -592,8 +612,9 @@ export async function PATCH(req: NextRequest) {
         data: {
           ...(status         && { status }),
           ...(payment_status && { payment_status }),
+          ...(cashCollectedAtPickup && { payment_status: 'paid' }),
           ...(status === 'delivered' && order.status !== 'delivered' && { delivered_at: new Date() }),
-          ...(payment_status === 'paid' && order.payment_status !== 'paid' && { paid_at: new Date() }),
+          ...((payment_status === 'paid' || cashCollectedAtPickup) && order.payment_status !== 'paid' && { paid_at: new Date() }),
         },
       })
 

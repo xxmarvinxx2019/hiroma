@@ -1,0 +1,3 @@
+-- The original security-PIN work used the existing account fields and did not
+-- introduce a separate database schema change. Keep an explicit no-op file so
+-- Prisma can track this historical migration consistently.
