@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import { getProfilePhotoDisplayUrl, removeProfilePhoto, uploadProfilePhoto } from '@/app/lib/profilePhoto'
 
 // ── GET reseller profile ──
 export async function GET() {
@@ -34,7 +35,9 @@ export async function GET() {
       },
     })
 
-    return NextResponse.json({ user: data })
+    return NextResponse.json({
+      user: data ? { ...data, profile_photo: await getProfilePhotoDisplayUrl(data.profile_photo) } : data,
+    })
   } catch (error) {
     console.error('[RESELLER PROFILE GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
@@ -59,15 +62,6 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Full name and mobile are required.' }, { status: 400 })
     }
 
-    if (profile_photo !== null && profile_photo !== undefined) {
-      const validPhoto = typeof profile_photo === 'string'
-        && /^data:image\/(jpeg|png|webp);base64,/i.test(profile_photo)
-        && profile_photo.length <= 1_500_000
-      if (!validPhoto) {
-        return NextResponse.json({ error: 'Use a JPEG, PNG, or WebP profile photo up to 1 MB.' }, { status: 400 })
-      }
-    }
-
     // Check email uniqueness
     if (email?.trim()) {
       const existing = await prisma.user.findFirst({
@@ -86,12 +80,22 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'User not found.' }, { status: 404 })
     }
 
+    let storedProfilePhoto = previous.profile_photo
+    if (profile_photo === null) {
+      storedProfilePhoto = null
+    } else if (profile_photo !== undefined) {
+      if (typeof profile_photo !== 'string' || !profile_photo.startsWith('data:image/')) {
+        return NextResponse.json({ error: 'Invalid profile photo upload.' }, { status: 400 })
+      }
+      storedProfilePhoto = await uploadProfilePhoto(user.id, profile_photo)
+    }
+
     const nextProfile = {
       full_name: full_name.trim(),
       mobile: mobile.trim(),
       address: address?.trim() || null,
       email: email?.trim().toLowerCase() || null,
-      profile_photo: profile_photo === undefined ? previous.profile_photo : profile_photo,
+      profile_photo: storedProfilePhoto,
     }
     const changedFields = [
       previous.full_name !== nextProfile.full_name ? 'name' : null,
@@ -124,7 +128,12 @@ export async function PATCH(req: NextRequest) {
         : []),
     ])
 
-    return NextResponse.json({ success: true, user: updated })
+    if (profile_photo === null) await removeProfilePhoto(previous.profile_photo)
+
+    return NextResponse.json({
+      success: true,
+      user: { ...updated, profile_photo: await getProfilePhotoDisplayUrl(updated.profile_photo) },
+    })
   } catch (error) {
     console.error('[RESELLER PROFILE PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

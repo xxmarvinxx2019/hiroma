@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { getProfilePhotoDisplayUrl } from '@/app/lib/profilePhoto'
 
 export async function GET() {
   try {
@@ -86,6 +87,7 @@ export async function GET() {
     return NextResponse.json({
       user: {
         ...user,
+        profile_photo: await getProfilePhotoDisplayUrl(user.profile_photo),
         ...(currentUser.is_staff && {
           full_name: currentUser.actor_name || currentUser.full_name,
           username: currentUser.actor_username || currentUser.username,
