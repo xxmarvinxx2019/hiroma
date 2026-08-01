@@ -159,7 +159,7 @@ export default function AdminPayoutsPage() {
               className="flex-1 border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
             />
             <button onClick={handleSaveSettings} disabled={savingSettings}
-              className="px-4 py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50 whitespace-nowrap">
+              className="px-4 py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50 whitespace-nowrap">
               {savingSettings ? 'Saving...' : 'Save'}
             </button>
             <button onClick={() => { setCutoffInput(cutoffSettings); setShowSettings(false) }}
@@ -196,7 +196,7 @@ export default function AdminPayoutsPage() {
           <div className="flex gap-2 mt-2 flex-wrap">
             {[['15,31', '15th & Last day'], ['10,25', '10th & 25th'], ['1,15', '1st & 15th'], ['30', 'Monthly (30th)']].map(([val, label]) => (
               <button key={val} onClick={() => setCutoffInput(val)}
-                className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${cutoffInput === val ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
+                className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${cutoffInput === val ? 'bg-[#010521] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
                 {label}
               </button>
             ))}
@@ -239,7 +239,7 @@ export default function AdminPayoutsPage() {
             {(['all', 'pending', 'approved', 'rejected', 'released'] as const).map((s) => (
               <button key={s} onClick={() => setStatusFilter(s)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  statusFilter === s ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-500 hover:text-[#0D1B3E]'
+                  statusFilter === s ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-500 hover:text-[#0D1B3E]'
                 }`}>
                 {s}
               </button>
@@ -377,10 +377,10 @@ export default function AdminPayoutsPage() {
             <p className="text-xs text-gray-400">{meta.total} requests</p>
             <div className="flex gap-1">
               <button disabled={page === 1} onClick={() => setPage(page - 1)}
-                className="w-7 h-7 rounded-lg bg-[#F0F2F8] text-gray-500 text-xs hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 transition-colors">‹</button>
+                className="w-7 h-7 rounded-lg bg-[#F0F2F8] text-gray-500 text-xs hover:bg-[#010521] hover:text-white disabled:opacity-30 transition-colors">‹</button>
               <span className="w-7 h-7 flex items-center justify-center text-xs text-[#0D1B3E] font-medium">{page}</span>
               <button disabled={page === meta.totalPages} onClick={() => setPage(page + 1)}
-                className="w-7 h-7 rounded-lg bg-[#F0F2F8] text-gray-500 text-xs hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 transition-colors">›</button>
+                className="w-7 h-7 rounded-lg bg-[#F0F2F8] text-gray-500 text-xs hover:bg-[#010521] hover:text-white disabled:opacity-30 transition-colors">›</button>
             </div>
           </div>
         )}
@@ -451,7 +451,7 @@ export default function AdminPayoutsPage() {
             </div>
             <p className="text-[10px] text-gray-400 mb-4">Share this number with the reseller for reference</p>
             <button onClick={() => setResultModal(null)}
-              className="w-full py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850]">
+              className="w-full py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850]">
               Done
             </button>
           </div>

@@ -183,7 +183,7 @@ export default function AdminOrdersPage() {
             {(['all', 'regional', 'provincial', 'city', 'reseller'] as const).map((f) => (
               <button key={f} onClick={() => setLevelFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  levelFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
+                  levelFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                 }`}>{f}</button>
             ))}
           </div>
@@ -320,7 +320,7 @@ export default function AdminOrdersPage() {
                         next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' :
                         next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' :
                         next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9] cursor-not-allowed' :
-                        'bg-[#eef0f8] hover:bg-[#0D1B3E]'
+                        'bg-[#eef0f8] hover:bg-[#010521]'
                       )}
                       title={
                         next === 'processing' && !canProcess(order) ? 'Mark as paid first before processing' :

@@ -117,7 +117,7 @@ export default function AdminPinRequestsPage() {
             className="flex-1 min-w-[200px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
           {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (
             <button key={f} onClick={() => setStatusFilter(f)}
-              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
+              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
               {f}
               {f === 'pending' && summary.pending > 0 && (
                 <span className="ml-1.5 bg-[#9a6f1e] text-white text-[9px] px-1.5 py-0.5 rounded-full">{summary.pending}</span>
@@ -197,7 +197,7 @@ export default function AdminPinRequestsPage() {
                       </button>
                     )}
                     <button onClick={() => handleAction(r.id, 'approved')} disabled={acting === r.id}
-                      className="text-[10px] bg-[#0D1B3E] text-white px-2 py-1 rounded-lg hover:bg-[#162850] disabled:opacity-50 font-medium">
+                      className="text-[10px] bg-[#010521] text-white px-2 py-1 rounded-lg hover:bg-[#162850] disabled:opacity-50 font-medium">
                       {acting === r.id ? '...' : 'Approve'}
                     </button>
                     <button onClick={() => handleAction(r.id, 'rejected')} disabled={acting === r.id}

@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAutoLogout } from '@/app/hooks/useAutoLogout'
 import NotificationBell from '@/app/components/ui/NotificationBell'
+import FirstLoginPasswordModal from '@/app/components/security/FirstLoginPasswordModal'
 import styles from './reseller-theme.module.css'
 
 type ThemeName = 'default' | 'modern'
@@ -64,7 +65,7 @@ function Sidebar({
   }
 
   return (
-    <div className="bg-[#0D1B3E] flex flex-col w-56" style={{ height: '100vh' }}>
+    <div className="bg-[#010521] flex flex-col w-56" style={{ height: '100vh' }}>
 
       {/* Logo */}
       <div
@@ -135,7 +136,7 @@ function Sidebar({
             />
             <div
               role="menu"
-              className="absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#13244a] p-1.5 shadow-2xl"
+              className="absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#010521] p-1.5 shadow-2xl"
             >
               <button
                 type="button"
@@ -187,7 +188,7 @@ function Sidebar({
       </div>
 
       {/* User Footer */}
-      <div className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0">
+      <div className="px-3 py-3 border-t border-white/5 bg-[#010521] flex-shrink-0">
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-7 h-7 overflow-hidden rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
             {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'R'}</span>}
@@ -221,7 +222,14 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
   })
   const [sidebarOpen, setSidebarOpen]     = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ id: string; full_name: string; username: string; profile_photo?: string | null } | null>(null)
+  const [user, setUser] = useState<{
+    id: string
+    full_name: string
+    username: string
+    profile_photo?: string | null
+    password_change_required?: boolean
+    password_review_reason?: 'temporary_first_login' | 'temporary_day_3' | 'temporary_day_7' | 'temporary_day_30' | 'quarterly'
+  } | null>(null)
   // Keep the server and first browser render identical. The saved browser
   // preference is applied only after hydration.
   const [theme, setTheme] = useState<ThemeName>('default')
@@ -247,7 +255,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
   const modernTheme = theme === 'modern'
 
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/auth/me', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => { if (data.user) setUser(data.user) })
       .catch(() => router.push('/login'))
@@ -285,6 +293,14 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
         background: modernTheme ? '#050D20' : '#F0F2F8',
       }}
     >
+      <FirstLoginPasswordModal
+        open={Boolean(user?.password_change_required)}
+        reviewReason={user?.password_review_reason}
+        onResolved={() => setUser((current) => current
+          ? { ...current, password_change_required: false }
+          : current)}
+      />
+
       {/* Inactivity warning */}
       {showWarning && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
@@ -335,7 +351,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
         {/* Topbar */}
         <header
-          className="bg-[#0D1B3E] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
+          className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
           style={{ height: '56px' }}
         >
           <div className="flex items-center gap-3">

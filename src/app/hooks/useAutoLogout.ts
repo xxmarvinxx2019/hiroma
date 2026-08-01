@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
-const INACTIVITY_TIMEOUT = 5 * 60 * 1000  // 5 minutes
+const INACTIVITY_TIMEOUT = 20 * 60 * 1000 // 20 minutes
 const WARNING_BEFORE     = 30 * 1000       // warn 30s before logout
 
 interface UseAutoLogoutOptions {

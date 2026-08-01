@@ -162,7 +162,7 @@ useEffect(() => {
             + Register Reseller
           </Link>}
           {(!stats.isStaff || stats.staffPermissions.includes('orders')) && <Link href="/dashboard/city/orders?action=walk-in"
-            className="bg-[#0D1B3E] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
+            className="bg-[#010521] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
             🛒 Walk-in Sale
           </Link>}
         </div>
@@ -179,7 +179,7 @@ useEffect(() => {
           { key: 'inventory', label: '🏭 Inventory'   },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key as ReportTab)}
-            className={`text-xs px-3 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`text-xs px-3 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
           </button>
         ))}
@@ -254,7 +254,7 @@ useEffect(() => {
                       <div className="w-full rounded-t-md transition-all"
                         style={{ height: h, background: isLast ? '#0D1B3E' : '#bfdbfe' }} />
                       <p className="text-[9px] text-gray-400">{m.month}</p>
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#010521] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         {fmt(m.revenue)}
                       </div>
                     </div>
@@ -277,7 +277,7 @@ useEffect(() => {
                 <div className="px-5 py-8 text-center text-gray-400 text-sm">No resellers yet</div>
               ) : stats.recentResellers.map(r => (
                 <div key={r.id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc]">
-                  <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -307,7 +307,7 @@ useEffect(() => {
                     {i + 1}
                   </div>
                   {/* Avatar */}
-                  <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">

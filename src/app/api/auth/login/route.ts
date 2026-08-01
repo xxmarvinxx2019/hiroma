@@ -55,6 +55,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 })
     }
 
+    if (user.login_disabled) {
+      createAuditLog({
+        user_id:       user.id,
+        user_name:     user.full_name,
+        user_role:     user.role,
+        member_id:     formatMemberId(user.id, user.role),
+        activity_type: 'blocked_login',
+        category:      'auth',
+        description:   'Interactive login blocked for system-only account',
+        ip_address, device,
+        risk_level:    'high',
+        status:        'suspicious',
+      })
+      return NextResponse.json({ error: 'This system account cannot sign in.' }, { status: 403 })
+    }
+
     const passwordValid = await verifyPassword(password, user.password_hash)
     if (!passwordValid) {
       createAuditLog({

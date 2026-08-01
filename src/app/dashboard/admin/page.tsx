@@ -187,7 +187,7 @@ export default function AdminDashboardPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/dashboard/admin/pins"
-            className="bg-[#0D1B3E] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
+            className="bg-[#010521] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
             🔑 Generate PIN
           </Link>
           <Link href="/dashboard/admin/distributors"
@@ -275,7 +275,7 @@ export default function AdminDashboardPage() {
                   <div className="w-full rounded-t-sm transition-all"
                     style={{ height: h, background: isLast ? '#0D1B3E' : '#bfdbfe' }} />
                   <p className="text-[7px] text-gray-400">{m.month}</p>
-                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#010521] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                     {fmt(m.revenue)}
                   </div>
                 </div>
@@ -459,7 +459,7 @@ export default function AdminDashboardPage() {
             <div className="px-5 py-8 text-center text-gray-400 text-sm">No resellers yet</div>
           ) : recentResellers.map(r => (
             <div key={r.id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors">
-              <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                 {r.full_name.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">

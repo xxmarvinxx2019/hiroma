@@ -119,7 +119,7 @@ function TreeNodeCard({
   return (
     <div className="flex flex-col items-center gap-1">
       {/* Node */}
-      <div className="bg-[#0D1B3E] rounded-lg px-3 py-2 text-center min-w-[90px]">
+      <div className="bg-[#010521] rounded-lg px-3 py-2 text-center min-w-[90px]">
         <p className="text-white text-xs font-semibold truncate max-w-[80px]">
           @{node.username}
         </p>
@@ -133,7 +133,7 @@ function TreeNodeCard({
 
         {/* Left side */}
         <div className="flex flex-col items-center gap-1">
-          <div className="w-px h-3 bg-[#0D1B3E]/20" />
+          <div className="w-px h-3 bg-[#010521]/20" />
           {node.left_available ? (
             // Empty left slot — clickable
             <button
@@ -166,7 +166,7 @@ function TreeNodeCard({
 
         {/* Right side */}
         <div className="flex flex-col items-center gap-1">
-          <div className="w-px h-3 bg-[#0D1B3E]/20" />
+          <div className="w-px h-3 bg-[#010521]/20" />
           {node.right_available ? (
             // Empty right slot — clickable
             <button
@@ -252,7 +252,7 @@ function UpgradeModal({
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-        <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+        <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-white font-semibold text-sm">Upgrade Package</h2>
             <p className="text-white/40 text-xs mt-0.5">{reseller.full_name} · @{reseller.username}</p>
@@ -271,7 +271,7 @@ function UpgradeModal({
                 onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()} placeholder="Enter new PIN code"
                 className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C] uppercase tracking-wider" />
               <button onClick={verifyUpgradePin} disabled={pinLoading || !pinInput.trim()}
-                className="bg-[#0D1B3E] text-white text-xs rounded-lg px-4 hover:bg-[#162850] disabled:opacity-50">
+                className="bg-[#010521] text-white text-xs rounded-lg px-4 hover:bg-[#162850] disabled:opacity-50">
                 {pinLoading ? '...' : 'Verify'}
               </button>
             </div>
@@ -724,7 +724,7 @@ export default function CityResellersPage() {
             <div key={r.id} className="grid grid-cols-6 px-5 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
               {/* Reseller */}
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                   {r.full_name.charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0">
@@ -780,7 +780,7 @@ export default function CityResellersPage() {
       {successData && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="bg-[#0D1B3E] px-6 py-6 text-center">
+            <div className="bg-[#010521] px-6 py-6 text-center">
               <div className="w-16 h-16 bg-[#C9A84C]/20 border-2 border-[#C9A84C]/40 rounded-full flex items-center justify-center mx-auto mb-3">
                 <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
                   <path d="M6 16L13 23L26 9" stroke="#C9A84C" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
@@ -869,7 +869,7 @@ export default function CityResellersPage() {
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
 
             {/* Header */}
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between flex-shrink-0">
+            <div className="bg-[#010521] px-6 py-4 flex items-center justify-between flex-shrink-0">
               <div>
                 <h2 className="text-white font-semibold text-sm">Register new reseller</h2>
                 <p className="text-white/40 text-xs mt-0.5">
@@ -944,7 +944,7 @@ export default function CityResellersPage() {
                       <button
                         onClick={verifyReferral}
                         disabled={referralLoading || !referralInput.trim()}
-                        className="bg-[#0D1B3E] text-white text-xs font-medium rounded-lg px-4 hover:bg-[#1A2F5E] transition-colors disabled:opacity-60 whitespace-nowrap"
+                        className="bg-[#010521] text-white text-xs font-medium rounded-lg px-4 hover:bg-[#1A2F5E] transition-colors disabled:opacity-60 whitespace-nowrap"
                       >
                         {referralLoading ? '...' : 'Verify'}
                       </button>
@@ -999,7 +999,7 @@ export default function CityResellersPage() {
                                     <div className="flex gap-1.5">
                                       {slot.left_open && (
                                         <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'left', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Left`); setSlotDropdownOpen(false) }}
-                                          className="text-[10px] bg-[#0D1B3E] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]">← Left</button>
+                                          className="text-[10px] bg-[#010521] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]">← Left</button>
                                       )}
                                       {slot.right_open && (
                                         <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'right', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Right`); setSlotDropdownOpen(false) }}

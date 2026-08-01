@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
+import styles from './login.module.css'
 
 export default function LoginPage() {
   const router = useRouter()
+  const sceneRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState({ username: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [requiresPin, setRequiresPin] = useState(false)
@@ -14,6 +16,19 @@ export default function LoginPage() {
   const [showSecurityPin, setShowSecurityPin] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const scene = sceneRef.current
+    if (!scene || event.pointerType === 'touch') return
+    const bounds = scene.getBoundingClientRect()
+    scene.style.setProperty('--cursor-x', `${event.clientX - bounds.left}px`)
+    scene.style.setProperty('--cursor-y', `${event.clientY - bounds.top}px`)
+    scene.style.setProperty('--cursor-opacity', '1')
+  }
+
+  const handlePointerLeave = () => {
+    sceneRef.current?.style.setProperty('--cursor-opacity', '0')
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -93,11 +108,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0D1B3E] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-4xl bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
+    <div
+      ref={sceneRef}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+      className={`${styles.loginScene} min-h-screen bg-[#010521] flex items-center justify-center px-4 py-12`}
+    >
+      <div className={styles.holographicField} aria-hidden="true">
+        <span className={styles.auroraOne} />
+        <span className={styles.auroraTwo} />
+        <span className={styles.lightRay} />
+      </div>
+      <span className={styles.cursorGlow} aria-hidden="true" />
+      <div className={`${styles.loginCard} w-full max-w-4xl bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row`}>
 
         {/* ── Left Panel ── */}
-        <div className="bg-[#0D1B3E] md:w-1/2 p-10 flex flex-col justify-between border-r border-white/5">
+        <div className={`${styles.heroPanel} bg-[#010521] md:w-1/2 p-10 flex flex-col justify-between border-r border-white/5`}>
           <div>
             <Link href="/" className="flex items-center gap-3 mb-10">
               <div className="w-10 h-10 relative flex-shrink-0">
@@ -130,7 +156,7 @@ export default function LoginPage() {
         </div>
 
         {/* ── Right Panel — Form ── */}
-        <div className="md:w-1/2 p-10 flex flex-col justify-center bg-white">
+        <div className={`${styles.formPanel} md:w-1/2 p-10 flex flex-col justify-center bg-white`}>
           <h1 className="text-[#0D1B3E] text-2xl font-semibold mb-1">Welcome back</h1>
           <p className="text-gray-400 text-sm mb-8">Sign in to your Hiroma account</p>
 
@@ -215,7 +241,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-3 hover:bg-[#E8C96A] transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              className={`${styles.primaryButton} w-full bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-3 hover:bg-[#E8C96A] transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer`}
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -251,7 +277,7 @@ export default function LoginPage() {
       </div>
 
       {requiresPin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0D1B3E]/65 p-4" role="dialog" aria-modal="true" aria-labelledby="security-pin-login-title">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/65 p-4" role="dialog" aria-modal="true" aria-labelledby="security-pin-login-title">
           <form onSubmit={handlePinSubmit} className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="border-b border-[#0D1B3E]/8 px-6 py-5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C9A84C]">Account security</p>

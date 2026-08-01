@@ -17,11 +17,12 @@ interface Pin {
 interface Package { id: string; name: string; price: number; is_active: boolean }
 interface CityDist { id: string; full_name: string; username: string }
 
-const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmt = (n: number) => `â‚±${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const STATUS_STYLES: Record<string, string> = {
   unused:    'bg-[#fff8e6] text-[#b87a00]',
   used:      'bg-[#e8f7ef] text-[#1a7a4a]',
+  expired:   'bg-[#fff1f2] text-[#be123c]',
   cancelled: 'bg-[#fdecea] text-[#a03030]',
 }
 
@@ -32,10 +33,10 @@ export default function PinsPage() {
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'cancelled'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('unused')
   const [page, setPage]               = useState(1)
   const [meta, setMeta]               = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, cancelled: 0})
+  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
   const [showForm, setShowForm]       = useState(false)
   const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '' })
   const [formLoading, setFormLoading] = useState(false)
@@ -89,7 +90,7 @@ export default function PinsPage() {
     ]).then(([pd, dd]) => {
       setPackages(pd.packages || [])
       const list = (dd.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city')
-      setCityDists([{ id: dd.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin' }, ...list])
+      setCityDists([{ id: dd.adminUser?.id || '', full_name: 'â­ Admin (Self)', username: 'admin' }, ...list])
     })
   }, [])
 
@@ -114,7 +115,7 @@ export default function PinsPage() {
       .then(d => {
         setPins(d.pins || [])
         setMeta(d.meta || { total: 0, page: 1, pageSize: 15, totalPages: 1 })
-        setSummary(d.summary || { total: 0, unused: 0, used: 0, cancelled: 0 })
+        setSummary(d.summary || { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
       })
       .finally(() => setLoading(false))
   }, [page, statusFilter, search, dateMode, dateFrom, dateTo])
@@ -154,7 +155,7 @@ export default function PinsPage() {
   }
 
   const { from: displayFrom } = getDateRange()
-  const displayDate = dateMode === 'today' ? 'Today' : dateMode === 'yesterday' ? 'Yesterday' : dateMode === 'week' ? 'This Week' : dateMode === 'month' ? 'This Month' : `${dateFrom} — ${dateTo}`
+  const displayDate = dateMode === 'today' ? 'Today' : dateMode === 'yesterday' ? 'Yesterday' : dateMode === 'week' ? 'This Week' : dateMode === 'month' ? 'This Month' : `${dateFrom} â€” ${dateTo}`
 
   return (
     <div className="w-full space-y-5">
@@ -171,12 +172,13 @@ export default function PinsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { label: 'TOTAL PINS', value: summary.total, color: '#2563eb', icon: '📋', sub: 'View details below' },
-          { label: 'UNUSED',     value: summary.unused,    color: '#C9A84C', icon: '🔒', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
-          { label: 'USED',       value: summary.used,      color: '#1a7a4a', icon: '✅', sub: `${summary.total > 0 ? ((summary.used / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
-          { label: 'CANCELLED',  value: summary.cancelled,   color: '#64748b', icon: '🚫', sub: `${summary.total > 0 ? ((summary.cancelled / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'TOTAL PINS', value: summary.total, color: '#2563eb', icon: 'ðŸ“‹', sub: 'View details below' },
+          { label: 'UNUSED',     value: summary.unused,    color: '#C9A84C', icon: 'ðŸ”’', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'USED',       value: summary.used,      color: '#1a7a4a', icon: 'âœ…', sub: `${summary.total > 0 ? ((summary.used / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'EXPIRED',    value: summary.expired,   color: '#be123c', icon: '⌛', sub: `${summary.total > 0 ? ((summary.expired / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'CANCELLED',  value: summary.cancelled,   color: '#64748b', icon: 'ðŸš«', sub: `${summary.total > 0 ? ((summary.cancelled / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
             <div className="flex items-center justify-between mb-3">
@@ -204,7 +206,7 @@ export default function PinsPage() {
           <div className="flex gap-1">
             {(['today','yesterday','week','month','custom'] as const).map(m => (
               <button key={m} onClick={() => setDateMode(m)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors capitalize ${dateMode === m ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors capitalize ${dateMode === m ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                 {m === 'today' ? 'Today' : m === 'yesterday' ? 'Yesterday' : m === 'week' ? 'This Week' : m === 'month' ? 'This Month' : 'Custom'}
               </button>
             ))}
@@ -214,7 +216,7 @@ export default function PinsPage() {
           {dateMode === 'custom' && (
             <div className="flex items-center gap-2 border border-[#0D1B3E]/10 rounded-xl px-3 py-2 bg-[#f8f9fc]">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-xs text-[#0D1B3E] outline-none bg-transparent" />
-              <span className="text-gray-300 text-xs">—</span>
+              <span className="text-gray-300 text-xs">â€”</span>
               <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="text-xs text-[#0D1B3E] outline-none bg-transparent" />
             </div>
           )}
@@ -225,7 +227,7 @@ export default function PinsPage() {
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
-              placeholder="Search by PIN code or username..."
+              placeholder="Search PIN, package, status, user, or date..."
               className="flex-1 bg-transparent text-xs text-[#0D1B3E] outline-none placeholder:text-gray-300" />
           </div>
         </div>
@@ -237,13 +239,14 @@ export default function PinsPage() {
         <div className="flex items-center justify-between px-5 py-3 border-b border-[#0D1B3E]/8">
           <div className="flex gap-1">
             {([
-              { key: 'all',       label: `All (${summary.total})` },
               { key: 'unused',    label: `Unused (${summary.unused})` },
               { key: 'used',      label: `Used (${summary.used})` },
+              { key: 'expired',   label: `Expired (${summary.expired})` },
               { key: 'cancelled', label: `Cancelled (${summary.cancelled})` },
+              { key: 'all',       label: `All (${summary.total})` },
             ] as const).map(f => (
               <button key={f.key} onClick={() => setStatusFilter(f.key)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${statusFilter === f.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${statusFilter === f.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
                 {f.label}
               </button>
             ))}
@@ -287,7 +290,7 @@ export default function PinsPage() {
           </div>
         ) : pins.length === 0 ? (
           <div className="flex flex-col items-center py-16">
-            <span className="text-4xl mb-3">🔑</span>
+            <span className="text-4xl mb-3">ðŸ”‘</span>
             <p className="text-gray-400 text-sm">No PINs found for this period</p>
           </div>
         ) : pins.map(pin => (
@@ -302,10 +305,10 @@ export default function PinsPage() {
               <p className="text-xs font-mono font-semibold text-[#0D1B3E]">{pin.pin_code}</p>
             </div>
             <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold w-fit" style={{ background: '#C9A84C18', color: '#C9A84C' }}>
-              {pin.package?.name || '—'}
+              {pin.package?.name || 'â€”'}
             </span>
             <div>
-              <p className="text-xs font-medium text-[#0D1B3E]">{pin.city_distributor?.full_name || '—'}</p>
+              <p className="text-xs font-medium text-[#0D1B3E]">{pin.city_distributor?.full_name || 'â€”'}</p>
               <p className="text-[10px] text-gray-400">@{pin.city_distributor?.username || ''}</p>
             </div>
             <div>
@@ -314,7 +317,7 @@ export default function PinsPage() {
                   <p className="text-xs font-medium text-[#0D1B3E]">{pin.used_by_user.full_name}</p>
                   <p className="text-[10px] text-gray-400">@{pin.used_by_user.username}</p>
                 </>
-              ) : <p className="text-xs text-gray-300">—</p>}
+              ) : <p className="text-xs text-gray-300">â€”</p>}
             </div>
             <span className={`text-[10px] px-2.5 py-1 rounded-full font-semibold w-fit ${STATUS_STYLES[pin.status] || 'bg-gray-100 text-gray-400'}`}>
               {pin.status}
@@ -354,11 +357,11 @@ export default function PinsPage() {
               </div>
               {form.pin_type === 'upgrade' && (
                 <div>
-                  <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Reseller’s current package</label>
+                  <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Resellerâ€™s current package</label>
                   <select value={form.upgrade_from_package_id} onChange={e => setForm({ ...form, upgrade_from_package_id: e.target.value })}
                     className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
                     <option value="">Select current package...</option>
-                    {packages.filter(p => p.id !== form.package_id).map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
+                    {packages.filter(p => p.id !== form.package_id).map(p => <option key={p.id} value={p.id}>{p.name} â€” {fmt(p.price)}</option>)}
                   </select>
                 </div>
               )}
@@ -368,7 +371,7 @@ export default function PinsPage() {
                 <select value={form.package_id} onChange={e => setForm({ ...form, package_id: e.target.value })}
                   className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
                   <option value="">Select package...</option>
-                  {packages.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
+                  {packages.map(p => <option key={p.id} value={p.id}>{p.name} â€” {fmt(p.price)}</option>)}
                 </select>
               </div>
               {/* City Dist */}
@@ -429,7 +432,7 @@ export default function PinsPage() {
           <div className="bg-white rounded-2xl shadow-2xl border border-[#0D1B3E]/8 w-[520px] mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#0D1B3E]/8 bg-[#e8f7ef] rounded-t-2xl">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#1a7a4a]/20 flex items-center justify-center text-xl">✅</div>
+                <div className="w-9 h-9 rounded-xl bg-[#1a7a4a]/20 flex items-center justify-center text-xl">âœ…</div>
                 <div>
                   <p className="text-sm font-bold text-[#1a7a4a]">{generatedPins.length} PINs Generated Successfully!</p>
                   <p className="text-[10px] text-[#1a7a4a]/70">PINs are ready to be assigned to resellers</p>
@@ -455,7 +458,7 @@ export default function PinsPage() {
               </div>
               <div className="flex gap-2 mt-5">
                 <button onClick={() => { setShowSuccessModal(false); setGeneratedPins([]) }}
-                  className="flex-1 py-2.5 rounded-xl bg-[#0D1B3E] text-white text-xs font-bold hover:bg-[#1A2F5E] transition-colors">
+                  className="flex-1 py-2.5 rounded-xl bg-[#010521] text-white text-xs font-bold hover:bg-[#1A2F5E] transition-colors">
                   Done
                 </button>
                 <button onClick={() => {

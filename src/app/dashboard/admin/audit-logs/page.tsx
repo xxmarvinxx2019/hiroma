@@ -244,7 +244,7 @@ export default function AuditLogPage() {
                   Reset
                 </button>
                 <button onClick={exportCSV}
-                  className="flex-1 flex items-center justify-center gap-1 text-xs bg-[#0D1B3E] text-white px-3 py-2 rounded-xl hover:bg-[#1A2F5E] transition-colors">
+                  className="flex-1 flex items-center justify-center gap-1 text-xs bg-[#010521] text-white px-3 py-2 rounded-xl hover:bg-[#1A2F5E] transition-colors">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   Export CSV
                 </button>
@@ -299,7 +299,7 @@ export default function AuditLogPage() {
 
                     {/* User */}
                     <div className="col-span-2 flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                      <div className="w-7 h-7 rounded-full bg-[#010521] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
                         {log.user_name?.charAt(0) || '?'}
                       </div>
                       <div className="min-w-0">

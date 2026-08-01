@@ -73,16 +73,11 @@ export function smsWelcomeReseller({
   package_name: string
 }): string {
   const first_name = full_name.split(' ')[0]
-  return `Welcome to HIROMA, ${first_name}!
+  return `Welcome to HIROMA, ${first_name}! Your account has been successfully activated.
 
-Your account is now active.
 Package: ${package_name}
-
-Login details:
 Username: ${username}
-Password: ${password}
+Temporary Password: ${password}
 
-Login at: hiroma.com
-
-Keep your credentials safe. - HIROMA Team`
+Log in at HiromaDigital.com and change your temporary password after your first login. Never share your login credentials. Welcome to the HIROMA Digital Community.`
 }

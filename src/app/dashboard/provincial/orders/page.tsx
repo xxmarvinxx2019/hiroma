@@ -214,7 +214,7 @@ function CreateOrderModal({
                     </div>
                     <button
                       onClick={() => addToCart(product)}
-                      className="text-xs bg-[#0D1B3E] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors"
+                      className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors"
                     >
                       + Add
                     </button>
@@ -270,7 +270,7 @@ function CreateOrderModal({
                 {(['online', 'offline'] as const).map((t) => (
                   <button key={t} onClick={() => setOrderType(t)}
                     className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${
-                      orderType === t ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400'
+                      orderType === t ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400'
                     }`}>{t}</button>
                 ))}
               </div>
@@ -436,7 +436,7 @@ export default function ProvincialOrdersPage() {
             onClick={() => { setTab(t.key as 'my_orders' | 'city_orders'); setStatusFilter('all'); setTypeFilter('all'); setSearch(''); setSearchInput('') }}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${
               tab === t.key
-                ? 'bg-[#0D1B3E] text-white'
+                ? 'bg-[#010521] text-white'
                 : 'text-gray-400 hover:text-[#0D1B3E]'
             }`}
           >
@@ -489,7 +489,7 @@ export default function ProvincialOrdersPage() {
             {(['all', 'pending', 'processing', 'delivered', 'cancelled'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
+                  statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                 }`}>{f}</button>
             ))}
           </div>
@@ -599,7 +599,7 @@ export default function ProvincialOrdersPage() {
                       <button key={next}
                         disabled={updatingId === order.id || (next === 'processing' && !canProcess(order))}
                         onClick={() => next === 'cancelled' ? setCancelConfirm(order.id) : handleStatusUpdate(order.id, next)}
-                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : 'bg-[#eef0f8] hover:bg-[#010521]')}
                         title={next === 'processing' ? 'Mark Processing' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
                         {next === 'cancelled' ? (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>

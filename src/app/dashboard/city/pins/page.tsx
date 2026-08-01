@@ -30,7 +30,7 @@ export default function CityPinsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   // Filters
-  const [statusFilter,  setStatusFilter]  = useState<'all' | 'unused' | 'used' | 'expired'>('all')
+  const [statusFilter,  setStatusFilter]  = useState<'all' | 'unused' | 'used' | 'expired'>('unused')
   const [packageFilter, setPackageFilter] = useState('')
   const [dateFrom,      setDateFrom]      = useState('')
   const [dateTo,        setDateTo]        = useState('')
@@ -62,7 +62,7 @@ export default function CityPinsPage() {
     setPackageFilter('')
     setDateFrom('')
     setDateTo('')
-    setStatusFilter('all')
+    setStatusFilter('unused')
     setSearchInput('')
     setSearch('')
     setPage(1)
@@ -154,15 +154,15 @@ export default function CityPinsPage() {
           {/* Row 1: search + status + filter toggle */}
           <div className="flex items-center gap-2 flex-wrap">
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by PIN code or reseller..."
+              placeholder="Search PIN, package, status, reseller, or date..."
               className="flex-1 min-w-[200px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
 
             {/* Status filters */}
             <div className="flex gap-1">
-              {(['all', 'unused', 'used', 'expired'] as const).map((f) => (
+              {(['unused', 'used', 'expired', 'all'] as const).map((f) => (
                 <button key={f} onClick={() => setStatusFilter(f)}
                   className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                    statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
+                    statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                   }`}>{f}</button>
               ))}
             </div>
@@ -179,14 +179,14 @@ export default function CityPinsPage() {
               </svg>
               Filters
               {activeFilterCount > 0 && (
-                <span className="bg-[#0D1B3E] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                <span className="bg-[#010521] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
                   {activeFilterCount}
                 </span>
               )}
             </button>
 
             {/* Clear all */}
-            {(activeFilterCount > 0 || search || statusFilter !== 'all') && (
+            {(activeFilterCount > 0 || search || statusFilter !== 'unused') && (
               <button onClick={clearFilters}
                 className="text-xs text-[#a03030] hover:underline">
                 Clear all
@@ -295,7 +295,7 @@ export default function CityPinsPage() {
                       className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full transition-all ${
                         copiedId === pin.id
                           ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                          : 'bg-[#F0F2F8] text-gray-400 hover:bg-[#0D1B3E] hover:text-white'
+                          : 'bg-[#F0F2F8] text-gray-400 hover:bg-[#010521] hover:text-white'
                       }`}>
                       {copiedId === pin.id ? '✓ Copied' : 'Copy'}
                     </button>

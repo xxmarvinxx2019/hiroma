@@ -82,9 +82,9 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const PAYMENT_LABEL: Record<string, string> = {
-  cash_on_pickup: '💵 Cash on Pickup',
-  gcash:          '📱 GCash',
-  bank_transfer:  '🏦 Bank Transfer',
+  cash_on_pickup: 'ðŸ’µ Cash on Pickup',
+  gcash:          'ðŸ“± GCash',
+  bank_transfer:  'ðŸ¦ Bank Transfer',
 }
 
 // ============================================================
@@ -213,12 +213,12 @@ function CreateOrderModal({
               {assignedDist ? `Ordering from: ${assignedDist.full_name}` : 'No assigned distributor'}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">âœ•</button>
         </div>
 
         <div className="flex flex-1 min-h-0">
 
-          {/* Left — product picker */}
+          {/* Left â€” product picker */}
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
 
@@ -245,7 +245,7 @@ function CreateOrderModal({
                     />
                     {false && selectedDistId && (
                       <button onClick={() => { setSelectedDistId(''); setDistSearch('') }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">âœ•</button>
                     )}
                     {false && showDistDrop && (
                       <div className="absolute z-[100] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-40 overflow-y-auto">
@@ -264,7 +264,7 @@ function CreateOrderModal({
                               }}
                               className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${selectedDistId === d.id ? 'bg-[#F0F2F8]' : ''}`}>
                               <p className="text-xs font-medium text-[#0D1B3E]">{d.full_name}</p>
-                              <p className="text-[10px] text-gray-400">@{d.username}{d.distributor_profile?.coverage_area ? ` · ${d.distributor_profile.coverage_area}` : ''}</p>
+                              <p className="text-[10px] text-gray-400">@{d.username}{d.distributor_profile?.coverage_area ? ` Â· ${d.distributor_profile.coverage_area}` : ''}</p>
                             </div>
                           ))
                         }
@@ -315,8 +315,8 @@ function CreateOrderModal({
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                             product.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'
                           }`}>{product.type}</span>
-                          <span className="text-xs text-gray-400">₱{Number(product.price).toLocaleString()}</span>
-                          <span className="text-xs text-gray-300">· {product.available_quantity} in stock</span>
+                          <span className="text-xs text-gray-400">â‚±{Number(product.price).toLocaleString()}</span>
+                          <span className="text-xs text-gray-300">Â· {product.available_quantity} in stock</span>
                         </div>
                       </div>
                       <button
@@ -332,7 +332,7 @@ function CreateOrderModal({
             </div>
           </div>
 
-          {/* Right — cart + payment */}
+          {/* Right â€” cart + payment */}
           <div className="w-60 flex flex-col flex-shrink-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0">
               <p className="text-xs font-semibold text-[#0D1B3E]">Order Summary</p>
@@ -346,14 +346,14 @@ function CreateOrderModal({
                     <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">−</button>
+                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">âˆ’</button>
                       <input type="number" min={1} max={c.product.available_quantity} value={c.quantity}
                         onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v)) updateQty(c.product.id, v) }}
                         className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5" />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
                         disabled={c.quantity >= c.product.available_quantity}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0 disabled:opacity-40">+</button>
-                      <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
+                      <span className="ml-auto text-gray-400">â‚±{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
                   </div>
                 ))
@@ -363,7 +363,7 @@ function CreateOrderModal({
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
               <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]">
                 <span>Total</span>
-                <span>₱{total.toLocaleString()}</span>
+                <span>â‚±{total.toLocaleString()}</span>
               </div>
 
               {/* Order type */}
@@ -380,16 +380,16 @@ function CreateOrderModal({
               <div>
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
-                  {/* Cash on pickup — always available */}
+                  {/* Cash on pickup â€” always available */}
                   <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference('') }}
                     className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${
                       paymentMethod === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
                     }`}>
-                    <span className="text-sm">💵</span>
+                    <span className="text-sm">ðŸ’µ</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-[10px] font-medium text-[#0D1B3E]">Cash on Pickup</p>
                     </div>
-                    {paymentMethod === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
+                    {paymentMethod === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">âœ“</span>}
                   </div>
                   {/* Approved payment methods */}
                   {paymentMethods.map((pm) => (
@@ -397,13 +397,13 @@ function CreateOrderModal({
                       className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${
                         paymentMethod === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
                       }`}>
-                      <span className="text-sm">{pm.type === 'gcash' ? '📱' : '🏦'}</span>
+                      <span className="text-sm">{pm.type === 'gcash' ? 'ðŸ“±' : 'ðŸ¦'}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-[10px] font-medium text-[#0D1B3E]">{pm.type === 'gcash' ? 'GCash' : 'Bank Transfer'}</p>
                         {pm.bank_name && <p className="text-[9px] text-gray-400 truncate">{pm.bank_name}</p>}
-                        <p className="text-[9px] text-gray-400 truncate">{pm.account_name} · {pm.account_number}</p>
+                        <p className="text-[9px] text-gray-400 truncate">{pm.account_name} Â· {pm.account_number}</p>
                       </div>
-                      {paymentMethod === pm.type && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
+                      {paymentMethod === pm.type && <span className="text-[#C9A84C] text-xs flex-shrink-0">âœ“</span>}
                     </div>
                   ))}
                 </div>
@@ -589,15 +589,15 @@ export default function ResellerOrdersPage() {
                     <p className="text-[10px] text-gray-400">Ref: {order.payment_reference}</p>
                   )}
                   {order.payment_status === 'paid' ? (
-                    <span className="text-[10px] text-[#1a7a4a] font-medium">✓ Paid</span>
+                    <span className="text-[10px] text-[#1a7a4a] font-medium">âœ“ Paid</span>
                   ) : order.payment_method !== 'cash_on_pickup' ? (
-                    <span className="text-[10px] text-[#9a6f1e]">⏳ Unpaid</span>
+                    <span className="text-[10px] text-[#9a6f1e]">â³ Unpaid</span>
                   ) : null}
                 </div>
 
                 {/* Amount */}
                 <div>
-                  <p className="text-xs font-semibold text-[#0D1B3E]">₱{Number(order.total_amount).toLocaleString()}</p>
+                  <p className="text-xs font-semibold text-[#0D1B3E]">â‚±{Number(order.total_amount).toLocaleString()}</p>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                     order.order_type === 'online' ? 'bg-[#f0f7ff] text-[#2563eb]' : 'bg-[#eef0f8] text-[#0D1B3E]'
                   }`}>{order.order_type}</span>
@@ -647,14 +647,14 @@ export default function ResellerOrdersPage() {
                             item.product.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'
                           }`}>{item.product.type}</span>
                           <span className="text-[#0D1B3E] font-medium">{item.product.name}</span>
-                          <span className="text-gray-400">× {item.quantity}</span>
+                          <span className="text-gray-400">Ã— {item.quantity}</span>
                         </div>
-                        <span className="text-[#0D1B3E] font-medium">₱{Number(item.subtotal).toLocaleString()}</span>
+                        <span className="text-[#0D1B3E] font-medium">â‚±{Number(item.subtotal).toLocaleString()}</span>
                       </div>
                     ))}
                     <div className="flex justify-between text-xs pt-1.5 border-t border-[#0D1B3E]/8 font-semibold">
                       <span className="text-gray-400">Total</span>
-                      <span className="text-[#0D1B3E]">₱{Number(order.total_amount).toLocaleString()}</span>
+                      <span className="text-[#0D1B3E]">â‚±{Number(order.total_amount).toLocaleString()}</span>
                     </div>
                   </div>
                   {order.notes && <p className="text-xs text-gray-400 mt-2 italic">Note: {order.notes}</p>}
@@ -681,7 +681,7 @@ export default function ResellerOrdersPage() {
           onMouseDown={() => setSelectedOrder(null)}>
           <div className="orderDetailsModal bg-[#F7F8FC] rounded-[24px] shadow-2xl border border-white/20 w-full max-w-2xl max-h-[92vh] overflow-hidden"
             onMouseDown={(event) => event.stopPropagation()}>
-            <div className="relative overflow-hidden px-6 py-5 bg-gradient-to-br from-[#0D1B3E] via-[#152C5B] to-[#0D1B3E] flex items-start justify-between">
+            <div className="relative overflow-hidden px-6 py-5 bg-[#010521] flex items-start justify-between">
               <div className="absolute -right-10 -top-14 w-40 h-40 rounded-full bg-[#C9A84C]/15 blur-xl" />
               <div className="relative">
                 <p className="text-[10px] uppercase tracking-[0.22em] text-[#C9A84C] font-semibold mb-1">Order overview</p>
@@ -699,7 +699,7 @@ export default function ResellerOrdersPage() {
               </div>
               <button onClick={() => setSelectedOrder(null)}
                 className="relative w-9 h-9 rounded-xl bg-white/10 text-white/60 hover:text-white hover:bg-white/20 text-lg transition-colors">
-                ×
+                Ã—
               </button>
             </div>
 
@@ -708,7 +708,7 @@ export default function ResellerOrdersPage() {
                 <div className="rounded-2xl bg-white border border-[#0D1B3E]/8 p-4 shadow-sm">
                   <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Supplier</p>
                   <div className="flex items-center gap-2">
-                    <span className="w-8 h-8 rounded-xl bg-[#eef0f8] flex items-center justify-center">🏪</span>
+                    <span className="w-8 h-8 rounded-xl bg-[#eef0f8] flex items-center justify-center">ðŸª</span>
                     <p className="text-sm font-semibold text-[#0D1B3E]">{selectedOrder.seller.full_name}</p>
                   </div>
                   <p className="text-xs text-gray-400">@{selectedOrder.seller.username}</p>
@@ -719,7 +719,7 @@ export default function ResellerOrdersPage() {
                     {PAYMENT_LABEL[selectedOrder.payment_method || 'cash_on_pickup'] || selectedOrder.payment_method}
                   </p>
                   <p className={`text-xs mt-1 ${selectedOrder.payment_status === 'paid' ? 'text-[#1a7a4a]' : 'text-[#9a6f1e]'}`}>
-                    {selectedOrder.payment_status === 'paid' ? '✓ Paid' : 'Pending payment'}
+                    {selectedOrder.payment_status === 'paid' ? 'âœ“ Paid' : 'Pending payment'}
                   </p>
                   {selectedOrder.payment_reference && (
                     <p className="text-xs text-gray-400 mt-1">Reference: {selectedOrder.payment_reference}</p>
@@ -738,23 +738,23 @@ export default function ResellerOrdersPage() {
                   <div key={`${item.product.name}-${index}`}
                     className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F8F9FC] transition-colors">
                     <div className="flex items-center gap-3">
-                      <span className="w-9 h-9 rounded-xl bg-[#F0F2F8] flex items-center justify-center">📦</span>
+                      <span className="w-9 h-9 rounded-xl bg-[#F0F2F8] flex items-center justify-center">ðŸ“¦</span>
                       <div>
                       <p className="text-xs font-medium text-[#0D1B3E]">{item.product.name}</p>
                       <p className="text-[10px] text-gray-400">
-                        ₱{Number(item.unit_price).toLocaleString()} × {item.quantity}
+                        â‚±{Number(item.unit_price).toLocaleString()} Ã— {item.quantity}
                       </p>
                       </div>
                     </div>
                     <p className="text-xs font-semibold text-[#0D1B3E]">
-                      ₱{Number(item.subtotal).toLocaleString()}
+                      â‚±{Number(item.subtotal).toLocaleString()}
                     </p>
                   </div>
                 ))}
                 <div className="flex justify-between items-center px-4 py-4 bg-gradient-to-r from-[#F8F9FC] to-[#fef9ee]">
                   <p className="text-sm font-semibold text-[#0D1B3E]">Total Amount</p>
                   <p className="text-lg font-bold text-[#C9A84C]">
-                    ₱{Number(selectedOrder.total_amount).toLocaleString()}
+                    â‚±{Number(selectedOrder.total_amount).toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -767,12 +767,12 @@ export default function ResellerOrdersPage() {
                       {selectedOrder.status === 'cancelled' ? 'Order cancelled' : 'Track your order progress'}
                     </p>
                   </div>
-                  <span className="text-xl">{selectedOrder.status === 'delivered' ? '🎉' : selectedOrder.status === 'cancelled' ? '✕' : '🚚'}</span>
+                  <span className="text-xl">{selectedOrder.status === 'delivered' ? 'ðŸŽ‰' : selectedOrder.status === 'cancelled' ? 'âœ•' : 'ðŸšš'}</span>
                 </div>
 
                 {selectedOrder.status === 'cancelled' ? (
                   <div className="rounded-xl bg-[#fdecea] border border-[#e05252]/20 px-4 py-3 flex items-center gap-3">
-                    <span className="w-9 h-9 rounded-full bg-[#e05252] text-white flex items-center justify-center font-bold">×</span>
+                    <span className="w-9 h-9 rounded-full bg-[#e05252] text-white flex items-center justify-center font-bold">Ã—</span>
                     <div>
                       <p className="text-xs font-semibold text-[#a03030]">This order was cancelled</p>
                       <p className="text-[10px] text-[#a03030]/70 mt-0.5">No further processing or delivery will occur.</p>
@@ -794,10 +794,10 @@ export default function ResellerOrdersPage() {
                       }}
                     />
                     {([
-                      ['pending', 'Order Placed', '✓'],
-                      ['processing', 'Processing', '📦'],
-                      ['ready_for_pickup', 'Ready for Pickup', '🏪'],
-                      ['delivered', 'Delivered', '✓'],
+                      ['pending', 'Order Placed', 'âœ“'],
+                      ['processing', 'Processing', 'ðŸ“¦'],
+                      ['ready_for_pickup', 'Ready for Pickup', 'ðŸª'],
+                      ['delivered', 'Delivered', 'âœ“'],
                     ] as const).map(([step, label, icon]) => {
                       const sequence = ['pending', 'processing', 'ready_for_pickup', 'delivered']
                       const reached = sequence.indexOf(step) <= sequence.indexOf(selectedOrder.status)
@@ -828,7 +828,7 @@ export default function ResellerOrdersPage() {
               )}
 
               <button onClick={() => setSelectedOrder(null)}
-                className="w-full bg-gradient-to-r from-[#0D1B3E] to-[#193464] text-white text-sm font-medium py-3 rounded-xl hover:shadow-lg hover:shadow-[#0D1B3E]/15 transition-all">
+                className="w-full bg-[#010521] text-white hover:bg-[#0D1B3E] text-sm font-medium py-3 rounded-xl hover:shadow-lg hover:shadow-[#0D1B3E]/15 transition-all">
                 Close
               </button>
             </div>

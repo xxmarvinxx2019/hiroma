@@ -100,7 +100,7 @@ function BarChart({ data }: { data: DailySale[] }) {
           const h = Math.max(4, (d.revenue / max) * 120)
           return (
             <div key={d.date} className="flex flex-col items-center gap-1 group relative">
-              <div className="absolute bottom-8 bg-[#0D1B3E] text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
+              <div className="absolute bottom-8 bg-[#010521] text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
                 {new Date(d.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}<br />
                 {fmt(d.revenue)}<br />
                 {d.orders} orders
@@ -296,7 +296,7 @@ export default function AdminReportsPage() {
             <div className="flex gap-1">
               {[7, 14, 30, 60, 90].map((d) => (
                 <button key={d} onClick={() => setDays(d)}
-                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${days === d && !useRange ? 'bg-[#0D1B3E] text-white' : 'bg-white border border-[#0D1B3E]/10 text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${days === d && !useRange ? 'bg-[#010521] text-white' : 'bg-white border border-[#0D1B3E]/10 text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {d}d
                 </button>
               ))}
@@ -318,7 +318,7 @@ export default function AdminReportsPage() {
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
               <button onClick={applyRange}
-                className="bg-[#0D1B3E] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#162850]">
+                className="bg-[#010521] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#162850]">
                 Apply
               </button>
             </div>
@@ -337,7 +337,7 @@ export default function AdminReportsPage() {
           { key: 'mlm',      label: '💰 MLM & Commissions' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2 rounded-lg text-xs transition-colors ${activeTab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`px-4 py-2 rounded-lg text-xs transition-colors ${activeTab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
           </button>
         ))}
@@ -372,7 +372,7 @@ export default function AdminReportsPage() {
               </div>
               <div className="flex items-center gap-2 bg-white border border-[#0D1B3E]/8 rounded-xl p-1">
                 <button onClick={() => setShowAllTime(false)}
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${!showAllTime ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${!showAllTime ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
                   Period
                 </button>
                 <button onClick={() => setShowAllTime(true)}

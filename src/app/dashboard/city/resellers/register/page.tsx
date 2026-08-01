@@ -1,21 +1,11 @@
 'use client'
 
-function generateUsername(fullName: string): string {
-  const parts = fullName.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0].replace(/[^a-z0-9]/g, '')
-  const firstName = parts[0].replace(/[^a-z]/g, '')
-  const initials  = parts.slice(1).map((p) => p.replace(/[^a-z]/g, '')[0] || '').join('')
-  return (firstName + initials).replace(/[^a-z0-9]/g, '')
-}
-
-function isValidUsername(username: string): boolean {
-  return /^[a-z][a-z0-9]*$/.test(username)
-}
-
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from 'next/navigation'
+import { buildPersonName, hasCompletePersonName, normalizePersonName } from '@/app/lib/nameFormat'
+import { generateTemporaryPassword } from '@/app/lib/temporaryPassword'
+import LegalNameFields from '@/app/components/registration/LegalNameFields'
 
 interface VerifiedPin {
   id: string
@@ -70,7 +60,7 @@ function CityRegisterResellerPageInner() {
     region_code: '', region_name: '',
     province_code: '', province_name: '',
     city_muni_code: '', city_muni_name: '',
-    street: '',
+    street: '', zip_code: '',
   })
 
   // Step 3 — Referral & slot
@@ -87,11 +77,13 @@ function CityRegisterResellerPageInner() {
   // Step 4 — Details
   const [form, setForm] = useState({
     full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '',
+    first_name: '', middle_name: '', last_name: '', suffix: '', no_middle_name: false,
     birthday: '', birthplace: '',
   })
-  const [nameCapInfo, setNameCapInfo]             = useState<{ count: number; max: number; remaining: number } | null>(null)
-  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
-  const [usernameEdited, setUsernameEdited]       = useState(false)
+  const [nameCapInfo, setNameCapInfo] = useState<{
+    count: number; max: number; remaining: number; remaining_after_registration?: number
+    account_number?: number; first_account?: boolean; proposed_username?: string; ready?: boolean; error?: string
+  } | null>(null)
   const [formLoading, setFormLoading]             = useState(false)
   const [agreedToTerms, setAgreedToTerms]         = useState(false)
   const [formError, setFormError]                 = useState('')
@@ -99,13 +91,6 @@ function CityRegisterResellerPageInner() {
   const [smsPromptOpen, setSmsPromptOpen]         = useState(false)
   const [smsSending, setSmsSending]               = useState(false)
   const [smsStatus, setSmsStatus]                 = useState<{ type: 'success' | 'error' | 'skipped'; message: string } | null>(null)
-
-  // Auto-generate username
-  useEffect(() => {
-    if (usernameEdited || !form.full_name.trim()) return
-    setForm((f) => ({ ...f, username: generateUsername(form.full_name) }))
-    setUsernameAvailable(null)
-  }, [form.full_name, usernameEdited])
 
   // Load regions
   useEffect(() => {
@@ -171,19 +156,19 @@ function CityRegisterResellerPageInner() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const fullAddress = [location.street, location.city_muni_name, location.province_name, location.region_name]
+  const fullAddress = [location.street, location.city_muni_name, location.province_name, location.region_name, location.zip_code]
     .filter(Boolean).join(', ')
 
   const resetForm = useCallback(() => {
     setStep(1)
     setPinInput(''); setPinData(null); setPinError('')
-    setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '' })
+    setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '', zip_code: '' })
     setProvinces([]); setCityMunis([])
     setReferralInput(''); setReferralData(null); setReferralError('')
     setAvailableSlots([]); setSlotSearch(''); setSelectedSlot(null)
-    setForm({ full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '', birthday: '', birthplace: '' })
+    setForm({ full_name: '', first_name: '', middle_name: '', last_name: '', suffix: '', no_middle_name: false, username: '', email: '', mobile: '', password: '', confirmPassword: '', birthday: '', birthplace: '' })
     setAgreedToTerms(false)
-    setNameCapInfo(null); setUsernameAvailable(null); setUsernameEdited(false)
+    setNameCapInfo(null)
     setFormError('')
     setSmsPromptOpen(false); setSmsSending(false); setSmsStatus(null)
   }, [])
@@ -230,64 +215,94 @@ function CityRegisterResellerPageInner() {
     setReferralLoading(true); setReferralError('')
     setReferralData(null); setAvailableSlots([]); setSlotSearch(''); setSelectedSlot(null)
 
-    const res = await fetch('/api/city/resellers/verify-referral', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: referralInput.trim().toLowerCase() }),
-    })
-    const data = await res.json()
-    if (!res.ok) { setReferralError(data.error || 'Referral not found.'); setReferralLoading(false); return }
-    setReferralData(data.reseller)
-
     setSlotsLoading(true)
-    const slotsRes = await fetch(`/api/city/resellers/available-slots?referrer=${referralInput.trim().toLowerCase()}`)
-    const slotsData = await slotsRes.json()
-    setAvailableSlots(slotsData.slots || [])
-    setSlotsLoading(false)
-    setReferralLoading(false)
+    try {
+      const res = await fetch('/api/city/resellers/verify-referral', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: referralInput.trim().toLowerCase() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setReferralError(data.error || 'Referral not found.'); return }
+      setReferralData(data.reseller)
+      setAvailableSlots(data.slots || [])
+    } catch {
+      setReferralError('Unable to verify referral. Please try again.')
+    } finally {
+      setSlotsLoading(false)
+      setReferralLoading(false)
+    }
   }
 
-  const checkNameCap = async (name: string) => {
-    if (!name.trim() || name.trim().length < 3) return
-    const res = await fetch(`/api/city/resellers/check-name?name=${encodeURIComponent(name.trim())}`)
-    setNameCapInfo(await res.json())
-  }
+  const checkNameCap = async (
+    name: string,
+    birthday = form.birthday,
+    birthplace = form.birthplace,
+  ) => {
+    const normalizedName = normalizePersonName(name)
+    if (!normalizedName || !birthday || !birthplace.trim()) {
+      setNameCapInfo(null)
+      setForm((current) => ({ ...current, full_name: normalizedName, username: '' }))
+      return
+    }
 
-  const checkUsername = async (uname: string) => {
-    if (!uname.trim() || uname.trim().length < 3) return
-    const res = await fetch(`/api/city/resellers/check-username?username=${encodeURIComponent(uname.trim().toLowerCase())}`)
-    setUsernameAvailable((await res.json()).available)
+    const query = new URLSearchParams({ name: normalizedName, birthday, birthplace: birthplace.trim() })
+    const res = await fetch(`/api/city/resellers/check-name?${query.toString()}`)
+    const data = await res.json()
+    if (!res.ok) {
+      setNameCapInfo(data)
+      setForm((current) => ({ ...current, full_name: normalizedName, username: '' }))
+      return
+    }
+    setNameCapInfo(data)
+    const temporaryPassword = generateTemporaryPassword(normalizedName)
+    setForm((current) => ({
+      ...current,
+      full_name: normalizedName,
+      username: data.proposed_username || '',
+      password: temporaryPassword,
+      confirmPassword: temporaryPassword,
+    }))
   }
-
   // Step 4 — Register
   const handleRegister = async () => {
     if (!form.full_name || !form.username || !form.mobile || !form.email || !form.password) {
       setFormError('Please fill in all required fields.'); return
     }
-    if (!isValidUsername(form.username.toLowerCase())) {
-      setFormError('Username must start with a letter and contain only letters and numbers.'); return
-    }
-    const expectedBase = generateUsername(form.full_name)
-    if (form.username.toLowerCase().replace(/[0-9]+$/, '') !== expectedBase) {
-      setFormError(`Username must follow the format: "${expectedBase}" or "${expectedBase}1", etc.`); return
-    }
     if (form.password !== form.confirmPassword) { setFormError('Passwords do not match.'); return }
+    if (!hasCompletePersonName(form.full_name)) {
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      setFormError('First name and last name are required.'); return
+    }
+    if (!form.no_middle_name && !form.middle_name.trim()) {
+      setFormError('Enter the legal middle name or select "This member legally has no middle name."'); return
+    }
+      setFormError('Enter the complete legal name: first name, middle name, and last name.'); return
+    }
     if (form.password.length < 6) { setFormError('Password must be at least 6 characters.'); return }
     if (nameCapInfo && nameCapInfo.remaining === 0) { setFormError(`Maximum accounts reached for "${form.full_name}".`); return }
-    if (usernameAvailable === false) { setFormError('Username is already taken.'); return }
     if (!form.birthday) { setFormError('Please enter date of birth.'); return }
+    if (!form.username) { setFormError('Complete the name, date of birth, and place of birth so the system can generate a username.'); return }
     if (!form.birthplace) { setFormError('Please enter place of birth.'); return }
     if (!agreedToTerms) { setFormError('You must agree to the Terms and Conditions before registering.'); return }
     if (!selectedSlot) { setFormError('No placement slot selected.'); return }
     if (!location.city_muni_name) { setFormError('Please select a complete location.'); return }
+    if (!location.street.trim()) { setFormError('Street / Barangay is required.'); return }
+    if (!/^\d{4}$/.test(location.zip_code)) { setFormError('Please enter a valid 4-digit ZIP code.'); return }
 
     setFormLoading(true); setFormError('')
 
     const res = await fetch('/api/city/resellers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        full_name: form.full_name, username: form.username.toLowerCase(),
+        full_name: normalizePersonName(form.full_name), username: form.username.toLowerCase(),
         email: form.email, mobile: form.mobile, password: form.password,
+        first_name: form.first_name,
+        middle_name: form.middle_name,
+        last_name: form.last_name,
+        suffix: form.suffix,
+        no_middle_name: form.no_middle_name,
         address: fullAddress,
+        zip_code: location.zip_code,
         birthday: form.birthday, birthplace: form.birthplace,
         pin_id: pinData?.id,
         referrer_username: referralData?.username,
@@ -300,7 +315,7 @@ function CityRegisterResellerPageInner() {
     if (!res.ok) {
       setFormError(data.error || 'Registration failed.')
     } else {
-      setSuccessData({ id: data.reseller.id, full_name: form.full_name, username: form.username.toLowerCase(), package: data.package || null })
+      setSuccessData({ id: data.reseller.id, full_name: data.reseller.full_name, username: form.username.toLowerCase(), package: data.package || null })
       setSmsStatus(null)
       setSmsPromptOpen(true)
     }
@@ -346,7 +361,7 @@ function CityRegisterResellerPageInner() {
               {step > i + 1 ? '✓' : i + 1}
             </div>
             <span className={`text-xs font-medium hidden sm:block ${step === i + 1 ? 'text-[#0D1B3E]' : 'text-gray-400'}`}>{label}</span>
-            {i < 3 && <div className="flex-1 h-px bg-[#0D1B3E]/10" />}
+            {i < 3 && <div className="flex-1 h-px bg-[#010521]/10" />}
           </div>
         ))}
       </div>
@@ -431,12 +446,21 @@ function CityRegisterResellerPageInner() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Street / Barangay <span className="text-gray-300">(optional)</span></label>
-              <input value={location.street}
-                onChange={(e) => setLocation((l) => ({ ...l, street: e.target.value }))}
-                placeholder="e.g. Brgy. San Jose, Rizal St."
-                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Street / Barangay <span className="text-[#C9A84C]">*</span></label>
+                <input value={location.street} required
+                  onChange={(e) => setLocation((l) => ({ ...l, street: e.target.value }))}
+                  placeholder="e.g. Brgy. San Jose, Rizal St."
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">ZIP Code <span className="text-[#C9A84C]">*</span></label>
+                <input value={location.zip_code} required inputMode="numeric" maxLength={4}
+                  onChange={(e) => setLocation((l) => ({ ...l, zip_code: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  placeholder="e.g. 6529"
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              </div>
             </div>
 
             {location.city_muni_name && (
@@ -448,8 +472,8 @@ function CityRegisterResellerPageInner() {
 
             <div className="flex gap-2">
               <button onClick={() => setStep(1)} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0]">← Back</button>
-              <button onClick={() => { if (!location.city_muni_name) return; setStep(3) }}
-                disabled={!location.city_muni_name || (!location.province_code && provinces.length > 0)}
+              <button onClick={() => { if (!location.city_muni_name || !location.street.trim() || !/^\d{4}$/.test(location.zip_code)) return; setStep(3) }}
+                disabled={!location.city_muni_name || !location.street.trim() || !/^\d{4}$/.test(location.zip_code) || (!location.province_code && provinces.length > 0)}
                 className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] disabled:opacity-60">
                 Continue →
               </button>
@@ -474,7 +498,7 @@ function CityRegisterResellerPageInner() {
                   placeholder="Enter referrer's username"
                   className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
                 <button onClick={verifyReferral} disabled={referralLoading || !referralInput.trim()}
-                  className="bg-[#0D1B3E] text-white text-xs font-medium rounded-lg px-4 hover:bg-[#1A2F5E] disabled:opacity-60">
+                  className="bg-[#010521] text-white text-xs font-medium rounded-lg px-4 hover:bg-[#1A2F5E] disabled:opacity-60">
                   {referralLoading ? '...' : 'Verify'}
                 </button>
               </div>
@@ -517,7 +541,7 @@ function CityRegisterResellerPageInner() {
                               <div className="flex gap-1.5">
                                 {slot.left_open && (
                                   <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'left', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Left`); setSlotDropdownOpen(false) }}
-                                    className="text-[10px] bg-[#0D1B3E] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]">← Left</button>
+                                    className="text-[10px] bg-[#010521] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]">← Left</button>
                                 )}
                                 {slot.right_open && (
                                   <button onClick={() => { setSelectedSlot({ parent_node_id: slot.node_id, position: 'right', parent_username: slot.username }); setSlotSearch(`${slot.full_name} (@${slot.username}) — Right`); setSlotDropdownOpen(false) }}
@@ -563,25 +587,41 @@ function CityRegisterResellerPageInner() {
             </div>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Full name <span className="text-[#C9A84C]">*</span></label>
-              <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-                onBlur={(e) => checkNameCap(e.target.value)} placeholder="Juan dela Cruz"
-                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
-              {nameCapInfo && (
-                <p className={`text-xs mt-1 ${nameCapInfo.remaining === 0 ? 'text-red-500' : nameCapInfo.remaining <= 2 ? 'text-[#9a6f1e]' : 'text-gray-400'}`}>
-                  {nameCapInfo.remaining === 0 ? `⛔ Max accounts reached for this name` : `${nameCapInfo.remaining} of ${nameCapInfo.max} slots remaining`}
+              <LegalNameFields
+                value={form}
+                onChange={(legalName) => {
+                  const fullName = buildPersonName({
+                    firstName: legalName.first_name,
+                    middleName: legalName.no_middle_name ? '' : legalName.middle_name,
+                    lastName: legalName.last_name,
+                    suffix: legalName.suffix,
+                  })
+                  setForm((current) => ({
+                    ...current,
+                    ...legalName,
+                    full_name: fullName,
+                    username: '',
+                    password: '',
+                    confirmPassword: '',
+                  }))
+                  setNameCapInfo(null)
+                }}
+                onBlur={() => checkNameCap(form.full_name, form.birthday, form.birthplace)}
+              />
+              {nameCapInfo?.ready && (
+                <p className={`text-xs mt-1 ${nameCapInfo.remaining_after_registration === 0 ? 'text-[#9a6f1e]' : 'text-gray-500'}`}>
+                  {nameCapInfo.first_account ? 'First account' : 'Existing member'} · Account {nameCapInfo.account_number} of {nameCapInfo.max} · {nameCapInfo.remaining_after_registration} slots remaining after registration
                 </p>
               )}
+              {nameCapInfo?.error && <p className="text-xs text-red-500 mt-1">{nameCapInfo.error}</p>}
             </div>
 
             <div>
               <label className="block text-xs text-gray-400 mb-1">Username <span className="text-[#C9A84C]">*</span></label>
-              <input value={form.username}
-                onChange={(e) => { setForm({ ...form, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }); setUsernameAvailable(null); setUsernameEdited(true) }}
-                onBlur={(e) => checkUsername(e.target.value)} placeholder="juandc"
-                className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${usernameAvailable === true ? 'border-[#1a7a4a] bg-[#f0faf5]' : usernameAvailable === false ? 'border-red-400 bg-red-50' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`} />
-              {usernameAvailable === true  && <p className="text-xs text-[#1a7a4a] mt-1">✓ Available</p>}
-              {usernameAvailable === false && <p className="text-xs text-red-500 mt-1">✕ Already taken</p>}
+              <input value={form.username} readOnly
+                placeholder="Generated after entering birth details"
+                className="w-full bg-gray-100 border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-medium text-[#0D1B3E] outline-none cursor-not-allowed" />
+              <p className="text-[11px] text-gray-400 mt-1">Automatically generated and cannot be edited.</p>
             </div>
 
             <div>
@@ -602,13 +642,13 @@ function CityRegisterResellerPageInner() {
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Date of Birth <span className="text-[#C9A84C]">*</span></label>
                 <input type="date" value={form.birthday}
-                  onChange={(e) => setForm({ ...form, birthday: e.target.value })}
+                  onChange={(e) => { setForm({ ...form, birthday: e.target.value, username: '' }); setNameCapInfo(null) }} onBlur={(e) => checkNameCap(form.full_name, e.target.value, form.birthplace)}
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Place of Birth <span className="text-[#C9A84C]">*</span></label>
                 <input type="text" value={form.birthplace}
-                  onChange={(e) => setForm({ ...form, birthplace: e.target.value })}
+                  onChange={(e) => { setForm({ ...form, birthplace: e.target.value, username: '' }); setNameCapInfo(null) }} onBlur={(e) => checkNameCap(form.full_name, form.birthday, e.target.value)}
                   placeholder="e.g. Cebu City"
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
               </div>
@@ -616,21 +656,19 @@ function CityRegisterResellerPageInner() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Password <span className="text-[#C9A84C]">*</span></label>
-                <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="Min. 6 characters"
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+                <label className="block text-xs text-gray-400 mb-1">Temporary password <span className="text-[#C9A84C]">*</span></label>
+                <input type="text" value={form.password} readOnly placeholder="Generated after identity details"
+                  className="w-full bg-gray-100 border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-medium text-[#0D1B3E] outline-none cursor-not-allowed" />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Confirm <span className="text-[#C9A84C]">*</span></label>
-                <input type="password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
-                  placeholder="Re-enter password"
+                <label className="block text-xs text-gray-400 mb-1">Confirm temporary password <span className="text-[#C9A84C]">*</span></label>
+                <input type="text" value={form.confirmPassword} readOnly placeholder="Generated automatically"
                   className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`} />
-                {form.confirmPassword && form.password !== form.confirmPassword && <p className="text-xs text-red-500 mt-1">Passwords do not match</p>}
               </div>
             </div>
 
             {/* Terms & Conditions */}
+            <p className="text-[11px] text-gray-400 -mt-2">Generated from the member's name initials plus six random digits. It is included in the welcome SMS.</p>
             <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg p-3">
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input type="checkbox" checked={agreedToTerms}
@@ -649,7 +687,7 @@ function CityRegisterResellerPageInner() {
             <div className="flex gap-2 pt-1">
               <button onClick={() => { setStep(3); setFormError('') }} className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0]">← Back</button>
               <button onClick={handleRegister}
-                disabled={formLoading || nameCapInfo?.remaining === 0 || usernameAvailable === false || (form.confirmPassword.length > 0 && form.password !== form.confirmPassword)}
+                disabled={formLoading || !form.username || (form.confirmPassword.length > 0 && form.password !== form.confirmPassword)}
                 className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] disabled:opacity-60">
                 {formLoading ? 'Registering...' : 'Register Reseller ✓'}
               </button>
@@ -692,7 +730,7 @@ function CityRegisterResellerPageInner() {
       {successData && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center px-4 overflow-y-auto py-6">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden my-auto">
-            <div className="bg-[#0D1B3E] px-6 py-6 text-center relative">
+            <div className="bg-[#010521] px-6 py-6 text-center relative">
               <div className="absolute inset-0 pointer-events-none"
                 style={{ background: 'radial-gradient(ellipse 60% 60% at 50% 100%, rgba(201,168,76,0.12) 0%, transparent 70%)' }} />
               <div className="w-16 h-16 bg-[#C9A84C]/20 border-2 border-[#C9A84C]/40 rounded-full flex items-center justify-center mx-auto mb-3 relative">

@@ -172,11 +172,11 @@ export default function ProvincialInventoryPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         <button onClick={() => setTab('inventory')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'inventory' ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'inventory' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📦 Stock Levels
         </button>
         <button onClick={() => setTab('sales')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'sales' ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'sales' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📊 Sales Movement
         </button>
       </div>
@@ -197,7 +197,7 @@ export default function ProvincialInventoryPage() {
             <div className="flex gap-1">
               {(['all', 'physical', 'digital'] as const).map(f => (
                 <button key={f} onClick={() => setTypeFilter(f)}
-                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${typeFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${typeFilter === f ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f}
                 </button>
               ))}
@@ -210,7 +210,7 @@ export default function ProvincialInventoryPage() {
                 { key: 'ok',  label: '✅ OK'  },
               ].map(f => (
                 <button key={f.key} onClick={() => setStockFilter(f.key as any)}
-                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${stockFilter === f.key ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${stockFilter === f.key ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f.label}
                 </button>
               ))}

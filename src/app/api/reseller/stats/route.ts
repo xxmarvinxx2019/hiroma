@@ -72,28 +72,37 @@ export async function GET() {
     ])
 
     const profileBase       = results[0] as any
-    // Fetch rank/total_pu via raw SQL (columns may not exist yet)
     let rankData = { rank: 'default', total_pu: 0 }
-    if (profileBase) {
-      try {
-        const rows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
+    let referralCap = { enabled: true, cap: 10 }
+    let rankOptions: Awaited<ReturnType<typeof getRanksForPackage>> = []
+    let activePeriod: Awaited<ReturnType<typeof getActivePeriod>> = null
+
+    if (profileBase?.package_id) {
+      const [rankRows, capRows, resolvedRanks, resolvedPeriod] = await Promise.all([
+        prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
           SELECT COALESCE(rank, 'default') as rank, COALESCE(total_pu, 0) as total_pu
           FROM reseller_profiles WHERE user_id::text = ${user.id}
-        `
-        if (rows[0]) rankData = { rank: rows[0].rank, total_pu: Number(rows[0].total_pu) }
-      } catch { /* columns not migrated yet */ }
-    }
-    const profile = profileBase ? { ...profileBase, ...rankData } : null
-    let referralCap = { enabled: true, cap: 10 }
-    if (profile?.package_id) {
-      const [row] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+        `.catch(() => []),
+        prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
         SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
                COALESCE(daily_referral_cap, 10)::int AS cap
         FROM packages
-        WHERE id = ${profile.package_id}
-      `
-      if (row) referralCap = { enabled: Boolean(row.enabled), cap: Number(row.cap) || 10 }
+        WHERE id = ${profileBase.package_id}
+        `,
+        getRanksForPackage(profileBase.package_id),
+        getActivePeriod(profileBase.package_id),
+      ])
+
+      if (rankRows[0]) {
+        rankData = { rank: rankRows[0].rank, total_pu: Number(rankRows[0].total_pu) }
+      }
+      if (capRows[0]) {
+        referralCap = { enabled: Boolean(capRows[0].enabled), cap: Number(capRows[0].cap) || 10 }
+      }
+      rankOptions = resolvedRanks
+      activePeriod = resolvedPeriod
     }
+    const profile = profileBase ? { ...profileBase, ...rankData } : null
     const wallet            = results[1] as any
     const treeNode          = results[2] as any
     const commissions       = (results[3] || []) as any[]
@@ -155,8 +164,8 @@ export async function GET() {
       rank: {
         current:       profile?.rank       || 'default',
         total_pu:      profile?.total_pu   || 0,
-        ranks:         profile?.package_id ? await getRanksForPackage(profile.package_id) : [],
-        active_period: profile?.package_id ? await getActivePeriod(profile.package_id)   : null,
+        ranks:         rankOptions,
+        active_period: activePeriod,
       },
       commission_summary: commissionSummary,
       recent_commissions: recentCommissions,

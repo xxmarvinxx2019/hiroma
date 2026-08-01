@@ -252,7 +252,7 @@ export default function PackagesPage() {
           {packages.map((pkg) => (
             <div key={pkg.id} className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden hover:shadow-md transition-shadow">
               {/* Card Header */}
-              <div className="bg-[#0D1B3E] px-4 py-3 flex items-center justify-between">
+              <div className="bg-[#010521] px-4 py-3 flex items-center justify-between">
                 <div>
                   <h3 className="text-white font-semibold text-sm">{pkg.name}</h3>
                   <p className="text-[#C9A84C] text-xs mt-0.5">
@@ -339,7 +339,7 @@ export default function PackagesPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+            <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">
                 {editPkg ? 'Edit package' : 'Create new package'}
               </h2>

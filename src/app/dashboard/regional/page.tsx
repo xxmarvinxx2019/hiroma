@@ -91,7 +91,7 @@ function RankedCard({ title, items, valueKey, nameKey, subKey, subKey2, href }: 
             style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#9ca3af' : i === 2 ? '#cd7f32' : '#f1f5f9', color: i < 3 ? 'white' : '#9ca3af' }}>
             {i + 1}
           </div>
-          <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             {item[nameKey].charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
@@ -158,7 +158,7 @@ export default function RegionalDashboardPage() {
             </div>
           )}
           <Link href="/dashboard/regional/orders"
-            className="bg-[#0D1B3E] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors flex items-center justify-center">
+            className="bg-[#010521] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors flex items-center justify-center">
             Place Order
           </Link>
         </div>
@@ -174,7 +174,7 @@ export default function RegionalDashboardPage() {
           { key: 'inventory', label: '🏭 Inventory' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key as Tab)}
-            className={`text-xs px-3 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`text-xs px-3 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
           </button>
         ))}
@@ -213,7 +213,7 @@ export default function RegionalDashboardPage() {
                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
                       <div className="w-full rounded-t-md" style={{ height: h, background: i === stats.monthlyRevenue.length - 1 ? '#0D1B3E' : '#bfdbfe' }} />
                       <p className="text-[9px] text-gray-400">{m.month}</p>
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0D1B3E] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 z-10">
+                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#010521] text-white text-[8px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 z-10">
                         {fmt(m.revenue)}
                       </div>
                     </div>
@@ -352,7 +352,7 @@ export default function RegionalDashboardPage() {
                 <div key={r.id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc]">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
                     style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#9ca3af' : i === 2 ? '#cd7f32' : '#f1f5f9', color: i < 3 ? 'white' : '#9ca3af' }}>{i+1}</div>
-                  <div className="w-7 h-7 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                  <div className="w-7 h-7 rounded-full bg-[#010521] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">

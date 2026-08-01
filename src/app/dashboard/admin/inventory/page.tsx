@@ -186,7 +186,7 @@ function AddProductionModal({
                       </div>
                     </div>
                     <button onClick={() => addToCart(product)}
-                      className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${inCart ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#0D1B3E] text-white hover:bg-[#162850]'}`}>
+                      className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${inCart ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#010521] text-white hover:bg-[#162850]'}`}>
                       {inCart ? `✓ ${inCart.quantity}` : '+ Add'}
                     </button>
                   </div>
@@ -232,7 +232,7 @@ function AddProductionModal({
               {error   && <p className="text-xs text-[#a03030]">{error}</p>}
               {success && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-2 py-1.5 rounded-lg">{success}</p>}
               <button onClick={handleSubmit} disabled={submitting || cart.length === 0}
-                className="w-full bg-[#0D1B3E] text-white text-xs py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50 font-medium">
+                className="w-full bg-[#010521] text-white text-xs py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50 font-medium">
                 {submitting ? 'Adding...' : 'Add to My Stock'}
               </button>
             </div>
@@ -391,7 +391,7 @@ function AssignStockModal({
                     <div className="flex gap-1 mt-1.5 flex-wrap">
                       {(['all', 'regional', 'provincial', 'city', 'reseller'] as const).map((r) => (
                         <button key={r} onClick={() => { setRecipientRole(r); setRecipientPage(1) }}
-                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors capitalize ${recipientRole === r ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
+                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors capitalize ${recipientRole === r ? 'bg-[#010521] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
                           {r}
                         </button>
                       ))}
@@ -420,10 +420,10 @@ function AssignStockModal({
                         <span>{recipientMeta.total} results</span>
                         <div className="flex gap-1 items-center">
                           <button disabled={recipientPage === 1} onClick={() => setRecipientPage(p => p - 1)}
-                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 flex items-center justify-center">‹</button>
+                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#010521] hover:text-white disabled:opacity-30 flex items-center justify-center">‹</button>
                           <span>{recipientPage}/{recipientMeta.totalPages}</span>
                           <button disabled={recipientPage === recipientMeta.totalPages} onClick={() => setRecipientPage(p => p + 1)}
-                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#0D1B3E] hover:text-white disabled:opacity-30 flex items-center justify-center">›</button>
+                            className="w-5 h-5 rounded bg-[#F0F2F8] hover:bg-[#010521] hover:text-white disabled:opacity-30 flex items-center justify-center">›</button>
                         </div>
                       </div>
                     )}
@@ -461,7 +461,7 @@ function AssignStockModal({
                         className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
                           inCart
                             ? 'bg-[#e8f7ef] text-[#1a7a4a]'
-                            : 'bg-[#0D1B3E] text-white hover:bg-[#162850]'
+                            : 'bg-[#010521] text-white hover:bg-[#162850]'
                         }`}>
                         {inCart ? `✓ ${inCart.quantity}` : '+ Add'}
                       </button>
@@ -621,7 +621,7 @@ export default function AdminInventoryPage() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowProduction(true)}
-            className="bg-[#0D1B3E] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
+            className="bg-[#010521] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
             + Add Production
           </button>
           <button onClick={() => setShowAssign(true)}
@@ -658,7 +658,7 @@ export default function AdminInventoryPage() {
           { key: 'distributed', label: '📋 Distributor Inventory' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
           </button>
         ))}
@@ -762,7 +762,7 @@ export default function AdminInventoryPage() {
             <div className="flex gap-1">
               {(['all', 'physical', 'digital'] as const).map((f) => (
                 <button key={f} onClick={() => setTypeFilter(f)}
-                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${typeFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${typeFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f}
                 </button>
               ))}
@@ -854,7 +854,7 @@ export default function AdminInventoryPage() {
                         <input type="number" value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)}
                           className="w-14 bg-[#F0F2F8] border border-[#C9A84C] rounded px-2 py-1 text-xs outline-none" />
                         <button onClick={() => handleSaveThreshold(item.id)} disabled={saving}
-                          className="text-xs text-white bg-[#0D1B3E] px-2 py-1 rounded disabled:opacity-50">
+                          className="text-xs text-white bg-[#010521] px-2 py-1 rounded disabled:opacity-50">
                           {saving ? '...' : 'Save'}
                         </button>
                       </div>

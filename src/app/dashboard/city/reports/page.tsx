@@ -230,7 +230,7 @@ useEffect(() => { loadReport() }, [loadReport])
           </div>
 
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden mb-6">
-            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 bg-gradient-to-r from-[#0D1B3E] to-[#162b5b]">
+            <div className="px-5 py-4 border-b border-[#0D1B3E]/8 bg-[#010521]">
               <h2 className="text-sm font-bold text-white">Overall Liquidation Breakdown</h2>
               <p className="text-[11px] text-white/65 mt-1">
                 Complete reconciliation of sales, registration activity, costs, collections, and final net profit.

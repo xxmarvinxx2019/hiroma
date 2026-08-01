@@ -7,7 +7,7 @@ import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// ── Generate unique PIN code ──
+// â”€â”€ Generate unique PIN code â”€â”€
 function calculateUpgradeSnapshot(products: Array<{ quantity: number; product: { price: unknown; reseller_price: unknown; city_price: unknown; cost_price: unknown } }>) {
   return products.reduce((total, item) => {
     const srp = Number(item.product.price || 0)
@@ -27,7 +27,7 @@ function generatePinCode(packageName: string): string {
   return `${prefix}-${year}-${tier}-${random}`
 }
 
-// ── GET all PINs with pagination, search, status filter ──
+// â”€â”€ GET all PINs with pagination, search, status filter â”€â”€
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const status        = searchParams.get('status')        || 'all'
+    const status        = searchParams.get('status')        || 'unused'
     const search        = searchParams.get('search')        || ''
     const page          = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize      = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
@@ -44,25 +44,36 @@ export async function GET(req: NextRequest) {
     const dateFrom      = searchParams.get('from')          || ''
     const dateTo        = searchParams.get('to')            || ''
 
+    const normalizedSearch = search.trim().toLowerCase()
+    const searchedStatus = Object.values(PinStatus).find((value) => value === normalizedSearch)
+    const searchDateMatch = normalizedSearch.match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\/(\d{1,2})\/(\d{4}))$/)
+    const searchDate = searchDateMatch ? new Date(Number(searchDateMatch[1] || searchDateMatch[6]), Number(searchDateMatch[2] || searchDateMatch[4]) - 1, Number(searchDateMatch[3] || searchDateMatch[5])) : null
+    const validSearchDate = searchDate && !Number.isNaN(searchDate.getTime()) ? searchDate : null
+
     if (status !== 'all' && !Object.values(PinStatus).includes(status as PinStatus)) {
       return NextResponse.json({ error: 'Invalid PIN status.' }, { status: 400 })
     }
 
-    const fromDate = dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0, 0, 0, 0))
-    const toDate   = dateTo   ? new Date(dateTo + 'T23:59:59') : new Date(new Date().setHours(23, 59, 59, 999))
+    const fromDate = validSearchDate || (dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0, 0, 0, 0)))
+    const toDate = validSearchDate ? new Date(new Date(validSearchDate).setHours(23, 59, 59, 999)) : dateTo ? new Date(dateTo + 'T23:59:59') : new Date(new Date().setHours(23, 59, 59, 999))
 
-    const where: Prisma.PinWhereInput = {
+    const baseWhere: Prisma.PinWhereInput = {
       created_at: { gte: fromDate, lte: toDate },
-      ...(status !== 'all' && { status: status as PinStatus }),
       ...(cityDistId && { city_dist_id: cityDistId }),
-      ...(search && {
+      ...(search && !searchedStatus && !validSearchDate && {
         OR: [
-          { pin_code:         { contains: search, mode: 'insensitive' } },
+          { pin_code: { contains: search, mode: 'insensitive' } },
+          { package: { name: { contains: search, mode: 'insensitive' } } },
           { city_distributor: { full_name: { contains: search, mode: 'insensitive' } } },
-          { city_distributor: { username:  { contains: search, mode: 'insensitive' } } },
-          { used_by_user:     { full_name: { contains: search, mode: 'insensitive' } } },
+          { city_distributor: { username: { contains: search, mode: 'insensitive' } } },
+          { used_by_user: { full_name: { contains: search, mode: 'insensitive' } } },
+          { used_by_user: { username: { contains: search, mode: 'insensitive' } } },
         ],
       }),
+    }
+    const where: Prisma.PinWhereInput = {
+      ...baseWhere,
+      ...((searchedStatus || status !== 'all') && { status: (searchedStatus || status) as PinStatus }),
     }
 
     const [total, pins, summaryRaw] = await Promise.all([
@@ -70,7 +81,7 @@ export async function GET(req: NextRequest) {
 
       prisma.pin.findMany({
         where,
-        orderBy: { created_at: 'desc' },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
@@ -84,17 +95,18 @@ export async function GET(req: NextRequest) {
 
       prisma.pin.groupBy({
         by:    ['status'],
-        where,
+        where: baseWhere,
         _count: { status: true },
       }),
     ])
 
-    const summary = { total: 0, unused: 0, used: 0, cancelled: 0 }
+    const summary = { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 }
     for (const row of summaryRaw) {
       summary.total += row._count.status
       const s = row.status as string
       if (s === 'unused')    summary.unused    = row._count.status
       if (s === 'used')      summary.used      = row._count.status
+      if (s === 'expired')   summary.expired   = row._count.status
       if (s === 'cancelled') summary.cancelled = row._count.status
     }
 
@@ -109,7 +121,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST generate & sell PINs to city distributor ──
+// â”€â”€ POST generate & sell PINs to city distributor â”€â”€
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -132,7 +144,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Get package details ──
+    // â”€â”€ Get package details â”€â”€
     const pkg = await prisma.package.findUnique({
       where:  { id: package_id },
       select: {
@@ -185,7 +197,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Generate unique PIN codes ──
+    // â”€â”€ Generate unique PIN codes â”€â”€
     const pinCodes: string[] = []
     const existingPins = new Set(
       (await prisma.pin.findMany({ select: { pin_code: true } })).map(
@@ -202,7 +214,7 @@ export async function POST(req: NextRequest) {
 
     const totalAmount = unitPinPrice * quantity
 
-    // ── Create PINs + record as a sale order ──
+    // â”€â”€ Create PINs + record as a sale order â”€â”€
     await prisma.$transaction(async (tx) => {
 
       // 1. Bulk create PINs
@@ -225,7 +237,7 @@ export async function POST(req: NextRequest) {
         })),
       })
 
-      // 2. Record the PIN sale as an order (admin → city distributor)
+      // 2. Record the PIN sale as an order (admin â†’ city distributor)
       // Note: no order_items needed since this is a PIN sale not a product sale
       await tx.order.create({
         data: {
@@ -235,7 +247,7 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           total_amount: totalAmount,
           is_cross_purchase: false,
-          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${unitPinPrice.toLocaleString()} each`,
+          notes: `PIN sale: ${quantity} Ã— ${pkg.name} package @ â‚±${unitPinPrice.toLocaleString()} each`,
         },
       })
 
@@ -265,7 +277,7 @@ return NextResponse.json({
     return NextResponse.json({ error: 'PIN generation failed: ' + detail }, { status: 500 })
   }
 }
-// ── PATCH — cancel PINs (single or bulk) ──
+// â”€â”€ PATCH â€” cancel PINs (single or bulk) â”€â”€
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()

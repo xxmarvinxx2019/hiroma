@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url)
-    const status    = searchParams.get('status')   || 'all'
+    const status    = searchParams.get('status')   || 'unused'
     const page      = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize  = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
     const search    = searchParams.get('search')   || ''
@@ -19,28 +19,28 @@ export async function GET(req: NextRequest) {
     const dateFrom  = searchParams.get('dateFrom') || ''
     const dateTo    = searchParams.get('dateTo')   || ''
 
+    const normalizedSearch = search.trim().toLowerCase()
+    const searchableStatuses = ['unused', 'used', 'expired', 'cancelled'] as const
+    const searchedStatus = searchableStatuses.find((value) => value === normalizedSearch)
+    const searchDateMatch = normalizedSearch.match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\/(\d{1,2})\/(\d{4}))$/)
+    const searchDate = searchDateMatch ? new Date(Number(searchDateMatch[1] || searchDateMatch[6]), Number(searchDateMatch[2] || searchDateMatch[4]) - 1, Number(searchDateMatch[3] || searchDateMatch[5])) : null
+    const validSearchDate = searchDate && !Number.isNaN(searchDate.getTime()) ? searchDate : null
+
     // ── Build where clause ──
     const where: any = {
       city_dist_id: user.id,
     }
 
-    if (status !== 'all') {
-      where.status = status
+    if (searchedStatus || status !== 'all') {
+      where.status = searchedStatus || status
     }
 
-    if (search) {
+    if (search && !searchedStatus && !validSearchDate) {
       where.OR = [
-        { pin_code: { contains: search.toUpperCase(), mode: 'insensitive' } },
-        {
-          used_by_user: {
-            username: { contains: search.toLowerCase(), mode: 'insensitive' },
-          },
-        },
-        {
-          used_by_user: {
-            full_name: { contains: search, mode: 'insensitive' },
-          },
-        },
+        { pin_code: { contains: search, mode: 'insensitive' } },
+        { package: { name: { contains: search, mode: 'insensitive' } } },
+        { used_by_user: { username: { contains: search, mode: 'insensitive' } } },
+        { used_by_user: { full_name: { contains: search, mode: 'insensitive' } } },
       ]
     }
 
@@ -48,7 +48,11 @@ export async function GET(req: NextRequest) {
       where.package_id = packageId
     }
 
-    if (dateFrom || dateTo) {
+    if (validSearchDate) {
+      const searchDateEnd = new Date(validSearchDate)
+      searchDateEnd.setHours(23, 59, 59, 999)
+      where.created_at = { gte: validSearchDate, lte: searchDateEnd }
+    } else if (dateFrom || dateTo) {
       where.created_at = {
         ...(dateFrom && { gte: new Date(dateFrom) }),
         ...(dateTo   && { lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)) }),
@@ -62,7 +66,7 @@ export async function GET(req: NextRequest) {
     const [pins, packages] = await Promise.all([
       prisma.pin.findMany({
         where,
-        orderBy: { created_at: 'desc' },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {

@@ -2,25 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
+type SubtreeNode = {
+  id: string
+  user_id: string
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser()
-    if (!user || !['city', 'admin'].includes(user.role)) {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !['city', 'admin'].includes(currentUser.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { username } = await req.json()
-
     if (!username) {
-      return NextResponse.json(
-        { error: 'Username is required.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Username is required.' }, { status: 400 })
     }
 
-    const cleanUsername = username.trim().toLowerCase()
-
-    // ── Find referrer ──
+    const cleanUsername = String(username).trim().toLowerCase()
     const referrer = await prisma.user.findUnique({
       where: { username: cleanUsername },
       select: {
@@ -36,94 +35,112 @@ export async function POST(req: NextRequest) {
             package: { select: { id: true, name: true } },
           },
         },
+        binary_tree_node: { select: { id: true } },
       },
     })
 
     if (!referrer) {
-      return NextResponse.json(
-        { error: 'Username not found. Please check and try again.' },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: 'Username not found. Please check and try again.' }, { status: 404 })
     }
 
     const isHiromaNode = referrer.username === 'hiroma'
     const isReseller = referrer.role === 'reseller'
-
     if (!isReseller && !isHiromaNode) {
-      return NextResponse.json(
-        { error: 'This account is not a valid referrer.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'This account is not a valid referrer.' }, { status: 400 })
     }
-
     if (referrer.status !== 'active') {
-      return NextResponse.json(
-        { error: 'This referrer account is not active.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'This referrer account is not active.' }, { status: 400 })
     }
 
-    // ── Find binary tree node ──
-    const node = await prisma.binaryTreeNode.findUnique({
-      where: { user_id: referrer.id },
-      select: { id: true },
-    })
-
+    const node = referrer.binary_tree_node
     if (!node) {
-      return NextResponse.json(
-        { error: 'This referrer has no binary tree node. Please contact admin.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'This referrer has no binary tree node. Please contact admin.' }, { status: 400 })
     }
 
-    // ── Check direct leg availability ──
-    const leftChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: node.id, position: 'left' },
-      select: { id: true },
+    // One recursive query gets the whole subtree. The previous implementation
+    // scanned nodes one by one, then repeated the same work in a second request.
+    const subtreeNodes = await prisma.$queryRaw<SubtreeNode[]>`
+      WITH RECURSIVE subtree AS (
+        SELECT id, user_id
+        FROM binary_tree_nodes
+        WHERE id = ${node.id}
+
+        UNION ALL
+
+        SELECT n.id, n.user_id
+        FROM binary_tree_nodes n
+        INNER JOIN subtree s ON n.parent_id = s.id
+      )
+      SELECT id, user_id FROM subtree
+    `
+
+    const nodeIds = subtreeNodes.map((item) => item.id)
+    const nodeUserIds = subtreeNodes.map((item) => item.user_id)
+    const capPromise = isReseller && referrer.reseller_profile
+      ? prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
+          SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
+                 COALESCE(daily_referral_cap, 10)::int AS cap
+          FROM packages
+          WHERE id = ${referrer.reseller_profile.package.id}
+        `
+      : Promise.resolve([] as { enabled: boolean; cap: number }[])
+
+    const [existingChildren, users, capRows] = await Promise.all([
+      prisma.binaryTreeNode.findMany({
+        where: { parent_id: { in: nodeIds } },
+        select: { parent_id: true, position: true },
+      }),
+      prisma.user.findMany({
+        where: { id: { in: nodeUserIds } },
+        select: {
+          id: true,
+          full_name: true,
+          username: true,
+          reseller_profile: { select: { package: { select: { name: true } } } },
+        },
+      }),
+      capPromise,
+    ])
+
+    const takenSlots = new Map<string, Set<string>>()
+    for (const child of existingChildren) {
+      if (!child.parent_id) continue
+      if (!takenSlots.has(child.parent_id)) takenSlots.set(child.parent_id, new Set())
+      takenSlots.get(child.parent_id)!.add(child.position)
+    }
+
+    const userMap = new Map(users.map((item) => [item.id, item]))
+    const slots = subtreeNodes.flatMap((subtreeNode) => {
+      const userData = userMap.get(subtreeNode.user_id)
+      if (!userData) return []
+      const taken = takenSlots.get(subtreeNode.id) || new Set<string>()
+      const leftOpen = !taken.has('left')
+      const rightOpen = !taken.has('right')
+      if (!leftOpen && !rightOpen) return []
+      return [{
+        node_id: subtreeNode.id,
+        user_id: subtreeNode.user_id,
+        full_name: userData.full_name,
+        username: userData.username,
+        package: userData.reseller_profile?.package?.name || '—',
+        left_open: leftOpen,
+        right_open: rightOpen,
+      }]
     })
 
-    const rightChild = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: node.id, position: 'right' },
-      select: { id: true },
-    })
-
-    const leftIsDirect = !leftChild
-    const rightIsDirect = !rightChild
-
-    let leftAvailable = leftIsDirect
-    let rightAvailable = rightIsDirect
-
-    if (!leftIsDirect && leftChild) {
-      leftAvailable = await hasOpenSlot(leftChild.id)
+    if (slots.length === 0) {
+      return NextResponse.json({ error: 'Both legs of this referrer are completely full. Please use a different referrer.' }, { status: 400 })
     }
 
-    if (!rightIsDirect && rightChild) {
-      rightAvailable = await hasOpenSlot(rightChild.id)
-    }
-
-    if (!leftAvailable && !rightAvailable) {
-      return NextResponse.json(
-        { error: 'Both legs of this referrer are completely full. Please use a different referrer.' },
-        { status: 400 }
-      )
-    }
-
-    // ── Daily referral cap check ──
     let dailyCount = 0
     let dailyCapReached = false
-
     if (isReseller && referrer.reseller_profile) {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const lastDate = referrer.reseller_profile.last_referral_date
       const isToday = lastDate ? new Date(lastDate) >= today : false
       dailyCount = isToday ? (referrer.reseller_profile.daily_referral_count || 0) : 0
-      const [capConfig] = await prisma.$queryRaw<{ enabled: boolean; cap: number }[]>`
-        SELECT COALESCE(direct_referral_cap_enabled, true) AS enabled,
-               COALESCE(daily_referral_cap, 10)::int AS cap
-        FROM packages
-        WHERE id = ${referrer.reseller_profile.package.id}
-      `
+      const capConfig = capRows[0]
       dailyCapReached = Boolean(capConfig?.enabled) && dailyCount >= Number(capConfig?.cap || 10)
     }
 
@@ -136,44 +153,12 @@ export async function POST(req: NextRequest) {
         is_hiroma_node: isHiromaNode,
         daily_referral_count: dailyCount,
         daily_cap_reached: dailyCapReached,
-        left_available: leftAvailable,
-        right_available: rightAvailable,
-        left_is_direct: leftIsDirect,
-        right_is_direct: rightIsDirect,
         node_id: node.id,
       },
+      slots,
     })
   } catch (error) {
     console.error('[VERIFY REFERRAL ERROR]', error)
-    return NextResponse.json(
-      { error: 'Something went wrong. Please try again.' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
-}
-
-// ── Helper: check if any open slot exists in a subtree ──
-async function hasOpenSlot(nodeId: string): Promise<boolean> {
-  const queue: string[] = [nodeId]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-
-    const left = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: current, position: 'left' },
-      select: { id: true },
-    })
-
-    const right = await prisma.binaryTreeNode.findFirst({
-      where: { parent_id: current, position: 'right' },
-      select: { id: true },
-    })
-
-    if (!left || !right) return true
-
-    queue.push(left.id)
-    queue.push(right.id)
-  }
-
-  return false
 }

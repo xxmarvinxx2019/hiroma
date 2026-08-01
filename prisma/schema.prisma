@@ -14,6 +14,13 @@ model User {
   mobile                     String
   profile_photo              String?
   password_hash              String
+  login_disabled             Boolean             @default(false)
+  password_change_required   Boolean             @default(false)
+  temporary_password_retained_at DateTime?
+  password_is_temporary      Boolean             @default(false)
+  password_retention_stage   Int                 @default(0)
+  password_prompt_due_at     DateTime?
+  password_changed_at        DateTime?
   two_factor_enabled         Boolean             @default(false)
   two_factor_pin_hash        String?
   two_factor_failed_attempts Int                 @default(0)
@@ -21,6 +28,7 @@ model User {
   role                       Role
   status                     UserStatus          @default(active)
   address                    String?
+  zip_code                   String?
   created_at                 DateTime            @default(now())
   created_by                 String?
   sponsored_nodes            BinaryTreeNode[]    @relation("TreeNodeSponsor")

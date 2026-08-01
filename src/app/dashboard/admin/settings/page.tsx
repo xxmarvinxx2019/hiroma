@@ -299,7 +299,7 @@ export default function SettingsPage() {
             <button
               onClick={handlePasswordSave}
               disabled={passwordSaving}
-              className="bg-[#0D1B3E] text-white font-semibold text-sm rounded-lg py-2.5 hover:bg-[#1A2F5E] transition-colors disabled:opacity-60 w-fit px-6"
+              className="bg-[#010521] text-white font-semibold text-sm rounded-lg py-2.5 hover:bg-[#1A2F5E] transition-colors disabled:opacity-60 w-fit px-6"
             >
               {passwordSaving ? 'Updating...' : 'Update password'}
             </button>
