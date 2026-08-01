@@ -127,7 +127,7 @@ export default function AdminPayoutDetailPage() {
       <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 mb-4">
         <div className="flex items-center justify-between relative">
           {/* Progress line */}
-          <div className="absolute top-5 left-0 right-0 h-0.5 bg-[#0D1B3E]/8 z-0" />
+          <div className="absolute top-5 left-0 right-0 h-0.5 bg-[#010521]/8 z-0" />
           <div className={`absolute top-5 left-0 h-0.5 z-0 transition-all duration-500 ${isRejected ? 'bg-[#a03030]' : 'bg-[#1a7a4a]'}`}
             style={{ width: isRejected ? '50%' : currentStep === 0 ? '0%' : '100%' }} />
 
@@ -233,7 +233,7 @@ export default function AdminPayoutDetailPage() {
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
           <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Reseller</p>
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-[#0D1B3E]/8 flex items-center justify-center text-[#0D1B3E] font-bold text-sm">
+            <div className="w-10 h-10 rounded-full bg-[#010521]/8 flex items-center justify-center text-[#0D1B3E] font-bold text-sm">
               {payout.user.full_name.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -326,7 +326,7 @@ export default function AdminPayoutDetailPage() {
               <button onClick={() => navigator.clipboard.writeText(resultTx)} className="text-[10px] text-[#C9A84C] hover:underline">Copy</button>
             </div>
             <button onClick={() => setResultTx(null)}
-              className="w-full py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850]">Done</button>
+              className="w-full py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850]">Done</button>
           </div>
         </div>
       )}

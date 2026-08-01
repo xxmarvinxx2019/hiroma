@@ -59,7 +59,7 @@ const RANK_PALETTE = [
   { bg: '#f0f7ff', text: '#2563eb', bar: '#2563eb', light: '#f0f7ff' },
   { bg: '#e8f7ef', text: '#1a7a4a', bar: '#1a7a4a', light: '#e8f7ef' },
 ]
-const BASE_COLORS = { bg: '#eef0f8', text: '#0D1B3E', bar: '#0D1B3E', light: '#eef0f8' }
+const BASE_COLORS = { bg: '#eef0f8', text: '#0D1B3E', bar: '#010521', light: '#eef0f8' }
 
 // ── Donut Chart ──
 function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
@@ -479,7 +479,7 @@ export default function ResellerDashboardPage() {
       <div className={`w-full space-y-5 ${styles.dashboard} ${styles.classicDashboard}`}>
 
       {/* ── Welcome Banner ── */}
-      <div className={`bg-gradient-to-br from-[#0D1B3E] via-[#1a2f5e] to-[#0D1B3E] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 overflow-hidden relative ${styles.welcome}`}>
+      <div className={`bg-[#010521] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 overflow-hidden relative ${styles.welcome}`}>
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#C9A84C]/5 rounded-full -translate-y-1/2 translate-x-1/2" />
         <div className="absolute bottom-0 left-32 w-32 h-32 bg-white/3 rounded-full translate-y-1/2" />
         <div className="relative z-10">
@@ -641,7 +641,7 @@ export default function ResellerDashboardPage() {
           </div>
 
           <Link href="/dashboard/reseller/tree"
-            className="mt-4 w-full flex items-center justify-center gap-2 bg-[#0D1B3E] text-white text-xs font-medium py-2 rounded-xl hover:bg-[#162850] transition-colors">
+            className="mt-4 w-full flex items-center justify-center gap-2 bg-[#010521] text-white text-xs font-medium py-2 rounded-xl hover:bg-[#0a1233] transition-colors">
             <span>🌳</span> View Binary Tree
           </Link>
         </div>

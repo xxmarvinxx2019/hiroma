@@ -166,7 +166,7 @@ export default function AdminPaymentMethodsPage() {
           { key: 'resellers', label: '👥 Reseller Approvals' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => { setTab(t.key); setStatusFilter('all') }}
-            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}
             {t.key !== 'own' && pending > 0 && (
               <span className="ml-1.5 bg-[#9a6f1e] text-white text-[9px] px-1.5 py-0.5 rounded-full">{pending}</span>
@@ -242,7 +242,7 @@ export default function AdminPaymentMethodsPage() {
                 ] as const).map(([value, label]) => (
                   <button key={value} onClick={() => savePayoutMode(value)} disabled={savingMode}
                     className={`px-3 py-2 rounded-lg text-xs border ${
-                      payoutMode === value ? 'bg-[#0D1B3E] text-white border-[#0D1B3E]' : 'bg-white text-gray-500 border-[#0D1B3E]/15'
+                      payoutMode === value ? 'bg-[#010521] text-white border-[#0D1B3E]' : 'bg-white text-gray-500 border-[#0D1B3E]/15'
                     }`}>
                     {label}
                   </button>
@@ -270,7 +270,7 @@ export default function AdminPaymentMethodsPage() {
             {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-white text-gray-400 border border-[#0D1B3E]/10 hover:text-[#0D1B3E]'
+                  statusFilter === f ? 'bg-[#010521] text-white' : 'bg-white text-gray-400 border border-[#0D1B3E]/10 hover:text-[#0D1B3E]'
                 }`}>
                 {f}
                 {f === 'pending' && pending > 0 && (
@@ -355,7 +355,7 @@ export default function AdminPaymentMethodsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
-            <div className="bg-[#0D1B3E] px-5 py-4 rounded-t-2xl flex items-center justify-between">
+            <div className="bg-[#010521] px-5 py-4 rounded-t-2xl flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Add Payment Method</h2>
               <button onClick={() => setShowForm(false)} className="text-white/50 hover:text-white text-lg">✕</button>
             </div>

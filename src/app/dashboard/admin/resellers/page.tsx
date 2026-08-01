@@ -187,7 +187,7 @@ export default function ResellersPage() {
                 onClick={() => setStatusFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   statusFilter === f
-                    ? 'bg-[#0D1B3E] text-white'
+                    ? 'bg-[#010521] text-white'
                     : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                 }`}
               >
@@ -285,7 +285,7 @@ export default function ResellersPage() {
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
 
             {/* Modal Header */}
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+            <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Reseller details</h2>
               <div className="flex items-center gap-2">
                 <button

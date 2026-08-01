@@ -120,14 +120,13 @@ export async function GET() {
     const topProducts = Object.values(productMovement).sort((a, b) => b.qty - a.qty).slice(0, 10)
 
     // ── Top provincial distributors ──
-    const topProvincials = []
-    for (const p of provincialProfiles) {
+    const topProvincials = await Promise.all(provincialProfiles.map(async (p) => {
       const [rev, cityCount2, orders] = await Promise.all([
         prisma.order.aggregate({ where: { seller_id: p.user_id, status: 'delivered' }, _sum: { total_amount: true } }),
         prisma.distributorProfile.count({ where: { dist_level: 'city', parent: { user_id: p.user_id } } }),
         prisma.order.count({ where: { seller_id: p.user_id, status: 'delivered' } }),
       ])
-      topProvincials.push({
+      return {
         id:        p.user_id,
         full_name: p.user.full_name,
         username:  p.user.username,
@@ -135,19 +134,18 @@ export async function GET() {
         revenue:   Number(rev._sum.total_amount || 0),
         cities:    cityCount2,
         orders,
-      })
-    }
+      }
+    }))
     topProvincials.sort((a, b) => b.revenue - a.revenue)
 
     // ── Top city distributors in this region ──
-    const topCityDists = []
-    for (const c of cityProfiles.slice(0, 10)) {
+    const topCityDists = await Promise.all(cityProfiles.slice(0, 10).map(async (c) => {
       const [rev, resellers, orders] = await Promise.all([
         prisma.order.aggregate({ where: { seller_id: c.user_id, status: 'delivered' }, _sum: { total_amount: true } }),
         prisma.user.count({ where: { role: 'reseller', created_by: c.user_id } }),
         prisma.order.count({ where: { seller_id: c.user_id, status: 'delivered' } }),
       ])
-      topCityDists.push({
+      return {
         id:        c.user_id,
         full_name: c.user.full_name,
         username:  c.user.username,
@@ -155,8 +153,8 @@ export async function GET() {
         revenue:   Number(rev._sum.total_amount || 0),
         resellers,
         orders,
-      })
-    }
+      }
+    }))
     topCityDists.sort((a, b) => b.revenue - a.revenue)
 
     // ── Top resellers in this region ──
@@ -172,24 +170,25 @@ export async function GET() {
     })
 
     // ── Monthly revenue ──
-    const monthlyRevenue: { month: string; revenue: number; orders: number }[] = []
-    for (let i = 5; i >= 0; i--) {
-      const d     = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const monthlyRevenue = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
+      const d     = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
       const start = new Date(d.getFullYear(), d.getMonth(), 1)
       const end   = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
-      const mItems = await prisma.orderItem.findMany({
-        where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: start, lte: end } } },
-        select: { subtotal: true },
-      })
-      const mOrders = await prisma.order.count({
-        where: { seller_id: user.id, status: 'delivered', updated_at: { gte: start, lte: end } },
-      })
-      monthlyRevenue.push({
+      const [revenueResult, orders] = await Promise.all([
+        prisma.orderItem.aggregate({
+          where:  { order: { seller_id: user.id, status: 'delivered', updated_at: { gte: start, lte: end } } },
+          _sum: { subtotal: true },
+        }),
+        prisma.order.count({
+          where: { seller_id: user.id, status: 'delivered', updated_at: { gte: start, lte: end } },
+        }),
+      ])
+      return {
         month:   d.toLocaleDateString('en-PH', { month: 'short' }),
-        revenue: mItems.reduce((s, i) => s + Number(i.subtotal || 0), 0),
-        orders:  mOrders,
-      })
-    }
+        revenue: Number(revenueResult._sum.subtotal || 0),
+        orders,
+      }
+    }))
 
     // ── Recent orders ──
     const recentOrders = await prisma.order.findMany({

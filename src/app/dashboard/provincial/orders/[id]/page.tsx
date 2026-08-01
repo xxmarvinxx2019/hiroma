@@ -198,7 +198,7 @@ export default function OrderDetailPage() {
           ← Back to Orders
         </button>
           <button onClick={handlePrint}
-            className="flex items-center gap-2 text-xs bg-[#0D1B3E] text-white px-4 py-2 rounded-xl hover:bg-[#1A2F5E] transition-colors">
+            className="flex items-center gap-2 text-xs bg-[#010521] text-white px-4 py-2 rounded-xl hover:bg-[#1A2F5E] transition-colors">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
               <rect x="6" y="14" width="12" height="8"/>
@@ -391,7 +391,7 @@ export default function OrderDetailPage() {
           </div>
 
           {/* Order Summary Card */}
-          <div className="bg-[#0D1B3E] rounded-2xl p-5">
+          <div className="bg-[#010521] rounded-2xl p-5">
             <p className="text-[#C9A84C] text-[10px] tracking-widest uppercase mb-3">Order Summary</p>
             <div className="space-y-2">
               <div className="flex justify-between text-xs">

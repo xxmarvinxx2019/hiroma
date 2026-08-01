@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
     const totalStock    = inventory.reduce((s, i) => s + i.quantity, 0)
 
     // ── Today's walk-in order sales ──
-    const todayWalkInItems = await prisma.orderItem.findMany({
+    const todayWalkInItemsPromise = prisma.orderItem.findMany({
       where:  {
         order: {
           seller_id: user.id,
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
       },
       select: { quantity: true, subtotal: true },
     })
-    const yesterdayWalkInItems = await prisma.orderItem.findMany({
+    const yesterdayWalkInItemsPromise = prisma.orderItem.findMany({
       where:  {
         order: {
           seller_id: user.id,
@@ -148,17 +148,13 @@ export async function GET(req: NextRequest) {
       },
       select: { quantity: true, subtotal: true },
     })
-    const salesRevenueToday     = todayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
-    const salesRevenueYesterday = yesterdayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
-    const unitsSoldToday        = todayWalkInItems.reduce((s, i) => s + i.quantity, 0)
-
     // ── Today's PINs used (reseller registrations today) ──
-    const pinsUsedToday = await prisma.pin.count({
+    const pinsUsedTodayPromise = prisma.pin.count({
       where: { city_dist_id: user.id, status: 'used', used_at: { gte: today, lt: tomorrow } },
     })
 
     // ── All-time product order sales ──
-    const deliveredOrders = await prisma.order.findMany({
+    const deliveredOrdersPromise = prisma.order.findMany({
       where:  {
         seller_id: user.id,
         status: 'delivered',
@@ -180,6 +176,39 @@ export async function GET(req: NextRequest) {
         },
       },
     })
+    const registrationSnapshotsPromise = prisma.registrationFinancial.findMany({
+      where: { city_dist_id: user.id, ...(dateFilter ? { created_at: dateFilter } : {}) },
+      select: {
+        pin_id: true,
+        package_id: true,
+        customer_payment: true,
+        product_acquisition_cost: true,
+        reseller_value: true,
+        pin_allocation: true,
+        registration_profit: true,
+      },
+    }).catch((error) => {
+      console.warn('[CITY STATS] Registration ledger unavailable; using legacy PIN calculations.', error)
+      return []
+    })
+
+    const [
+      todayWalkInItems,
+      yesterdayWalkInItems,
+      pinsUsedToday,
+      deliveredOrders,
+      registrationSnapshots,
+    ] = await Promise.all([
+      todayWalkInItemsPromise,
+      yesterdayWalkInItemsPromise,
+      pinsUsedTodayPromise,
+      deliveredOrdersPromise,
+      registrationSnapshotsPromise,
+    ])
+
+    const salesRevenueToday     = todayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
+    const salesRevenueYesterday = yesterdayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
+    const unitsSoldToday        = todayWalkInItems.reduce((s, i) => s + i.quantity, 0)
     const orderRevenue   = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
     const orderCost      = deliveredOrders.reduce(
       (s, o) => s + o.items.reduce(
@@ -232,21 +261,6 @@ export async function GET(req: NextRequest) {
     const topProducts = Object.values(productMovement).sort((a, b) => b.qty - a.qty).slice(0, 10)
 
     // ── Package (PIN) sales from reseller registrations ──
-    const registrationSnapshots = await prisma.registrationFinancial.findMany({
-      where: { city_dist_id: user.id, ...(dateFilter ? { created_at: dateFilter } : {}) },
-      select: {
-        pin_id: true,
-        package_id: true,
-        customer_payment: true,
-        product_acquisition_cost: true,
-        reseller_value: true,
-        pin_allocation: true,
-        registration_profit: true,
-      },
-    }).catch((error) => {
-      console.warn('[CITY STATS] Registration ledger unavailable; using legacy PIN calculations.', error)
-      return []
-    })
     const registrationRows = registrationSnapshots.map((row) => ({
       package_id: row.package_id,
       customer_payment: Number(row.customer_payment),
@@ -350,42 +364,45 @@ export async function GET(req: NextRequest) {
     }
 
     // Monthly table: every row is intersected with the selected reporting range.
-    const monthlyRevenue: { month: string; revenue: number; resellers: number }[] = []
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const monthStartDate = new Date(d.getFullYear(), d.getMonth(), 1)
-      const monthEndDate = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
-      const label = d.toLocaleDateString('en-PH', { month: 'short' })
-      const start = dateFilter ? new Date(Math.max(monthStartDate.getTime(), dateFilter.gte.getTime())) : monthStartDate
-      const end = dateFilter ? new Date(Math.min(monthEndDate.getTime(), dateFilter.lt.getTime() - 1)) : monthEndDate
-      if (end < start) {
-        monthlyRevenue.push({ month: label, revenue: 0, resellers: 0 })
-        continue
-      }
-      const mItems = await prisma.orderItem.findMany({
-        where: {
-          order: {
-            seller_id: user.id,
-            status: 'delivered',
-            OR: [
-              { delivered_at: { gte: start, lte: end } },
-              { delivered_at: null, created_at: { gte: start, lte: end } },
-            ],
-          },
-        },
-        select: { subtotal: true },
+    const monthlyRevenue = await Promise.all(
+      Array.from({ length: 6 }, async (_, index) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
+        const monthStartDate = new Date(d.getFullYear(), d.getMonth(), 1)
+        const monthEndDate = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59)
+        const month = d.toLocaleDateString('en-PH', { month: 'short' })
+        const start = dateFilter ? new Date(Math.max(monthStartDate.getTime(), dateFilter.gte.getTime())) : monthStartDate
+        const end = dateFilter ? new Date(Math.min(monthEndDate.getTime(), dateFilter.lt.getTime() - 1)) : monthEndDate
+
+        if (end < start) return { month, revenue: 0, resellers: 0 }
+
+        const [revenueResult, resellers] = await Promise.all([
+          prisma.orderItem.aggregate({
+            where: {
+              order: {
+                seller_id: user.id,
+                status: 'delivered',
+                OR: [
+                  { delivered_at: { gte: start, lte: end } },
+                  { delivered_at: null, created_at: { gte: start, lte: end } },
+                ],
+              },
+            },
+            _sum: { subtotal: true },
+          }),
+          prisma.user.count({
+            where: { role: 'reseller', created_by: user.id, created_at: { gte: start, lte: end } },
+          }),
+        ])
+
+        return {
+          month,
+          revenue: Number(revenueResult._sum.subtotal || 0),
+          resellers,
+        }
       })
-      const mResellers = await prisma.user.count({
-        where: { role: 'reseller', created_by: user.id, created_at: { gte: start, lte: end } },
-      })
-      monthlyRevenue.push({
-        month: label,
-        revenue: mItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
-        resellers: mResellers,
-      })
-    }
+    )
     // ── Recent orders (walk-in) ──
-    const recentOrders = await prisma.order.findMany({
+    const recentOrdersPromise = prisma.order.findMany({
       where:   { seller_id: user.id },
       orderBy: { created_at: 'desc' },
       take:    5,
@@ -393,6 +410,20 @@ export async function GET(req: NextRequest) {
         id: true, order_number: true, status: true,
         total_amount: true, created_at: true,
         buyer: { select: { full_name: true, username: true } },
+      },
+    })
+    const topEarnersPromise = prisma.resellerProfile.findMany({
+      where: { city_dist_id: user.id, user: { status: 'active' } },
+      select: {
+        user: {
+          select: {
+            id: true,
+            full_name: true,
+            username: true,
+            wallet: { select: { total_earned: true, balance: true } },
+          },
+        },
+        package: { select: { name: true } },
       },
     })
 
@@ -408,20 +439,8 @@ export async function GET(req: NextRequest) {
     const totalProfit = combinedProductProfit
     const totalUnitsSold = orderUnitsSold + packageUnitsSold
     // ── Top earners among resellers ──
-    const topEarners = (await prisma.resellerProfile.findMany({
-      where: { city_dist_id: user.id, user: { status: 'active' } },
-      select: {
-        user: {
-          select: {
-            id: true,
-            full_name: true,
-            username: true,
-            wallet: { select: { total_earned: true, balance: true } },
-          },
-        },
-        package: { select: { name: true } },
-      },
-    }))
+    const [recentOrders, topEarnerRows] = await Promise.all([recentOrdersPromise, topEarnersPromise])
+    const topEarners = topEarnerRows
       .sort((a, b) => Number(b.user.wallet?.total_earned || 0) - Number(a.user.wallet?.total_earned || 0))
       .slice(0, 5)
 

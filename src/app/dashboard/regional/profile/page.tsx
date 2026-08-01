@@ -206,7 +206,7 @@ export default function RegionalProfilePage() {
           <button
             onClick={handleProfileSave}
             disabled={profileSaving}
-            className="bg-[#0D1B3E] text-white text-sm px-5 py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50"
+            className="bg-[#010521] text-white text-sm px-5 py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50"
           >
             {profileSaving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -244,7 +244,7 @@ export default function RegionalProfilePage() {
           <button
             onClick={handlePasswordSave}
             disabled={passwordSaving}
-            className="bg-[#0D1B3E] text-white text-sm px-5 py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50"
+            className="bg-[#010521] text-white text-sm px-5 py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50"
           >
             {passwordSaving ? 'Updating...' : 'Update Password'}
           </button>

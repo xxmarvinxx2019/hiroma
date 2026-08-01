@@ -221,7 +221,7 @@ export default function ProductsPage() {
                 onClick={() => setTypeFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   typeFilter === f
-                    ? 'bg-[#0D1B3E] text-white'
+                    ? 'bg-[#010521] text-white'
                     : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                 }`}
               >
@@ -342,7 +342,7 @@ export default function ProductsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4 py-6">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-full">
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+            <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">
                 {editProduct ? 'Edit product' : 'Add new product'}
               </h2>

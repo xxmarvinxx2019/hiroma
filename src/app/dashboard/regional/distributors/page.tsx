@@ -112,11 +112,11 @@ export default function RegionalDistributorsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         <button onClick={() => setTab('provincial')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'provincial' ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'provincial' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           🏛️ Provincial ({summary.total})
         </button>
         <button onClick={() => setTab('city')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'city' ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'city' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           🏢 City ({citySummary.total || '...'})
         </button>
       </div>
@@ -149,7 +149,7 @@ export default function RegionalDistributorsPage() {
               </div>
               {['all','active','inactive'].map(f => (
                 <button key={f} onClick={() => setStatusFilter(f)}
-                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f}
                 </button>
               ))}
@@ -176,7 +176,7 @@ export default function RegionalDistributorsPage() {
                 <div className="grid grid-cols-5 px-4 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center cursor-pointer"
                   onClick={() => setExpanded(expanded === d.id ? null : d.id)}>
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                       {d.user.full_name.charAt(0).toUpperCase()}
                     </div>
                     <div>
@@ -277,7 +277,7 @@ export default function RegionalDistributorsPage() {
               </div>
               {['all','active','inactive'].map(f => (
                 <button key={f} onClick={() => setCityStatus(f)}
-                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${cityStatus === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${cityStatus === f ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f}
                 </button>
               ))}

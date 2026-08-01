@@ -100,7 +100,7 @@ export default function ProvincialResellersPage() {
           </div>
           {['all', 'active', 'inactive'].map(f => (
             <button key={f} onClick={() => setStatusFilter(f)}
-              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
               {f}
             </button>
           ))}
@@ -127,7 +127,7 @@ export default function ProvincialResellersPage() {
           <div key={r.id} className="grid grid-cols-6 px-4 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
             {/* Reseller */}
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                 {r.full_name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">

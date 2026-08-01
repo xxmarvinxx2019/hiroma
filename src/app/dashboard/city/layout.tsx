@@ -74,7 +74,7 @@ function Sidebar({
   }
 
   return (
-    <div className="w-56 bg-[#0D1B3E] flex flex-col" style={{ height: '100vh' }}>
+    <div className="w-56 bg-[#010521] flex flex-col" style={{ height: '100vh' }}>
       {/* Logo */}
       <div className="px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0" style={{ height: '56px' }}>
         <div className="w-8 h-8 relative flex-shrink-0">
@@ -116,7 +116,7 @@ function Sidebar({
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-white/5 flex-shrink-0 bg-[#0D1B3E]">
+      <div className="px-3 py-3 border-t border-white/5 flex-shrink-0 bg-[#010521]">
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
             <span className="text-[#C9A84C] text-xs font-bold">
@@ -213,7 +213,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
         {/* Topbar */}
-        <header className="bg-[#0D1B3E] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0" style={{ height: '56px' }}>
+        <header className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0" style={{ height: '56px' }}>
           <div className="flex items-center gap-3">
             <button className="md:hidden text-white/60 hover:text-white" onClick={() => setSidebarOpen(!sidebarOpen)}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

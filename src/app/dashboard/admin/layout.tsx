@@ -68,7 +68,7 @@ function Sidebar({
 
   return (
     <div
-      className="bg-[#0D1B3E] flex flex-col w-56"
+      className="bg-[#010521] flex flex-col w-56"
       style={{ height: '100vh' }}
     >
       {/* ── Logo — never moves ── */}
@@ -125,7 +125,7 @@ function Sidebar({
 
       {/* ── User Footer — always visible at bottom ── */}
       <div
-        className="px-3 py-3 border-t border-white/5 bg-[#0D1B3E] flex-shrink-0"
+        className="px-3 py-3 border-t border-white/5 bg-[#010521] flex-shrink-0"
       >
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
@@ -252,7 +252,7 @@ export default function AdminLayout({
       >
         {/* Topbar */}
         <header
-          className="bg-[#0D1B3E] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
+          className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
           style={{ height: '56px' }}
         >
           <div className="flex items-center gap-3">

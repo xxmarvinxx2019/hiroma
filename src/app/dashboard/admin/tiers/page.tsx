@@ -159,7 +159,7 @@ export default function TierSettingsPage() {
 
       {/* ── PU Reset Date (Global) ── */}
       <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden mb-6">
-        <div className="bg-[#0D1B3E] px-5 py-3 flex items-center justify-between">
+        <div className="bg-[#010521] px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-white font-semibold text-sm">Product Points Reset Date</h3>
             <span className="text-[#C9A84C] text-xs">Global — applies to all resellers</span>
@@ -236,7 +236,7 @@ export default function TierSettingsPage() {
           {packages.map((pkg) => (
             <div key={pkg.id} className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
               {/* Package Header */}
-              <div className="bg-[#0D1B3E] px-5 py-3 flex items-center justify-between">
+              <div className="bg-[#010521] px-5 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <h3 className="text-white font-semibold text-sm">{pkg.name}</h3>
                   <span className="text-[#C9A84C] text-xs">₱{Number(pkg.price).toLocaleString()} package</span>

@@ -96,7 +96,7 @@ export default function DistributorsPage() {
           <div className="flex gap-1">
             {(['all', 'active', 'inactive'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
-                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
                 {f}
               </button>
             ))}

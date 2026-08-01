@@ -96,7 +96,7 @@ export default function AdminRanksPage() {
       </div>
 
       {/* Info banner */}
-      <div className="bg-[#0D1B3E]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3 mb-5 text-xs text-gray-500 leading-relaxed">
+      <div className="bg-[#010521]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3 mb-5 text-xs text-gray-500 leading-relaxed">
         <p className="font-medium text-[#0D1B3E] mb-1">How it works</p>
         Each package has its own rank milestones with custom names. Ranks are only active during the configured <strong>rank period</strong>.
         When the period ends, all resellers reset to their package's base points per pair.
@@ -108,7 +108,7 @@ export default function AdminRanksPage() {
         {packages.map(pkg => (
           <button key={pkg.id} onClick={() => { setActiveTab(pkg.id); setError('') }}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === pkg.id ? 'bg-[#0D1B3E] text-white' : 'bg-white border border-[#0D1B3E]/10 text-gray-500 hover:text-[#0D1B3E]'
+              activeTab === pkg.id ? 'bg-[#010521] text-white' : 'bg-white border border-[#0D1B3E]/10 text-gray-500 hover:text-[#0D1B3E]'
             }`}>
             {pkg.name}
             <span className="text-[10px] ml-1.5 opacity-60">base {pkg.point_php_value} pts</span>
@@ -165,7 +165,7 @@ export default function AdminRanksPage() {
                     </div>
                     <div className="flex gap-1">
                       <button onClick={() => setEditPeriod({ ...period })}
-                        className="w-6 h-6 rounded bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group">
+                        className="w-6 h-6 rounded bg-[#eef0f8] hover:bg-[#010521] flex items-center justify-center transition-colors group">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                         </svg>
@@ -192,7 +192,7 @@ export default function AdminRanksPage() {
                   onChange={e => setEditPeriod({ ...editPeriod, end_date: e.target.value })}
                   className="border border-[#0D1B3E]/15 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
                 <button onClick={() => handleSavePeriod(editPeriod)} disabled={saving}
-                  className="text-xs bg-[#0D1B3E] text-white px-3 py-1 rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
+                  className="text-xs bg-[#010521] text-white px-3 py-1 rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
                 <button onClick={() => { setAddingPeriod(false); setEditPeriod(null) }} className="text-xs text-gray-400">Cancel</button>
               </div>
             )}
@@ -251,7 +251,7 @@ export default function AdminRanksPage() {
                           <p className="text-xs text-gray-400">{fmt(rank.pair_income * 0.50)}</p>
                           <div className="flex gap-1">
                             <button onClick={() => setEditRank({ ...rank })}
-                              className="w-6 h-6 rounded bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group">
+                              className="w-6 h-6 rounded bg-[#eef0f8] hover:bg-[#010521] flex items-center justify-center transition-colors group">
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                               </svg>

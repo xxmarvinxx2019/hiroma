@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import prisma from '@/app/lib/prisma'
+import { buildPersonName, hasCompletePersonName, isPersonSuffix, normalizePersonName } from '@/app/lib/nameFormat'
+import { generateUsernamePlan } from '@/app/lib/usernameGenerator'
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 // ============================================================
@@ -378,12 +380,13 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      full_name, username, email, mobile, password, address,
+      full_name, email, mobile, password, address, zip_code,
+      first_name, middle_name, last_name, suffix, no_middle_name,
       birthday, birthplace,
       pin_id, referrer_username, actual_parent_node_id, actual_position,
     } = await req.json()
 
-    if (!full_name || !username || !mobile || !password || !pin_id ||
+    if (!full_name || !mobile || !password || !pin_id ||
         !referrer_username || !actual_parent_node_id || !actual_position) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
     }
@@ -391,31 +394,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Date of birth and place of birth are required.' }, { status: 400 })
     }
 
+    if (!email || !address?.trim() || !/^\d{4}$/.test(String(zip_code || ''))) {
+      return NextResponse.json({ error: 'Email, complete street address, and a valid 4-digit ZIP code are required.' }, { status: 400 })
+    }
+
+    const cleanFirstName = normalizePersonName(String(first_name || ''))
+    const cleanMiddleName = normalizePersonName(String(middle_name || ''))
+    const cleanLastName = normalizePersonName(String(last_name || ''))
+    const cleanSuffix = String(suffix || '').trim()
+
+    if (!cleanFirstName || !cleanLastName) {
+      return NextResponse.json({ error: 'First name and last name are required.' }, { status: 400 })
+    }
+    if (no_middle_name !== true && !cleanMiddleName) {
+      return NextResponse.json({ error: 'Middle name is required unless the member legally has no middle name.' }, { status: 400 })
+    }
+    if (cleanSuffix && !isPersonSuffix(cleanSuffix)) {
+      return NextResponse.json({ error: 'Invalid name suffix.' }, { status: 400 })
+    }
+
+    const cleanFullName = buildPersonName({
+      firstName: cleanFirstName, middleName: no_middle_name === true ? '' : cleanMiddleName,
+      lastName: cleanLastName, suffix: cleanSuffix,
+    })
+
+    if (!hasCompletePersonName(cleanFullName)) {
+      return NextResponse.json({ error: 'A valid first name and last name are required.' }, { status: 400 })
+    }
+
     if (!['left', 'right'].includes(actual_position)) {
       return NextResponse.json({ error: 'Invalid position.' }, { status: 400 })
     }
 
-    const cleanUsername = username.trim().toLowerCase()
-    if (!/^[a-z][a-z0-9]*$/.test(cleanUsername)) {
-      return NextResponse.json({
-        error: 'Username must start with a letter and contain only letters and numbers.',
-      }, { status: 400 })
-    }
-
-    const nameParts    = full_name.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    const firstName    = nameParts[0]?.replace(/[^a-z]/g, '') || ''
-    const initials     = nameParts.slice(1).map((p: string) => p.replace(/[^a-z]/g, '')[0] || '').join('')
-    const expectedBase = (firstName + initials).replace(/[^a-z0-9]/g, '')
-    const usernameBase = cleanUsername.replace(/[0-9]+$/, '')
-
-    if (usernameBase !== expectedBase) {
-      return NextResponse.json({
-        error: `Username must follow the format: "${expectedBase}" or "${expectedBase}1", "${expectedBase}2", etc.`,
-      }, { status: 400 })
-    }
-
+    const usernamePlan = await generateUsernamePlan({
+      fullName: cleanFullName,
+      birthday: String(birthday),
+      birthplace: String(birthplace),
+    })
+    const cleanUsername = usernamePlan.username
     const [existingUser, pin, slotTaken, parentNodeExists, referrer] = await Promise.all([
-      prisma.user.findUnique({ where: { username: username.trim().toLowerCase() } }),
+      prisma.user.findUnique({ where: { username: cleanUsername } }),
       prisma.pin.findUnique({
         where:  { id: pin_id },
         select: { id: true, status: true, package_id: true, city_dist_id: true },
@@ -448,28 +466,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'The referrer account is not active. Please use an active referrer.' }, { status: 400 })
     }
 
-    const normalizedName = full_name.trim().toLowerCase()
-
-    // Check birthday + birthplace — same person counts toward 7-account limit
-    const birthdayStr    = new Date(birthday).toISOString().slice(0, 10)
-    const birthInfoRaw   = await prisma.$queryRaw<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count FROM users
-      WHERE birthday::text = ${birthdayStr}
-        AND LOWER(TRIM(birthplace)) = ${birthplace.trim().toLowerCase()}
-        AND role = 'reseller'
-        AND status != 'inactive'
-    `
-    const birthInfoCount  = Number(birthInfoRaw[0]?.count || 0)
-    const nameCap         = await prisma.nameCapRegistry.findUnique({ where: { normalized_name: normalizedName } })
-    const effectiveCount  = Math.max(nameCap?.count || 0, birthInfoCount)
-    const maxAllowed      = nameCap?.max_allowed || 7
+    const effectiveCount = usernamePlan.existingAccountCount
+    const maxAllowed = usernamePlan.maxAccounts
 
     if (effectiveCount >= maxAllowed) {
       return NextResponse.json({
         error: `Maximum accounts (${maxAllowed}) reached for this person.`,
       }, { status: 400 })
     }
-
     const isHiromaNode = referrer.username === 'hiroma'
 
     const referrerProfile = !isHiromaNode
@@ -572,14 +576,19 @@ export async function POST(req: NextRequest) {
     const newUser = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
-          username:      username.trim().toLowerCase(),
-          full_name:     full_name.trim(),
+          username:      cleanUsername,
+          full_name:     cleanFullName,
           email:         email?.trim().toLowerCase() || null,
           mobile:        mobile.trim(),
           password_hash: hashedPassword,
+          password_change_required: true,
+          password_is_temporary: true,
+          password_retention_stage: 0,
+          password_prompt_due_at: new Date(),
           role:          'reseller',
           status:        'active',
           address:       address?.trim() || null,
+          zip_code:      String(zip_code),
           created_by:    user.id,
         },
       })
@@ -663,9 +672,9 @@ export async function POST(req: NextRequest) {
       }
 
       await tx.nameCapRegistry.upsert({
-        where:  { normalized_name: normalizedName },
+        where:  { normalized_name: usernamePlan.identityKey },
         update: { count: { increment: 1 } },
-        create: { normalized_name: normalizedName, count: 1, max_allowed: 7 },
+        create: { normalized_name: usernamePlan.identityKey, count: 1, max_allowed: 7 },
       })
 
       return created
@@ -788,7 +797,7 @@ export async function POST(req: NextRequest) {
       member_id:     formatMemberId(user.actor_id || user.id, user.is_staff ? 'staff' : user.role),
       activity_type: 'reseller_registered',
       category:      'reseller',
-      description:   `New reseller registered: ${full_name} (@${username.trim().toLowerCase()})`,
+      description:   `New reseller registered: ${cleanFullName} (@${cleanUsername})`,
       metadata:      { reseller_id: newUser.id, owner_id: user.id, performed_by_staff: Boolean(user.is_staff) },
       risk_level:    'low',
       status:        'normal',
@@ -797,7 +806,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success:  true,
       message:  `${full_name} has been registered successfully.`,
-      reseller: { id: newUser.id, full_name, username: username.trim().toLowerCase() },
+      reseller: { id: newUser.id, full_name: cleanFullName, username: cleanUsername },
       package:  packageWithProducts ? (() => {
         const isBranch = registrationOwnerProfile?.dist_level === 'branch'
         const productsTotal = packageWithProducts.products.reduce(

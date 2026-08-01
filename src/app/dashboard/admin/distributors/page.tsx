@@ -441,7 +441,7 @@ export default function DistributorsPage() {
                 onClick={() => setFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   filter === f
-                    ? 'bg-[#0D1B3E] text-white'
+                    ? 'bg-[#010521] text-white'
                     : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'
                 }`}
               >
@@ -520,7 +520,7 @@ export default function DistributorsPage() {
                 )}
                 {/* Edit */}
                 <button onClick={() => openEdit(dist)}
-                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group"
+                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#010521] flex items-center justify-center transition-colors group"
                   title="Edit distributor">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -547,7 +547,7 @@ export default function DistributorsPage() {
                 <button
                   disabled={resettingId === dist.id}
                   onClick={() => handleResetPassword(dist.id)}
-                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#0D1B3E] flex items-center justify-center transition-colors group disabled:opacity-50"
+                  className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#010521] flex items-center justify-center transition-colors group disabled:opacity-50"
                   title="Reset password">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
@@ -565,7 +565,7 @@ export default function DistributorsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-            <div className="bg-[#0D1B3E] px-6 py-4 flex items-center justify-between">
+            <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Register new distributor</h2>
               <button
                 onClick={() => setShowForm(false)}
@@ -846,7 +846,7 @@ export default function DistributorsPage() {
                   Cancel
                 </button>
                 <button onClick={handleAssignParent} disabled={assignSaving}
-                  className="flex-1 bg-[#0D1B3E] text-white text-sm py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50 font-medium">
+                  className="flex-1 bg-[#010521] text-white text-sm py-2 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-50 font-medium">
                   {assignSaving ? 'Saving...' : 'Save Assignment'}
                 </button>
               </div>
@@ -871,7 +871,7 @@ export default function DistributorsPage() {
               className="text-[10px] text-[#C9A84C] hover:underline whitespace-nowrap">Copy</button>
           </div>
           <button onClick={() => setResetResult(null)}
-            className="w-full py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850]">
+            className="w-full py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850]">
             Done
           </button>
         </div>
@@ -912,7 +912,7 @@ export default function DistributorsPage() {
               Cancel
             </button>
             <button onClick={handleEditSave} disabled={editSaving}
-              className="flex-1 py-2 rounded-lg bg-[#0D1B3E] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50">
+              className="flex-1 py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50">
               {editSaving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>

@@ -181,7 +181,7 @@ export default function AdminCommissionsPage() {
               { key: 'sponsor_point',   label: '📦 Product Binary' },
             ].map(f => (
               <button key={f.key} onClick={() => setTypeFilter(f.key)}
-                className={`text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${typeFilter === f.key ? 'bg-[#0D1B3E] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
+                className={`text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${typeFilter === f.key ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                 {f.label}
               </button>
             ))}
@@ -213,7 +213,7 @@ export default function AdminCommissionsPage() {
             <div key={c.id} className="grid grid-cols-6 px-5 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
               {/* Reseller */}
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-[#0D1B3E] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                   {c.user.full_name.charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0">

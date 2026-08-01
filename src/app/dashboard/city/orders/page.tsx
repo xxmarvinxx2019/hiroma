@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import CityOrderDetailsModal from './CityOrderDetailsModal'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -171,7 +171,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
                       </div>
                     </div>
                     <button onClick={() => addToCart(product)} disabled={product.available_quantity === 0}
-                      className="text-xs bg-[#0D1B3E] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                      className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                       {product.available_quantity === 0 ? 'No stock' : '+ Add'}
                     </button>
                   </div>
@@ -208,7 +208,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
               <div className="flex gap-1">
                 {(['online', 'offline'] as const).map((t) => (
                   <button key={t} onClick={() => setOrderType(t)}
-                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${orderType === t ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400'}`}>{t}</button>
+                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${orderType === t ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400'}`}>{t}</button>
                 ))}
               </div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" rows={2}
@@ -431,7 +431,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                         <span className="text-xs text-gray-300">· {product.available_quantity} in stock</span>
                       </div>
                     </div>
-                    <button onClick={() => addToCart(product)} className="text-xs bg-[#0D1B3E] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors">+ Add</button>
+                    <button onClick={() => addToCart(product)} className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors">+ Add</button>
                   </div>
                 ))}
             </div>
@@ -491,7 +491,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
               <div className="flex gap-1">
                 {(['online', 'offline'] as const).map((t) => (
                   <button key={t} onClick={() => setOrderType(t)}
-                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${orderType === t ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400'}`}>{t}</button>
+                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${orderType === t ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400'}`}>{t}</button>
                 ))}
               </div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" rows={2}
@@ -530,6 +530,7 @@ export default function CityOrdersPage() {
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
   const [supplier, setSupplier]             = useState<Supplier | null>(null)
   const [showCreate, setShowCreate]         = useState(false)
+  const [selectedOrder, setSelectedOrder]   = useState<Order | null>(null)
   const [showResellerOrder, setShowResellerOrder] = useState(false)
   const [summary, setSummary]               = useState({ total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 })
 
@@ -625,7 +626,7 @@ export default function CityOrdersPage() {
         )}
         {tab === 'reseller_orders' && (
           <button onClick={() => setShowResellerOrder(true)}
-            className="bg-[#0D1B3E] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
+            className="bg-[#010521] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
             + Walk-in Order
           </button>
         )}
@@ -638,7 +639,7 @@ export default function CityOrdersPage() {
         ] as const).map((t) => (
           <button key={t.key}
             onClick={() => { setTab(t.key); setStatusFilter('all'); setTypeFilter('all'); setSearch(''); setSearchInput('') }}
-            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#0D1B3E] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
             {t.label}<span className="ml-1.5 text-xs opacity-60">{t.desc}</span>
           </button>
         ))}
@@ -668,7 +669,7 @@ export default function CityOrdersPage() {
           <div className="flex gap-1 flex-wrap">
             {(['all', 'pending', 'processing', 'ready_for_pickup', 'delivered', 'cancelled'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
-                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>{f}</button>
+                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>{f}</button>
             ))}
           </div>
           <div className="flex gap-1">
@@ -748,15 +749,9 @@ export default function CityOrdersPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                    <Link href={"/dashboard/city/orders/" + (order.order_number || order.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
-                    title="View details">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                  </Link>
+                    <button type="button" onClick={() => setSelectedOrder(order)} className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0" title="View details" aria-label={`View order ${order.order_number || order.id}`}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
                     {/* Confirm payment button */}
                     {tab === 'reseller_orders' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
@@ -773,7 +768,7 @@ export default function CityOrdersPage() {
                       <button key={next}
                         disabled={updatingId === order.id || (next === 'processing' && !canProcess(order))}
                         onClick={() => next === 'cancelled' ? setCancelConfirm(order.id) : handleStatusUpdate(order.id, next)}
-                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : next === 'ready_for_pickup' ? 'bg-[#f0f7ff] hover:bg-[#2563eb]' : next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9]' : 'bg-[#eef0f8] hover:bg-[#0D1B3E]')}
+                        className={"w-7 h-7 rounded-lg flex items-center justify-center transition-colors group flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " + (next === 'cancelled' ? 'bg-[#fdecea] hover:bg-[#a03030]' : next === 'delivered' ? 'bg-[#e8f7ef] hover:bg-[#1a7a4a]' : next === 'ready_for_pickup' ? 'bg-[#f0f7ff] hover:bg-[#2563eb]' : next === 'processing' && !canProcess(order) ? 'bg-[#f1f5f9]' : 'bg-[#eef0f8] hover:bg-[#010521]')}
                         title={next === 'processing' && !canProcess(order) ? 'Mark as paid first' : next === 'processing' ? 'Mark Processing' : next === 'ready_for_pickup' ? 'Mark Ready for Pickup' : next === 'delivered' ? 'Mark Delivered' : 'Cancel'}>
                         {next === 'cancelled' ? (
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#a03030] group-hover:text-white"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -819,6 +814,8 @@ export default function CityOrdersPage() {
         )}
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
+
+      {selectedOrder && <CityOrderDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
 
       {showResellerOrder && (
         <CreateResellerOrderModal

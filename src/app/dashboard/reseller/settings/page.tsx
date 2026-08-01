@@ -32,6 +32,7 @@ export default function ResellerSettingsPage() {
   const [securityTargetEnabled, setSecurityTargetEnabled] = useState(false)
   const [securitySwitchPreview, setSecuritySwitchPreview] = useState<boolean | null>(null)
   const [securityAction, setSecurityAction] = useState<'enable' | 'disable' | 'change'>('enable')
+  const [visiblePinField, setVisiblePinField] = useState({ current: false, new: false, confirm: false })
 
   useEffect(() => {
     setTheme(getStoredTheme())
@@ -111,6 +112,7 @@ export default function ResellerSettingsPage() {
     if (response.ok) {
       setTwoFactorEnabled(Boolean(data.enabled))
       setSecurityForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+    setVisiblePinField({ current: false, new: false, confirm: false })
       setSecurityModalOpen(false)
     }
   }
@@ -120,6 +122,7 @@ export default function ResellerSettingsPage() {
 
     clearSecurityMessage()
     setSecurityForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+    setVisiblePinField({ current: false, new: false, confirm: false })
     setSecurityTargetEnabled(nextEnabledState)
     setSecurityAction(twoFactorEnabled ? 'disable' : 'enable')
     setSecuritySwitchPreview(nextEnabledState)
@@ -133,13 +136,16 @@ export default function ResellerSettingsPage() {
   const openChangePinModal = () => {
     clearSecurityMessage()
     setSecurityForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+    setVisiblePinField({ current: false, new: false, confirm: false })
     setSecurityTargetEnabled(true)
     setSecurityAction('change')
     setSecurityModalOpen(true)
   }
 
+
   const closeSecurityModal = () => {
     setSecurityModalOpen(false)
+    setVisiblePinField({ current: false, new: false, confirm: false })
     setSecurityTargetEnabled(twoFactorEnabled)
     setSecuritySwitchPreview(null)
     clearSecurityMessage()
@@ -186,7 +192,7 @@ export default function ResellerSettingsPage() {
               <span className={`flex h-5 w-5 items-center justify-center rounded-full border ${
                 theme === option.value ? 'border-[#C9A84C] bg-[#C9A84C] text-[#0D1B3E]' : 'border-gray-300'
               }`}>
-                {theme === option.value && <span className="text-xs font-bold">✓</span>}
+                {theme === option.value && <span className="text-xs font-bold">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</span>}
               </span>
               <span>
                 <span className="block text-sm font-medium text-[#0D1B3E]">{option.label}</span>
@@ -206,7 +212,7 @@ export default function ResellerSettingsPage() {
         </div>
         <div className="flex items-center justify-between gap-4 p-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">⌁</div>
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â</div>
             <div>
             <p className="text-sm font-semibold text-[#0D1B3E]">Security PIN <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-500'}`}>{displayedSecurityState ? 'On' : 'Off'}</span></p>
               <p className="mt-1 text-xs text-gray-400">{displayedSecurityState ? 'Required at sign-in and sensitive actions.' : 'Protect sign-in, payouts, and account changes.'}</p>
@@ -239,14 +245,31 @@ export default function ResellerSettingsPage() {
                   <h2 id="security-pin-title" className="mt-1 text-base font-semibold text-[#0D1B3E]">{securityAction === 'enable' ? 'Set up your security PIN' : securityAction === 'change' ? 'Change your security PIN' : 'Turn off security PIN?'}</h2>
                   <p className="mt-1 text-xs leading-relaxed text-gray-400">{securityAction === 'enable' ? 'Create and confirm a six-digit PIN. You will need it after signing in and for sensitive actions.' : securityAction === 'change' ? 'Verify using your current PIN, then set a new six-digit PIN.' : 'Enter your current PIN before removing this protection.'}</p>
                 </div>
-                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="text-xl text-gray-400 hover:text-[#0D1B3E]">×</button>
+                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="text-xl text-gray-400 hover:text-[#0D1B3E]">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â</button>
               </div>
             </div>
             <div className="space-y-3 px-5 py-4">
-              {securityAction === 'disable' || securityAction === 'change' ? <input type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Current six-digit PIN" value={securityForm.current_pin} onChange={(event) => setSecurityForm({ ...securityForm, current_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" /> : null}
+              {securityAction === 'disable' || securityAction === 'change' ? (
+                <div className="relative">
+                  <input type={visiblePinField.current ? 'text' : 'password'} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Current six-digit PIN" value={securityForm.current_pin} onChange={(event) => setSecurityForm({ ...securityForm, current_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-10 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" />
+                  <button type="button" aria-label={visiblePinField.current ? 'Hide current PIN' : 'Show current PIN'} aria-pressed={visiblePinField.current} onClick={() => setVisiblePinField((value) => ({ ...value, current: !value.current }))} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-white hover:text-[#0D1B3E] focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/40">
+                    {visiblePinField.current ? <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 4c5 0 9 4 10 8a10.7 10.7 0 0 1-2.1 4.1"/><path d="M6.2 6.2C4.2 7.5 2.8 9.5 2 12c1 4 5 8 10 8 1.5 0 2.9-.4 4.1-1"/></svg> : <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>}
+                  </button>
+                </div>
+              ) : null}
               {securityAction !== 'disable' && <>
-                <input type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder={securityAction === 'enable' ? 'Create your six-digit PIN' : 'New six-digit PIN'} value={securityForm.new_pin} onChange={(event) => setSecurityForm({ ...securityForm, new_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" />
-                <input type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder={securityAction === 'enable' ? 'Confirm your six-digit PIN' : 'Confirm new six-digit PIN'} value={securityForm.confirm_pin} onChange={(event) => setSecurityForm({ ...securityForm, confirm_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" />
+                <div className="relative">
+                  <input type={visiblePinField.new ? 'text' : 'password'} inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder={securityAction === 'enable' ? 'Create your six-digit PIN' : 'New six-digit PIN'} value={securityForm.new_pin} onChange={(event) => setSecurityForm({ ...securityForm, new_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-10 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" />
+                  <button type="button" aria-label={visiblePinField.new ? 'Hide new PIN' : 'Show new PIN'} aria-pressed={visiblePinField.new} onClick={() => setVisiblePinField((value) => ({ ...value, new: !value.new }))} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-white hover:text-[#0D1B3E] focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/40">
+                    {visiblePinField.new ? <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 4c5 0 9 4 10 8a10.7 10.7 0 0 1-2.1 4.1"/><path d="M6.2 6.2C4.2 7.5 2.8 9.5 2 12c1 4 5 8 10 8 1.5 0 2.9-.4 4.1-1"/></svg> : <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>}
+                  </button>
+                </div>
+                <div className="relative">
+                  <input type={visiblePinField.confirm ? 'text' : 'password'} inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder={securityAction === 'enable' ? 'Confirm your six-digit PIN' : 'Confirm new six-digit PIN'} value={securityForm.confirm_pin} onChange={(event) => setSecurityForm({ ...securityForm, confirm_pin: event.target.value.replace(/\D/g, '').slice(0, 6) })} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-10 py-2.5 text-center text-sm outline-none focus:border-[#C9A84C]" />
+                  <button type="button" aria-label={visiblePinField.confirm ? 'Hide confirmation PIN' : 'Show confirmation PIN'} aria-pressed={visiblePinField.confirm} onClick={() => setVisiblePinField((value) => ({ ...value, confirm: !value.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-white hover:text-[#0D1B3E] focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/40">
+                    {visiblePinField.confirm ? <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 4c5 0 9 4 10 8a10.7 10.7 0 0 1-2.1 4.1"/><path d="M6.2 6.2C4.2 7.5 2.8 9.5 2 12c1 4 5 8 10 8 1.5 0 2.9-.4 4.1-1"/></svg> : <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>}
+                  </button>
+                </div>
               </>}
               {securityMessage && <p className="text-xs text-[#a03030]">{securityMessage}</p>}
             </div>

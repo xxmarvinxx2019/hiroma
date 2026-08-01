@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { getProfilePhotoDisplayUrl } from '@/app/lib/profilePhoto'
+import { getPasswordReviewReason, isPasswordReviewDue } from '@/app/lib/passwordReviewPolicy'
 
 export async function GET() {
   try {
@@ -30,6 +31,10 @@ export async function GET() {
         address: true,
         created_at: true,
         // Include reseller profile if role is reseller
+        password_change_required: true,
+        password_is_temporary: true,
+        password_retention_stage: true,
+        password_prompt_due_at: true,
         reseller_profile: {
           select: {
             id: true,
@@ -84,9 +89,15 @@ export async function GET() {
       )
     }
 
-    return NextResponse.json({
+    const passwordReviewDue = user.role === 'reseller' && isPasswordReviewDue(
+      user.password_change_required,
+      user.password_prompt_due_at,
+    )
+    const response = NextResponse.json({
       user: {
         ...user,
+        password_change_required: passwordReviewDue,
+        password_review_reason: getPasswordReviewReason(user.password_is_temporary, user.password_retention_stage),
         profile_photo: await getProfilePhotoDisplayUrl(user.profile_photo),
         ...(currentUser.is_staff && {
           full_name: currentUser.actor_name || currentUser.full_name,
@@ -97,6 +108,9 @@ export async function GET() {
         owner_id: currentUser.owner_id || user.id,
       },
     })
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    return response
+
   } catch (error) {
     console.error('[ME ERROR]', error)
     return NextResponse.json(

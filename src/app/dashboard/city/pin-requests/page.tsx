@@ -194,7 +194,7 @@ export default function CityPinRequestsPage() {
         <div className="flex items-center gap-2 px-4 py-3 border-b border-[#0D1B3E]/8">
           {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (
             <button key={f} onClick={() => setStatusFilter(f)}
-              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
+              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${statusFilter === f ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400 hover:text-[#0D1B3E]'}`}>
               {f}
             </button>
           ))}
@@ -259,7 +259,7 @@ export default function CityPinRequestsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="bg-[#0D1B3E] px-5 py-4 flex items-center justify-between">
+            <div className="bg-[#010521] px-5 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">Request PINs</h2>
               <button onClick={() => setShowForm(false)} className="text-white/50 hover:text-white text-lg">✕</button>
             </div>
