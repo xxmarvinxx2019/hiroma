@@ -7,7 +7,7 @@ import { calculatePackageEconomics } from '@/app/lib/package-economics'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// â”€â”€ Generate unique PIN code â”€â”€
+// ── Generate unique PIN code ──
 function calculateUpgradeSnapshot(products: Array<{ quantity: number; product: { price: unknown; reseller_price: unknown; city_price: unknown; cost_price: unknown } }>) {
   return products.reduce((total, item) => {
     const srp = Number(item.product.price || 0)
@@ -27,7 +27,7 @@ function generatePinCode(packageName: string): string {
   return `${prefix}-${year}-${tier}-${random}`
 }
 
-// â”€â”€ GET all PINs with pagination, search, status filter â”€â”€
+// ── GET all PINs with pagination, search, status filter ──
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// â”€â”€ POST generate & sell PINs to city distributor â”€â”€
+// ── POST generate & sell PINs to city distributor ──
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // â”€â”€ Get package details â”€â”€
+    // ── Get package details ──
     const pkg = await prisma.package.findUnique({
       where:  { id: package_id },
       select: {
@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // â”€â”€ Generate unique PIN codes â”€â”€
+    // ── Generate unique PIN codes ──
     const pinCodes: string[] = []
     const existingPins = new Set(
       (await prisma.pin.findMany({ select: { pin_code: true } })).map(
@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
 
     const totalAmount = unitPinPrice * quantity
 
-    // â”€â”€ Create PINs + record as a sale order â”€â”€
+    // ── Create PINs + record as a sale order ──
     await prisma.$transaction(async (tx) => {
 
       // 1. Bulk create PINs
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
         })),
       })
 
-      // 2. Record the PIN sale as an order (admin â†’ city distributor)
+      // 2. Record the PIN sale as an order (admin → city distributor)
       // Note: no order_items needed since this is a PIN sale not a product sale
       await tx.order.create({
         data: {
@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           total_amount: totalAmount,
           is_cross_purchase: false,
-          notes: `PIN sale: ${quantity} Ã— ${pkg.name} package @ â‚±${unitPinPrice.toLocaleString()} each`,
+          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${unitPinPrice.toLocaleString()} each`,
         },
       })
 
@@ -277,7 +277,7 @@ return NextResponse.json({
     return NextResponse.json({ error: 'PIN generation failed: ' + detail }, { status: 500 })
   }
 }
-// â”€â”€ PATCH â€” cancel PINs (single or bulk) â”€â”€
+// ── PATCH — cancel PINs (single or bulk) ──
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
