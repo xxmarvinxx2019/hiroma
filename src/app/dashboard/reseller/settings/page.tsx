@@ -192,7 +192,7 @@ export default function ResellerSettingsPage() {
               <span className={`flex h-5 w-5 items-center justify-center rounded-full border ${
                 theme === option.value ? 'border-[#C9A84C] bg-[#C9A84C] text-[#0D1B3E]' : 'border-gray-300'
               }`}>
-                {theme === option.value && <span className="text-xs font-bold">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</span>}
+                {theme === option.value && <span className="text-xs font-bold">✓</span>}
               </span>
               <span>
                 <span className="block text-sm font-medium text-[#0D1B3E]">{option.label}</span>
@@ -212,7 +212,7 @@ export default function ResellerSettingsPage() {
         </div>
         <div className="flex items-center justify-between gap-4 p-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â</div>
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">🔐</div>
             <div>
             <p className="text-sm font-semibold text-[#0D1B3E]">Security PIN <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-500'}`}>{displayedSecurityState ? 'On' : 'Off'}</span></p>
               <p className="mt-1 text-xs text-gray-400">{displayedSecurityState ? 'Required at sign-in and sensitive actions.' : 'Protect sign-in, payouts, and account changes.'}</p>
@@ -245,7 +245,7 @@ export default function ResellerSettingsPage() {
                   <h2 id="security-pin-title" className="mt-1 text-base font-semibold text-[#0D1B3E]">{securityAction === 'enable' ? 'Set up your security PIN' : securityAction === 'change' ? 'Change your security PIN' : 'Turn off security PIN?'}</h2>
                   <p className="mt-1 text-xs leading-relaxed text-gray-400">{securityAction === 'enable' ? 'Create and confirm a six-digit PIN. You will need it after signing in and for sensitive actions.' : securityAction === 'change' ? 'Verify using your current PIN, then set a new six-digit PIN.' : 'Enter your current PIN before removing this protection.'}</p>
                 </div>
-                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="text-xl text-gray-400 hover:text-[#0D1B3E]">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â</button>
+                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="text-xl text-gray-400 hover:text-[#0D1B3E]">×</button>
               </div>
             </div>
             <div className="space-y-3 px-5 py-4">

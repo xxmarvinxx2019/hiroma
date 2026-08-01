@@ -282,7 +282,7 @@ export async function GET(req: NextRequest) {
         SELECT
           rf."id"::text AS registration_financial_id,
           COALESCE(u."full_name", 'Unknown reseller') AS source_reseller,
-          COALESCE(u."username", 'â€”') AS source_username,
+          COALESCE(u."username", '—') AS source_username,
           rf."package_name_snapshot" AS package_name,
           rf."binary_commission_allocation"::float AS allocated_amount,
           COALESCE(lot."remaining_amount", 0)::float AS current_remaining_amount,
