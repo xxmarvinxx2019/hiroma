@@ -9,6 +9,34 @@ export function isValidSecurityPin(pin: unknown): pin is string {
   return typeof pin === 'string' && PIN_PATTERN.test(pin)
 }
 
+export interface ResellerSecurityPinVerification {
+  required: boolean
+  valid: boolean
+  locked?: boolean
+  error?: string
+}
+
+export function isSensitiveResellerPinAccepted(
+  verification: ResellerSecurityPinVerification,
+): boolean {
+  return verification.required === true && verification.valid === true
+}
+
+export function getSensitiveResellerPinFailure(
+  verification: ResellerSecurityPinVerification,
+) {
+  if (!verification.required) {
+    return {
+      error: 'Configure your six-digit security PIN before continuing.',
+      status: 403,
+    }
+  }
+  return {
+    error: verification.error || 'Security PIN is required.',
+    status: verification.locked ? 429 : 401,
+  }
+}
+
 export async function verifyResellerSecurityPin(userId: string, pin: unknown) {
   const user = await prisma.user.findUnique({
     where: { id: userId },

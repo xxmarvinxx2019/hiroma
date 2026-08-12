@@ -207,14 +207,14 @@ export default function AdminPayoutsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Pending Requests', value: String(summary.pending_count), color: '#C9A84C', sub: 'Awaiting approval' },
+          { label: 'Pending Requests', value: String(summary.pending_count), color: '#9a6f1e', sub: 'Awaiting approval' },
           { label: 'Total Amount',     value: fmt(summary.total_amount),     color: '#0D1B3E', sub: 'Filtered results' },
           { label: 'Cutoff Periods',   value: cutoffSettings.split(',').map((d) => d.trim() === '31' ? 'EOM' : `${d}th`).join(' & '), color: '#1a7a4a', sub: 'Every month' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4" style={{ borderTop: `2px solid ${s.color}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-xl font-semibold" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>
+          <div key={s.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg" style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.color}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.color}38` }}>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
+            <p className="text-xl font-extrabold text-white">{s.value}</p>
+            <p className="mt-0.5 text-[10px] font-medium text-white/70">{s.sub}</p>
           </div>
         ))}
       </div>

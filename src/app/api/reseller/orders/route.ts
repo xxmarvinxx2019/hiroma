@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
+import { InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 // ── GET reseller's orders + their city distributor as supplier ──
 export async function GET(req: NextRequest) {
   try {
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, payment_method, payment_reference, city_dist_id } = await req.json()
+    const { order_type, notes, items, payment_method, payment_reference, city_dist_id, delivery_address, delivery_location } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -116,25 +118,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
     }
 
-    // Self-service orders are always routed to the reseller's assigned distributor.
+    if (!delivery_address || typeof delivery_address !== 'string' || !delivery_address.trim()) {
+      return NextResponse.json({ error: 'A delivery address is required.' }, { status: 400 })
+    }
+    if (!validateStockItems(items)) {
+      return NextResponse.json({ error: 'Each item must have a valid product and positive whole-number quantity.' }, { status: 400 })
+    }
+
+    // Registration/referral ownership remains in the reseller profile. seller_id below is
+    // the fulfillment distributor for this order only.
     const profile = await prisma.resellerProfile.findUnique({
       where:  { user_id: user.id },
       select: {
         city_dist_id: true,
-        city_dist: {
-          select: { id: true, full_name: true, username: true, status: true },
-        },
       },
     })
-    const cityDist = profile?.city_dist?.status === 'active' ? profile.city_dist : null
+    const activeDistributors = await prisma.user.findMany({
+      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: 'city' } } },
+      select: { id: true, full_name: true, username: true, distributor_profile: { select: { coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true } } },
+    })
+    const location = delivery_location && typeof delivery_location === 'object' ? delivery_location as Record<string, unknown> : {}
+    const recommendation = profile?.city_dist_id ? recommendFulfillmentDistributor(activeDistributors.map((distributor) => ({
+      id: distributor.id,
+      full_name: distributor.full_name,
+      coverage_area: distributor.distributor_profile?.coverage_area,
+      region_name: distributor.distributor_profile?.region_name,
+      province_name: distributor.distributor_profile?.province_name,
+      city_muni_name: distributor.distributor_profile?.city_muni_name,
+      barangay_name: distributor.distributor_profile?.barangay_name,
+    })), profile.city_dist_id, {
+      address: delivery_address.trim(),
+      region: typeof location.region === 'string' ? location.region : '',
+      province: typeof location.province === 'string' ? location.province : '',
+      city: typeof location.city === 'string' ? location.city : '',
+      barangay: typeof location.barangay === 'string' ? location.barangay : '',
+    }) : null
+    const cityDist = activeDistributors.find(({ id }) => id === recommendation?.distributor.id) || null
 
     if (!cityDist) {
       return NextResponse.json({ error: 'No active distributor is assigned to your account.' }, { status: 400 })
     }
-    if (city_dist_id && city_dist_id !== profile?.city_dist_id) {
-      return NextResponse.json({
-        error: 'Online orders can only be placed with your assigned distributor.',
-      }, { status: 403 })
+    if (city_dist_id && city_dist_id !== cityDist.id) {
+      return NextResponse.json({ error: 'The fulfillment recommendation changed. Refresh the order and try again.' }, { status: 409 })
     }
 
     // Validate products
@@ -157,6 +182,22 @@ export async function POST(req: NextRequest) {
     }
 
     const productMap = new Map(products.map((p) => [p.id, p]))
+
+    const inventory = await prisma.inventory.findMany({
+      where: { owner_id: cityDist.id, product_id: { in: productIds } },
+      select: { product_id: true, quantity: true },
+    })
+    const stockByProduct = new Map(inventory.map((item) => [item.product_id, item.quantity]))
+    const unavailable = items.find((item: { product_id: string; quantity: number }) =>
+      !Number.isInteger(item.quantity) || item.quantity < 1 || (stockByProduct.get(item.product_id) || 0) < item.quantity
+    )
+    if (unavailable) {
+      const product = productMap.get(unavailable.product_id)
+      return NextResponse.json({
+        error: `Insufficient stock for ${product?.name || 'one or more items'} at ${cityDist.full_name}. Please change fulfillment distributor or adjust the quantity.`,
+      }, { status: 400 })
+    }
+
     let total_amount = 0
 
     const orderItems = items.map((item: { product_id: string; quantity: number }) => {
@@ -170,14 +211,16 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, unit_acquisition_cost, subtotal }
     })
 
-    const order = await prisma.order.create({
-      data: {
+    const order = await prisma.$transaction(async (tx) => {
+      await reserveOrderStock(tx, cityDist.id, items)
+      return tx.order.create({ data: {
         buyer_id:          user.id,
         seller_id:         cityDist.id,
         order_type,
         status:            'pending',
         total_amount,
         is_cross_purchase: false,
+        delivery_address:   delivery_address.trim(),
         notes:             notes?.trim() || null,
         payment_method:      payment_method || 'cash_on_pickup',
         payment_reference:   payment_reference?.trim()   || null,
@@ -187,7 +230,7 @@ export async function POST(req: NextRequest) {
       select: {
         id: true, status: true, total_amount: true, created_at: true,
         seller: { select: { full_name: true, username: true } },
-      },
+      } })
     })
     return NextResponse.json({
       success: true,
@@ -195,6 +238,9 @@ export async function POST(req: NextRequest) {
       order,
     })
   } catch (error) {
+    if (error instanceof InsufficientStockError) {
+      return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved the remaining quantity.' }, { status: 409 })
+    }
     console.error('[RESELLER ORDERS POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
@@ -215,6 +261,7 @@ export async function PATCH(req: NextRequest) {
 
     const order = await prisma.order.findFirst({
       where: { id: order_id, buyer_id: user.id },
+      include: { items: true },
     })
 
     if (!order) {
@@ -237,9 +284,14 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Only pending orders can be cancelled.' }, { status: 400 })
     }
 
-    const updated = await prisma.order.update({
-      where: { id: order_id },
-      data:  { status: 'cancelled' },
+    const updated = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.order.updateMany({
+        where: { id: order_id, buyer_id: user.id, status: 'pending' },
+        data: { status: 'cancelled' },
+      })
+      if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
+      await releaseOrderStock(tx, order.seller_id, order.items)
+      return tx.order.findUniqueOrThrow({ where: { id: order_id } })
     })
 
     return NextResponse.json({ success: true, order: updated })

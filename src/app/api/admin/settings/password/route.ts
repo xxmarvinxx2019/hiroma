@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser, verifyPassword, hashPassword } from '@/app/lib/auth'
+import { deleteAuthCookie, getCurrentUser, verifyPassword, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 export async function PATCH(req: NextRequest) {
@@ -48,12 +48,13 @@ export async function PATCH(req: NextRequest) {
     const newHash = await hashPassword(new_password)
     await prisma.user.update({
       where: { id: user.id },
-      data: { password_hash: newHash },
+      data: { password_hash: newHash, password_changed_at: new Date() },
     })
+    await deleteAuthCookie()
 
     return NextResponse.json({
       success: true,
-      message: 'Password updated successfully.',
+      message: 'Password updated successfully. Sign in again on this device.',
     })
   } catch (error) {
     console.error('[SETTINGS PASSWORD ERROR]', error)

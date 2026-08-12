@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { adminStaffPermissionForPath, firstAdminStaffRoute } from '@/app/lib/staffPermissions'
 
 // ============================================================
 // CONFIG
@@ -27,9 +28,12 @@ const ROLE_ROUTES: Record<string, string> = {
 }
 
 // ── Public routes that don't need auth ──
-const PUBLIC_ROUTES = ['/', '/login', '/forgot-password']
+const PUBLIC_ROUTES = ['/', '/login', '/login/member', '/login/distributor', '/login/admin', '/forgot-password', '/support']
 
 function requiredStaffPermission(pathname: string, method: string): string | null {
+  const adminPermission = adminStaffPermissionForPath(pathname, method)
+  if (adminPermission !== null) return adminPermission
+  if (pathname.startsWith('/dashboard/city/support-center') || pathname.startsWith('/dashboard/admin/support-center') || pathname.startsWith('/api/admin/support-requests') || pathname.startsWith('/api/support/tickets')) return 'support_center'
   if (pathname.startsWith('/dashboard/city/staff') || pathname.startsWith('/api/city/staff')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/city/profile') || pathname.startsWith('/api/city/profile')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/city/resellers/register')) return 'register_reseller'
@@ -56,13 +60,15 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // ── Allow public routes ──
-  if (PUBLIC_ROUTES.includes(pathname)) {
+  if (PUBLIC_ROUTES.includes(pathname) || pathname.startsWith('/verify/')) {
     return NextResponse.next()
   }
 
   // ── Allow API routes to handle their own auth ──
   if (pathname.startsWith('/api/') && requiredStaffPermission(pathname, req.method) === null) {
-    return NextResponse.next()
+    const requestHeaders = new Headers(req.headers)
+    requestHeaders.delete('x-hiroma-staff-permission')
+    return NextResponse.next({ request: { headers: requestHeaders } })
   }
 
   // ── Allow static files ──
@@ -93,19 +99,31 @@ export async function middleware(req: NextRequest) {
     if (payload.is_staff === true) {
       const requiredPermission = requiredStaffPermission(pathname, req.method)
       const permissions = Array.isArray(payload.permissions) ? payload.permissions : []
-      const hasPermission = !requiredPermission || requiredPermission
-        .split('|')
-        .some((permission) => permissions.includes(permission))
-      if (requiredPermission === '__owner_only__' || !hasPermission) {
+      const hasPermission = !requiredPermission || requiredPermission.split('|').some((permission) => permissions.includes(permission))
+      if (requiredPermission === '__owner_only__') {
         if (pathname.startsWith('/api/')) {
           return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
         }
+        const fallback = role === 'admin' ? firstAdminStaffRoute(permissions) : '/dashboard/city'
+        return NextResponse.redirect(new URL(fallback, req.url))
+      }
+      // Admin staff permissions are reloaded from the database by getCurrentUser
+      // on every API request. This makes removals and deactivation immediate and
+      // prevents a stale JWT from authorizing a mutation.
+      if (role !== 'admin' && !hasPermission) {
+        if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
         return NextResponse.redirect(new URL('/dashboard/city', req.url))
       }
     }
 
     if (pathname.startsWith('/api/')) {
-      return NextResponse.next()
+      const requestHeaders = new Headers(req.headers)
+      const requiredPermission = requiredStaffPermission(pathname, req.method)
+      requestHeaders.delete('x-hiroma-staff-permission')
+      if (payload.is_staff === true && role === 'admin' && requiredPermission) {
+        requestHeaders.set('x-hiroma-staff-permission', requiredPermission)
+      }
+      return NextResponse.next({ request: { headers: requestHeaders } })
     }
 
     const allowedRoute = ROLE_ROUTES[role]
@@ -117,6 +135,9 @@ export async function middleware(req: NextRequest) {
 
     // ── Block access to other role dashboards ──
     if (pathname.startsWith('/dashboard/')) {
+      if (role === 'staff' && payload.is_staff === true && pathname.startsWith('/dashboard/city/support-center') && Array.isArray(payload.permissions) && payload.permissions.includes('support_center')) {
+        return NextResponse.next()
+      }
       const isDashboardAllowed = pathname.startsWith(allowedRoute)
 
       // Admin can access everything

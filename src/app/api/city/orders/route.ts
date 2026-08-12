@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getRanksForPackage, getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 import prisma from '@/app/lib/prisma'
+import { cityOrderListScope } from '@/app/lib/orderSecurity'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
+import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 // ============================================================
 // HELPER — resolve who the city distributor buys from
 // ============================================================
@@ -108,14 +111,7 @@ export async function GET(req: NextRequest) {
     const isResellerTab = tab === 'reseller_orders'
 
     const where: Record<string, unknown> = {
-      // For reseller tab with a search: search ALL reseller orders, not just this city dist's
-      // For reseller tab without search: show only this city dist's reseller orders
-      ...(isBuyer
-        ? { buyer_id: user.id }
-        : (isResellerTab && search)
-          ? { buyer: { role: 'reseller' } }           // search all resellers
-          : { seller_id: user.id }                     // own reseller orders only
-      ),
+      ...cityOrderListScope(user.id, tab),
       ...(status !== 'all' && { status }),
       ...(type   !== 'all' && { order_type: type }),
       ...(search && {
@@ -211,6 +207,9 @@ export async function POST(req: NextRequest) {
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
     }
+    if (!validateStockItems(items)) {
+      return NextResponse.json({ error: 'Each item must have a valid product and positive whole-number quantity.' }, { status: 400 })
+    }
 
     if (!['online', 'offline'].includes(order_type)) {
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
@@ -270,8 +269,9 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    const order = await prisma.order.create({
-      data: {
+    const order = await prisma.$transaction(async (tx) => {
+      await reserveOrderStock(tx, supplier.id, items)
+      return tx.order.create({ data: {
         buyer_id:          user.id,
         seller_id:         supplier.id,
         order_type,
@@ -287,7 +287,7 @@ export async function POST(req: NextRequest) {
       select: {
         id: true, status: true, total_amount: true, created_at: true,
         seller: { select: { full_name: true, username: true } },
-      },
+      } })
     })
     createAuditLog({
   user_id:       user.actor_id || user.id,
@@ -308,6 +308,9 @@ export async function POST(req: NextRequest) {
       supplier,
     })
   } catch (error) {
+    if (error instanceof InsufficientStockError) {
+      return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved it.' }, { status: 409 })
+    }
     console.error('[CITY ORDERS POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
@@ -607,18 +610,27 @@ export async function PATCH(req: NextRequest) {
       && order.payment_status !== 'paid'
 
     const updated = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({
-        where: { id: order_id },
-        data: {
-          ...(status         && { status }),
+      if (status) {
+        const claimed = await tx.order.updateMany({
+          where: { id: order_id, status: order.status },
+          data: {
+            status,
+            ...(payment_status && { payment_status }),
+            ...(cashCollectedAtPickup && { payment_status: 'paid' }),
+            ...(status === 'delivered' && { delivered_at: new Date() }),
+            ...((payment_status === 'paid' || cashCollectedAtPickup) && order.payment_status !== 'paid' && { paid_at: new Date() }),
+          },
+        })
+        if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
+      } else {
+        await tx.order.update({ where: { id: order_id }, data: {
           ...(payment_status && { payment_status }),
-          ...(cashCollectedAtPickup && { payment_status: 'paid' }),
-          ...(status === 'delivered' && order.status !== 'delivered' && { delivered_at: new Date() }),
-          ...((payment_status === 'paid' || cashCollectedAtPickup) && order.payment_status !== 'paid' && { paid_at: new Date() }),
-        },
-      })
+          ...(payment_status === 'paid' && order.payment_status !== 'paid' && { paid_at: new Date() }),
+        } })
+      }
 
       if (status === 'delivered') {
+        await finalizeReservedStock(tx, order.seller_id, order.items)
         for (const item of order.items) {
           await tx.inventory.upsert({
             where: {
@@ -636,13 +648,6 @@ export async function PATCH(req: NextRequest) {
             },
           })
 
-          await tx.inventory.updateMany({
-            where: {
-              owner_id:   order.seller_id,
-              product_id: item.product_id,
-            },
-            data: { quantity: { decrement: item.quantity } },
-          })
         }
 
         const buyerRole = await tx.user.findUnique({
@@ -653,9 +658,11 @@ export async function PATCH(req: NextRequest) {
         if (buyerRole?.role === 'reseller') {
           buyerIsReseller = true
         }
+      } else if (status === 'cancelled') {
+        await releaseOrderStock(tx, order.seller_id, order.items)
       }
 
-      return updatedOrder
+      return tx.order.findUniqueOrThrow({ where: { id: order_id } })
     })
 
     // Run product binary pairing OUTSIDE transaction to avoid timeout
@@ -678,7 +685,7 @@ export async function PATCH(req: NextRequest) {
             where:  { user_id: order.buyer_id },
             select: { package_id: true },
           })
-          if (buyerProfile) {
+          if (false && buyerProfile) {
             // Fetch buyer's current rank/total_pu via raw SQL
             let buyerExtra = { rank: 'default', total_pu: 0 }
             try {
@@ -716,7 +723,7 @@ export async function PATCH(req: NextRequest) {
           }
 
           // 2. Fire ancestor pairing
-          await checkSponsorPairingPoints(order.buyer_id, currentOrderPU)
+          await processDeliveredProductBinaryOrder(order.id)
         }
       } catch (e) {
         console.error('[CITY ORDERS] Product binary pairing error:', e)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import styles from './reseller-theme.module.css'
 
 interface Stats {
@@ -478,6 +479,35 @@ export default function ResellerDashboardPage() {
 
       <div className={`w-full space-y-5 ${styles.dashboard} ${styles.classicDashboard}`}>
 
+      <div className={styles.testingHeroRow}>
+        <section className={styles.testingIdentityCard}>
+          <div className={styles.testingIdentityCopy}>
+            <span>Welcome back,</span>
+            <h1>{firstName} <b aria-hidden="true">👋</b></h1>
+            <p>@{stats.user.username}</p>
+            {stats.package && <em>{stats.package.name}</em>}
+          </div>
+          <div className={styles.testingBrandMark} aria-hidden="true">
+            <Image src="/hiroma-logo.jpg" alt="" width={58} height={58} />
+          </div>
+        </section>
+
+        <section className={`${styles.testingHeroMetric} ${styles.testingPotentialMetric}`}>
+          <div className={styles.testingMetricIcon} aria-hidden="true">🎁</div>
+          <span>Today&apos;s Potential<br />Earnings</span>
+          <strong>{fmt(potentialEarnings)}</strong>
+          <small><b>{refRemaining} referrals</b> to earn {fmt(directBonus)} more!</small>
+          <div className={styles.testingMetricProgress}><i style={{ width: `${Math.min(100, (refToday / Math.max(1, refCap)) * 100)}%` }} /></div>
+        </section>
+
+        <section className={`${styles.testingHeroMetric} ${styles.testingWalletMetric}`}>
+          <div className={styles.testingMetricIcon} aria-hidden="true">💳</div>
+          <span>Total Wallet<br />Balance</span>
+          <strong>{fmt(walletBal)}</strong>
+          <Link href="/dashboard/reseller/wallet">Withdraw →</Link>
+        </section>
+      </div>
+
       {/* ── Welcome Banner ── */}
       <div className={`bg-[#010521] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 overflow-hidden relative ${styles.welcome}`}>
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#C9A84C]/5 rounded-full -translate-y-1/2 translate-x-1/2" />
@@ -497,7 +527,7 @@ export default function ResellerDashboardPage() {
           <div className="bg-white/8 backdrop-blur rounded-2xl px-5 py-4 border border-white/10">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xl">🎁</span>
-              <p className="text-white/50 text-xs">Today's Potential Earnings</p>
+              <p className="text-white/50 text-xs">Today&apos;s Potential Earnings</p>
             </div>
             <p className="text-2xl font-bold text-white">{fmt(potentialEarnings)}</p>
             {refRemaining > 0 ? (
@@ -524,19 +554,32 @@ export default function ResellerDashboardPage() {
       {/* ── Top Stat Cards ── */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${styles.statGrid}`}>
         {[
-          { label: 'Total Earned',   value: fmt(walletEarned),              sub: 'Lifetime earnings',    color: '#1a7a4a', icon: '💰', href: '/dashboard/reseller/wallet' },
-          { label: 'Total Points',   value: totalPoints.toLocaleString(),        sub: `≈ ${fmt(pointsValue)}`, color: '#C9A84C', icon: '⭐', href: '/dashboard/reseller/points' },
-          { label: 'Left Affiliates',  value: leftCount.toLocaleString(),          sub: 'Affiliate members',    color: '#2563eb', icon: '👥', href: '/dashboard/reseller/tree' },
-          { label: 'Right Affiliates', value: rightCount.toLocaleString(),         sub: 'Affiliate members',    color: '#9a6f1e', icon: '👥', href: '/dashboard/reseller/tree' },
+          { label: 'Total Earned',     value: fmt(walletEarned),            sub: 'Lifetime earnings', color: '#168052', foreground: '#FFFFFF', icon: '💰', href: '/dashboard/reseller/wallet' },
+          { label: 'Total Points',     value: totalPoints.toLocaleString(), sub: `≈ ${fmt(pointsValue)}`, color: '#A17820', foreground: '#FFFFFF', icon: '⭐', href: '/dashboard/reseller/points' },
+          { label: 'Left Affiliates',  value: leftCount.toLocaleString(),   sub: 'Affiliate members', color: '#2563EB', foreground: '#FFFFFF', icon: '👥', href: '/dashboard/reseller/tree' },
+          { label: 'Right Affiliates', value: rightCount.toLocaleString(),  sub: 'Affiliate members', color: '#7C3AED', foreground: '#FFFFFF', icon: '👥', href: '/dashboard/reseller/tree' },
         ].map((s) => (
           <Link key={s.label} href={s.href}
-            className={`bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all group ${styles.statCard}`}>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
-              <span className="text-lg">{s.icon}</span>
+            className={`group relative min-h-32 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl ${styles.statCard}`}
+            style={{
+              background: `linear-gradient(145deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.02) 48%, rgba(0,0,0,0.16) 100%), ${s.color}`,
+              borderColor: 'rgba(255,255,255,0.3)',
+              borderTop: '3px solid rgba(255,255,255,0.62)',
+              boxShadow: `0 10px 26px ${s.color}38`,
+            }}>
+            <div aria-hidden="true" className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white opacity-20 blur-2xl transition-transform duration-300 group-hover:scale-125" />
+            <div aria-hidden="true" className="pointer-events-none absolute -bottom-12 -left-10 h-24 w-24 rounded-full bg-black opacity-10 blur-2xl" />
+            <div className="relative flex items-start justify-between mb-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border text-lg shadow-sm"
+                style={{ backgroundColor: 'rgba(255,255,255,0.22)', borderColor: 'rgba(255,255,255,0.3)' }}>
+                {s.icon}
+              </span>
             </div>
-            <p className="text-xl xl:text-2xl font-bold group-hover:text-[#0D1B3E]" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
+            <div className="relative">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide" style={{ color: s.foreground, opacity: 0.82 }}>{s.label}</p>
+              <p className="text-xl xl:text-2xl font-extrabold tracking-tight" style={{ color: s.foreground }}>{s.value}</p>
+              <p className="mt-1 text-[10px] font-medium leading-4" style={{ color: s.foreground, opacity: 0.72 }}>{s.sub}</p>
+            </div>
           </Link>
         ))}
       </div>

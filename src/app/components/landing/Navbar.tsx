@@ -46,7 +46,7 @@ export default function Navbar() {
         {/* Desktop CTA Buttons */}
         <div className="hidden md:flex items-center gap-3">
           <Link
-            href="/login"
+            href="/login/member"
             className="text-[#C9A84C] text-sm font-medium border border-[#C9A84C] rounded-lg px-4 py-2 hover:bg-[#C9A84C] hover:text-[#0D1B3E] transition-all duration-150"
           >
             Sign in
@@ -110,7 +110,7 @@ export default function Navbar() {
           </a>
           <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
             <Link
-              href="/login"
+              href="/login/member"
               className="text-[#C9A84C] text-sm font-medium border border-[#C9A84C] rounded-lg px-4 py-2 text-center hover:bg-[#C9A84C] hover:text-[#0D1B3E] transition-all duration-150"
             >
               Sign in

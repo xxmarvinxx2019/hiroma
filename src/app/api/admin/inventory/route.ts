@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
 import { getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 import { createAuditLog, getClientInfo } from '@/app/lib/auditLog'
 
@@ -474,6 +475,7 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      await consumeAvailableStock(tx, user.id, orderItems)
       const newOrder = isBranchTransfer
         ? null
         : await tx.order.create({
@@ -500,19 +502,8 @@ export async function POST(req: NextRequest) {
           where: { owner_id_product_id: { owner_id, product_id: item.product_id } },
           select: { quantity: true },
         })
-        const adminStockBefore = adminInventory?.quantity ?? 0
+        const adminStockBefore = (adminInventory?.quantity ?? 0) + item.quantity
         const recipientStockBefore = recipientInventory?.quantity ?? 0
-
-        const deducted = adminInventory
-          ? await tx.inventory.updateMany({
-              where: { id: adminInventory.id, quantity: { gte: item.quantity } },
-              data:  { quantity: { decrement: item.quantity } },
-            })
-          : { count: 0 }
-        if (deducted.count !== 1) {
-          const product = productMap.get(item.product_id)
-          throw new Error(`INSUFFICIENT_STOCK:${product?.name || item.product_id}`)
-        }
 
         await tx.inventory.upsert({
           where:  { owner_id_product_id: { owner_id, product_id: item.product_id } },
@@ -599,6 +590,12 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error('[ADMIN INVENTORY POST ERROR]', error)
+    if (error instanceof InsufficientStockError) {
+      return NextResponse.json(
+        { error: 'Insufficient available admin stock. Pending orders may have reserved the remaining quantity.' },
+        { status: 409 }
+      )
+    }
     if (error instanceof Error && error.message.startsWith('INSUFFICIENT_STOCK:')) {
       return NextResponse.json(
         { error: `Insufficient admin stock for "${error.message.slice('INSUFFICIENT_STOCK:'.length)}". Please refresh and retry.` },

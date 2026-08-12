@@ -87,14 +87,17 @@ export default function ResellerGenealogyPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
-          { label: 'Total Affiliates', value: summary.total, accent: '#0D1B3E' },
-          { label: 'Left Affiliates',  value: summary.left,  accent: '#2563eb' },
-          { label: 'Right Affiliates', value: summary.right, accent: '#9a6f1e' },
+          { label: 'Total Affiliates', value: summary.total, accent: '#0D1B3E', icon: '👥' },
+          { label: 'Left Affiliates',  value: summary.left,  accent: '#2563EB', icon: '↙' },
+          { label: 'Right Affiliates', value: summary.right, accent: '#A17820', icon: '↘' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value.toLocaleString()}</p>
+          <div key={s.label} className="group relative min-h-28 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${s.accent}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 26px ${s.accent}38` }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative flex items-start justify-between">
+              <div><p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p><p className="text-2xl font-extrabold text-white">{s.value.toLocaleString()}</p></div>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/30 bg-white/20 text-lg text-white">{s.icon}</span>
+            </div>
           </div>
         ))}
       </div>
@@ -107,7 +110,8 @@ export default function ResellerGenealogyPage() {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search name or username..."
+            placeholder="Search reseller, package, leg, points, or joined date..."
+            aria-label="Search affiliates by reseller, package, leg, points, or joined date"
             className="flex-1 min-w-[200px] bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
           <div className="flex gap-1">

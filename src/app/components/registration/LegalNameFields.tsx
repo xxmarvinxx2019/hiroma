@@ -17,6 +17,9 @@ interface LegalNameFieldsProps {
 const inputClass =
   "w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]";
 
+const capitalizeFirstLetter = (name: string) =>
+  name ? name[0].toUpperCase() + name.slice(1) : name;
+
 export default function LegalNameFields({
   value,
   onChange,
@@ -40,7 +43,9 @@ export default function LegalNameFields({
           <span className="mb-1 block text-xs text-gray-400">First name *</span>
           <input
             value={value.first_name}
-            onChange={(event) => update({ first_name: event.target.value })}
+            onChange={(event) =>
+              update({ first_name: capitalizeFirstLetter(event.target.value) })
+            }
             onBlur={onBlur}
             placeholder="Juan"
             className={inputClass}
@@ -53,7 +58,9 @@ export default function LegalNameFields({
           </span>
           <input
             value={value.middle_name}
-            onChange={(event) => update({ middle_name: event.target.value })}
+            onChange={(event) =>
+              update({ middle_name: capitalizeFirstLetter(event.target.value) })
+            }
             onBlur={onBlur}
             disabled={value.no_middle_name}
             placeholder={
@@ -67,7 +74,9 @@ export default function LegalNameFields({
           <span className="mb-1 block text-xs text-gray-400">Last name *</span>
           <input
             value={value.last_name}
-            onChange={(event) => update({ last_name: event.target.value })}
+            onChange={(event) =>
+              update({ last_name: capitalizeFirstLetter(event.target.value) })
+            }
             onBlur={onBlur}
             placeholder="Cruz"
             className={inputClass}

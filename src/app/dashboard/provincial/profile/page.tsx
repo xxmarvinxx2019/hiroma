@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
 
 // ============================================================
 // TYPES
@@ -12,6 +13,7 @@ interface CityUser {
   username: string
   email: string | null
   mobile: string
+  profile_photo: string | null
   address: string | null
   distributor_profile: {
     coverage_area: string
@@ -69,6 +71,7 @@ export default function ProvincialProfilePage() {
   const [loading, setLoading] = useState(true)
 
   // Profile form
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null)
   const [profileForm, setProfileForm] = useState({ full_name: '', email: '', mobile: '', address: '' })
   const [profileSaving, setProfileSaving]   = useState(false)
   const [profileSuccess, setProfileSuccess] = useState('')
@@ -86,6 +89,7 @@ export default function ProvincialProfilePage() {
       .then((data) => {
         if (data.user) {
           setUser(data.user)
+          setProfilePhoto(data.user.profile_photo || null)
           setProfileForm({
             full_name: data.user.full_name || '',
             email:     data.user.email     || '',
@@ -171,6 +175,7 @@ export default function ProvincialProfilePage() {
 
       {/* Profile */}
       <Section title="Personal Information" desc="Update your name, contact, and address">
+        <ProfilePhotoUploader profilePhoto={profilePhoto} fullName={profileForm.full_name} onChange={setProfilePhoto} />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <InputField
             label="Full Name" value={profileForm.full_name}

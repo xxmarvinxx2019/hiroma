@@ -1,46 +1,83 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
 
-// ── GET all available city distributors + admin ──
-export async function GET() {
+const distributorSelect = {
+  id: true, full_name: true, username: true, mobile: true, address: true, status: true,
+  distributor_profile: { select: {
+    coverage_area: true, dist_level: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true,
+  } },
+} as const
+
+type OutletRow = { user_id: string; fulfillment_outlet_name: string | null; fulfillment_outlet_address: string | null }
+
+function withFulfillmentAddress<T extends { id: string; address: string | null; distributor_profile: { coverage_area: string } | null }>(distributor: T, outlets: Map<string, OutletRow>) {
+  const outletRow = outlets.get(distributor.id)
+  const outlet = outletRow?.fulfillment_outlet_address?.trim()
+  return {
+    ...distributor,
+    fulfillment_address: outlet || distributor.address || distributor.distributor_profile?.coverage_area || null,
+    fulfillment_location_source: outlet ? 'physical_outlet' : 'registered_address',
+    fulfillment_outlet_name: outlet ? outletRow?.fulfillment_outlet_name || null : null,
+  }
+}
+
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'reseller') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user || user.role !== 'reseller') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const currentUser = await prisma.user.findUnique({ where: { id: user.id }, select: { address: true } })
+    const registeredAddress = currentUser?.address || ''
 
     const profile = await prisma.resellerProfile.findUnique({
-      where:  { user_id: user.id },
-      select: {
-        city_dist_id: true,
-        city_dist: {
-          select: {
-            id: true,
-            full_name: true,
-            username: true,
-            status: true,
-            distributor_profile: { select: { coverage_area: true, dist_level: true } },
-          },
-        },
-      },
+      where: { user_id: user.id },
+      select: { city_dist_id: true, city_dist: { select: distributorSelect } },
     })
-
     if (!profile?.city_dist || profile.city_dist.status !== 'active') {
       return NextResponse.json({
         distributors: [],
         assigned_distributor: null,
         default_city_dist_id: null,
+        registered_address: registeredAddress,
         error: 'No active distributor is assigned to this reseller.',
       })
     }
 
-    const { status: _status, ...assignedDistributor } = profile.city_dist
-    return NextResponse.json({
-      distributors: [assignedDistributor],
-      assigned_distributor: assignedDistributor,
-      default_city_dist_id: profile.city_dist_id,
+    const rawDistributors = await prisma.user.findMany({
+      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: 'city' } } },
+      select: distributorSelect, orderBy: { full_name: 'asc' },
     })
+    let outletRows: OutletRow[] = []
+    try {
+      outletRows = await prisma.$queryRaw<OutletRow[]>`
+        SELECT "user_id", "fulfillment_outlet_name", "fulfillment_outlet_address"
+        FROM "distributor_profiles"
+        WHERE "fulfillment_outlet_address" IS NOT NULL
+      `
+    } catch {
+      // The optional outlet migration may not be applied yet. Registered addresses remain the safe fallback.
+    }
+    const outlets = new Map(outletRows.map((row) => [row.user_id, row]))
+    const distributors = rawDistributors.map((distributor) => withFulfillmentAddress(distributor, outlets))
+    const assignedDistributor = withFulfillmentAddress(profile.city_dist, outlets)
+    const address = (req.nextUrl.searchParams.get('address') || registeredAddress).trim()
+    const region = req.nextUrl.searchParams.get('region') || ''
+    const province = req.nextUrl.searchParams.get('province') || ''
+    const city = req.nextUrl.searchParams.get('city') || ''
+    const barangay = req.nextUrl.searchParams.get('barangay') || ''
+    const recommendation = recommendFulfillmentDistributor(distributors.map((distributor) => ({
+      id: distributor.id,
+      full_name: distributor.full_name,
+      coverage_area: distributor.distributor_profile?.coverage_area,
+      region_name: distributor.distributor_profile?.region_name,
+      province_name: distributor.distributor_profile?.province_name,
+      city_muni_name: distributor.distributor_profile?.city_muni_name,
+      barangay_name: distributor.distributor_profile?.barangay_name,
+    })), profile.city_dist_id, { address, region, province, city, barangay })
+    const recommendedDistributor = distributors.find(({ id }) => id === recommendation?.distributor.id) || assignedDistributor
+    return NextResponse.json({ distributors, assigned_distributor: assignedDistributor, default_city_dist_id: profile.city_dist_id, registered_address: registeredAddress, recommended_distributor: recommendedDistributor, recommendation_basis: recommendation?.basis || 'assigned_fallback' })
   } catch (error) {
     console.error('[RESELLER CITY DISTS ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

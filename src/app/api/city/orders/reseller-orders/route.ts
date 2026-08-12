@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
 
 // ============================================================
 // PRODUCT BINARY POINTS — same logic as city orders route
@@ -191,6 +193,30 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = req.nextUrl
     const search = searchParams.get('search') || ''
+    const memberId = searchParams.get('member_id')?.trim().toUpperCase() || ''
+
+    if (memberId) {
+      if (!/^HRM-\d{4}-\d{6}$/.test(memberId)) {
+        return NextResponse.json({ error: 'Invalid Hiroma Member ID.' }, { status: 400 })
+      }
+      const reseller = await prisma.user.findFirst({
+        where: {
+          member_id: memberId,
+          role: 'reseller',
+          status: 'active',
+        },
+        select: {
+          id: true,
+          full_name: true,
+          username: true,
+          member_id: true,
+        },
+      })
+      if (!reseller) {
+        return NextResponse.json({ error: 'Active reseller not found for this Member ID.' }, { status: 404 })
+      }
+      return NextResponse.json({ reseller })
+    }
 
     const resellers = await prisma.user.findMany({
       where: {
@@ -207,6 +233,7 @@ export async function GET(req: NextRequest) {
         id:        true,
         full_name: true,
         username:  true,
+        member_id: true,
       },
       orderBy: { full_name: 'asc' },
       take: 30,
@@ -320,6 +347,7 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      await consumeAvailableStock(tx, user.id, orderItems)
       const newOrder = await tx.order.create({
         data: {
           buyer_id:          reseller_id || user.id,
@@ -363,12 +391,6 @@ export async function POST(req: NextRequest) {
             },
           })
         }
-
-        // Deduct from city distributor inventory
-        await tx.inventory.updateMany({
-          where: { owner_id: user.id, product_id: item.product_id },
-          data:  { quantity: { decrement: item.quantity } },
-        })
       }
 
       return newOrder
@@ -386,7 +408,7 @@ export async function POST(req: NextRequest) {
       const puMap = new Map(puProducts.map((p: any) => [p.id, Number(p.pu_value)]))
       const currentOrderPU = orderItems.reduce((sum: number, i: any) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
 
-      // Update buyer's own PU and rank
+      // Product Binary owns the idempotent personal-PU/rank update and pairing.
       let buyerExtra = { rank: 'default', total_pu: 0 }
       try {
         const brows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
@@ -396,7 +418,7 @@ export async function POST(req: NextRequest) {
         if (brows[0]) buyerExtra = { rank: brows[0].rank, total_pu: Number(brows[0].total_pu) }
       } catch { /* not migrated */ }
 
-      if (currentOrderPU > 0) {
+      if (false && currentOrderPU > 0) {
         const newTotalPU = buyerExtra.total_pu + currentOrderPU
         const { getCurrentRankForReseller } = await import('@/app/api/admin/ranks/route')
         const buyerPkgId = await prisma.resellerProfile.findUnique({ where: { user_id: reseller_id }, select: { package_id: true } }).then(p => p?.package_id || '')
@@ -410,8 +432,8 @@ export async function POST(req: NextRequest) {
           }
         } catch { /* not migrated */ }
 
-        await checkSponsorPairingPoints(reseller_id, currentOrderPU)
       }
+      if (currentOrderPU > 0) await processDeliveredProductBinaryOrder(order.id)
     } catch (pointsError) {
       console.error('[WALK-IN POINTS ERROR]', pointsError)
       // Don't fail the order if points check fails
@@ -462,6 +484,9 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error) {
+    if (error instanceof InsufficientStockError) {
+      return NextResponse.json({ error: 'Insufficient available stock. Pending orders may have reserved the remaining quantity.' }, { status: 409 })
+    }
     console.error('[CITY RESELLER ORDER POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

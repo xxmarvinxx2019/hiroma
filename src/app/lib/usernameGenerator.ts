@@ -1,20 +1,18 @@
 import prisma from '@/app/lib/prisma'
 import { getPersonNameCoreParts, normalizePersonName } from '@/app/lib/nameFormat'
+import { hashIdentityDocument } from '@/app/lib/identityDocument'
 
 const MAX_ACCOUNTS_PER_PERSON = 7
 
 type ExistingIdentityAccount = {
   username: string
+  full_name: string
   birthday: string | null
-  birthplace: string | null
+  identity_document_hash: string | null
 }
 
 function cleanUsernamePart(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '')
-}
-
-function normalizeBirthplace(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 function toBirthdayKey(value: string): string {
@@ -43,37 +41,52 @@ export type UsernamePlan = {
   remainingAfterRegistration: number
   isFirstAccount: boolean
   identityKey: string
+  confirmationRequired: boolean
+  matchingUsernames: string[]
 }
 
 export async function generateUsernamePlan(input: {
   fullName: string
   birthday: string
   birthplace: string
+  identityDocumentType?: string
+  identityDocumentNumber?: string
+  mobile?: string
+  email?: string
+  identityConfirmation?: 'same' | 'different'
 }): Promise<UsernamePlan> {
   const fullName = normalizePersonName(input.fullName)
-  const normalizedName = fullName.toLowerCase().replace(/\s+/g, ' ')
+  const legalNameCoreKey = getLegalNameCoreKey(fullName)
   const birthdayKey = toBirthdayKey(input.birthday)
-  const birthplaceKey = normalizeBirthplace(input.birthplace)
+  const identityDocumentHash = input.identityDocumentType && input.identityDocumentNumber
+    ? hashIdentityDocument(input.identityDocumentType, input.identityDocumentNumber)
+    : null
 
-  if (!normalizedName || !birthdayKey || !birthplaceKey) {
+  if (!legalNameCoreKey || legalNameCoreKey === '|' || !birthdayKey || !input.birthplace.trim()) {
     throw new Error('Full name, valid birth date, and place of birth are required to generate a username.')
   }
 
   const sameNameAccounts = await prisma.$queryRaw<ExistingIdentityAccount[]>`
     SELECT username,
+           full_name,
            birthday::text AS birthday,
-           LOWER(REGEXP_REPLACE(TRIM(COALESCE(birthplace, '')), '\s+', ' ', 'g')) AS birthplace
+           identity_document_hash
     FROM users
     WHERE role = 'reseller'
       AND status != 'inactive'
-      AND LOWER(REGEXP_REPLACE(TRIM(full_name), '\s+', ' ', 'g')) = ${normalizedName}
+      AND (
+        birthday::text = ${birthdayKey}
+        OR (${identityDocumentHash}::text IS NOT NULL AND identity_document_hash = ${identityDocumentHash})
+      )
     ORDER BY created_at ASC
   `
 
   const samePersonAccounts = sameNameAccounts.filter((account) =>
-    account.birthday === birthdayKey && account.birthplace === birthplaceKey
+    (account.birthday === birthdayKey && getLegalNameCoreKey(account.full_name) === legalNameCoreKey) ||
+    (identityDocumentHash !== null && account.identity_document_hash === identityDocumentHash)
   )
-  const existingAccountCount = samePersonAccounts.length
+  const confirmationRequired = samePersonAccounts.length > 0 && !input.identityConfirmation
+  const existingAccountCount = input.identityConfirmation === 'same' ? samePersonAccounts.length : 0
   if (existingAccountCount >= MAX_ACCOUNTS_PER_PERSON) {
     throw new Error(`Maximum accounts (${MAX_ACCOUNTS_PER_PERSON}) reached for this person.`)
   }
@@ -112,6 +125,13 @@ export async function generateUsernamePlan(input: {
     maxAccounts: MAX_ACCOUNTS_PER_PERSON,
     remainingAfterRegistration: MAX_ACCOUNTS_PER_PERSON - (existingAccountCount + 1),
     isFirstAccount,
-    identityKey: `${normalizedName}|${birthdayKey}|${birthplaceKey}`,
+    identityKey: `${legalNameCoreKey}|${birthdayKey}`,
+    confirmationRequired,
+    matchingUsernames: samePersonAccounts.map((account) => account.username),
   }
+}
+
+function getLegalNameCoreKey(fullName: string): string {
+  const parts = getPersonNameCoreParts(fullName)
+  return `${cleanUsernamePart(parts[0] || '')}|${cleanUsernamePart(parts.at(-1) || '')}`
 }

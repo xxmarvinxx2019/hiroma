@@ -1,7 +1,7 @@
 'use client'
 
 import CityOrderDetailsModal from './CityOrderDetailsModal'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 interface OrderItem {
@@ -33,6 +33,7 @@ interface Reseller {
   id: string
   full_name: string
   username: string
+  member_id?: string | null
 }
 
 interface Supplier {
@@ -257,6 +258,118 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
 }
 
 // ── City dist creates walk-in order for reseller ──
+function extractMemberIdFromQr(value: string) {
+  const normalized = decodeURIComponent(value).trim().toUpperCase()
+  return normalized.match(/HRM-\d{4}-\d{6}/)?.[0] || ''
+}
+
+function MemberQrScanner({
+  onClose,
+  onDetected,
+}: {
+  onClose: () => void
+  onDetected: (memberId: string) => Promise<boolean>
+}) {
+  const scannerElementId = `member-qr-reader-${useId().replace(/:/g, '-')}`
+  const detectionLocked = useRef(false)
+  const [manualMemberId, setManualMemberId] = useState('')
+  const [scannerError, setScannerError] = useState('')
+
+  useEffect(() => {
+    let disposed = false
+    let scanner: import('html5-qrcode').Html5Qrcode | null = null
+
+    const startScanner = async () => {
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode')
+        if (disposed) return
+        scanner = new Html5Qrcode(scannerElementId)
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1 },
+          async (decodedText) => {
+            if (detectionLocked.current) return
+            const memberId = extractMemberIdFromQr(decodedText)
+            if (!memberId) {
+              setScannerError('This QR code is not a valid Hiroma Member ID.')
+              return
+            }
+            detectionLocked.current = true
+            setScannerError('')
+            const accepted = await onDetected(memberId)
+            if (!accepted) {
+              setScannerError('Active reseller not found for this Member ID.')
+              detectionLocked.current = false
+            }
+          },
+          () => undefined,
+        )
+      } catch {
+        if (!disposed) setScannerError('Camera unavailable. Allow camera access or enter the Member ID below.')
+      }
+    }
+
+    void startScanner()
+    return () => {
+      disposed = true
+      if (scanner?.isScanning) {
+        void scanner.stop().then(() => scanner?.clear()).catch(() => undefined)
+      } else {
+        scanner?.clear()
+      }
+    }
+  }, [onDetected, scannerElementId])
+
+  const submitManualId = async () => {
+    const memberId = extractMemberIdFromQr(manualMemberId)
+    if (!memberId) {
+      setScannerError('Enter a valid Member ID, for example HRM-2026-000183.')
+      return
+    }
+    setScannerError('')
+    const accepted = await onDetected(memberId)
+    if (!accepted) setScannerError('Active reseller not found for this Member ID.')
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-[#010521]/65 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="member-scanner-title">
+      <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close member scanner" />
+      <aside className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
+        <div className="flex items-start justify-between border-b border-[#0D1B3E]/10 px-5 py-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#C9A84C]">Member identification</p>
+            <h2 id="member-scanner-title" className="mt-1 text-lg font-semibold text-[#0D1B3E]">Scan Digital ID QR</h2>
+            <p className="mt-1 text-xs leading-5 text-gray-400">Point the camera at the reseller&apos;s Hiroma Digital ID.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-[#F0F2F8] hover:text-[#0D1B3E]" aria-label="Close scanner">✕</button>
+        </div>
+
+        <div className="flex-1 space-y-5 p-5">
+          <div className="overflow-hidden rounded-2xl border border-[#C9A84C]/45 bg-[#010521] p-2 shadow-[0_14px_35px_rgba(1,5,33,.18)]">
+            <div id={scannerElementId} className="min-h-[300px] overflow-hidden rounded-xl" />
+          </div>
+          <div className="flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 before:h-px before:flex-1 before:bg-[#0D1B3E]/10 after:h-px after:flex-1 after:bg-[#0D1B3E]/10">
+            Or enter Member ID
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={manualMemberId}
+              onChange={(event) => setManualMemberId(event.target.value.toUpperCase())}
+              onKeyDown={(event) => { if (event.key === 'Enter') void submitManualId() }}
+              placeholder="HRM-2026-000183"
+              className="min-w-0 flex-1 rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-sm font-medium uppercase text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+            />
+            <button type="button" onClick={() => void submitManualId()} className="rounded-lg bg-[#010521] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#162850]">
+              Find member
+            </button>
+          </div>
+          {scannerError ? <p className="rounded-lg bg-[#fdecea] px-3 py-2 text-xs text-[#a03030]" role="alert">{scannerError}</p> : null}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
 function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [resellers, setResellers]           = useState<Reseller[]>([])
   const [selectedResellerId, setResellerId] = useState('')
@@ -273,6 +386,9 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   const [submitting, setSubmitting]         = useState(false)
   const [error, setError]                   = useState('')
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [showMemberScanner, setShowMemberScanner] = useState(false)
+  const [isScannedMemberLocked, setIsScannedMemberLocked] = useState(false)
+  const scanningMember = useRef(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -342,9 +458,37 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     else setError(data.error || 'Something went wrong.')
   }
 
+  const identifyScannedMember = useCallback(async (memberId: string) => {
+    if (scanningMember.current) return false
+    scanningMember.current = true
+    setError('')
+    try {
+      const response = await fetch(`/api/city/orders/reseller-orders?member_id=${encodeURIComponent(memberId)}`)
+      const data = await response.json()
+      if (!response.ok || !data.reseller) {
+        setError(data.error || 'Active reseller not found for this Member ID.')
+        return false
+      }
+      const reseller = data.reseller as Reseller
+      setResellerId(reseller.id)
+      setSelectedResellerName(reseller.full_name)
+      setResellerSearch('')
+      setCustomerName('')
+      setShowResellerDrop(false)
+      setIsScannedMemberLocked(true)
+      setShowMemberScanner(false)
+      return true
+    } catch {
+      setError('Unable to verify this member right now. Please try again.')
+      return false
+    } finally {
+      scanningMember.current = false
+    }
+  }, [])
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="relative bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Create Walk-in Order</h2>
@@ -356,27 +500,48 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
               <div className="relative">
-                <label className="block text-xs text-gray-400 mb-1">Reseller username or name (optional)</label>
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <label className="block text-xs text-gray-400">
+                    {isScannedMemberLocked ? 'Verified reseller (locked)' : 'Reseller username or name (optional)'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setError(''); setShowMemberScanner(true) }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#C9A84C]/45 bg-[#fef9ee] px-2.5 py-1.5 text-[10px] font-semibold text-[#8a641b] transition-colors hover:bg-[#f8edcf]"
+                  >
+                    <span aria-hidden="true">▣</span> {isScannedMemberLocked ? 'Rescan Member QR' : 'Scan Member QR'}
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type="text"
                     value={resellerSearch || selectedResellerName}
+                    readOnly={isScannedMemberLocked}
+                    aria-readonly={isScannedMemberLocked}
                     onChange={(e) => {
+                      if (isScannedMemberLocked) return
                       setResellerSearch(e.target.value)
                       setShowResellerDrop(true)
                       if (!e.target.value) { setResellerId(''); setSelectedResellerName('') }
                     }}
-                    onFocus={() => setShowResellerDrop(true)}
+                    onFocus={() => { if (!isScannedMemberLocked) setShowResellerDrop(true) }}
                     onBlur={() => setTimeout(() => setShowResellerDrop(false), 150)}
                     placeholder="Leave blank for non-member / search nationwide..."
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
+                    className={`w-full rounded-lg border px-3 py-2 pr-9 text-sm text-[#0D1B3E] outline-none placeholder:text-gray-400 ${
+                      isScannedMemberLocked
+                        ? 'cursor-not-allowed border-emerald-300 bg-emerald-50 font-medium'
+                        : 'border-[#0D1B3E]/15 bg-[#F0F2F8] focus:border-[#C9A84C]'
+                    }`}
                   />
-                  {selectedResellerId && (
+                  {isScannedMemberLocked && (
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-emerald-600" aria-label="Verified reseller locked">🔒</span>
+                  )}
+                  {selectedResellerId && !isScannedMemberLocked && (
                     <button onClick={() => { setResellerId(''); setSelectedResellerName(''); setResellerSearch('') }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
                   )}
                 </div>
-                {showResellerDrop && (
+                {showResellerDrop && !isScannedMemberLocked && (
                   <div className="absolute z-[100] w-full bg-white border border-[#0D1B3E]/15 rounded-xl shadow-xl mt-1 max-h-40 overflow-y-auto">
                     {resellers
                       .filter((r) =>
@@ -505,8 +670,12 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
           </div>
         </div>
       </div>
-
-
+      {showMemberScanner ? (
+        <MemberQrScanner
+          onClose={() => setShowMemberScanner(false)}
+          onDetected={identifyScannedMember}
+        />
+      ) : null}
     </div>
   )
 }

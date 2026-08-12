@@ -41,6 +41,13 @@ const STATUS: Record<PayoutStatus, { label: string; description: string; color: 
   },
 }
 
+const STATUS_CARD_COLORS: Record<PayoutStatus, string> = {
+  pending: '#A17820',
+  approved: '#2563EB',
+  rejected: '#C23B3B',
+  released: '#168052',
+}
+
 const fmtMoney = (value: number) =>
   `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -82,9 +89,10 @@ export default function ResellerPayoutsPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {(Object.keys(STATUS) as PayoutStatus[]).map((status) => (
-          <div key={status} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4">
-            <p className="text-xs text-gray-400">{STATUS[status].label}</p>
-            <p className="text-2xl font-semibold text-[#0D1B3E] mt-1">{counts[status]}</p>
+          <div key={status} className="group relative min-h-24 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${STATUS_CARD_COLORS[status]}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 26px ${STATUS_CARD_COLORS[status]}38` }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative"><p className="text-xs font-bold text-white/80">{STATUS[status].label}</p><p className="mt-1 text-2xl font-extrabold text-white">{counts[status]}</p></div>
           </div>
         ))}
       </div>

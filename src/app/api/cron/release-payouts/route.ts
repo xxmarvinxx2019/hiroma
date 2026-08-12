@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
+import { finalizePayoutFunds } from '@/app/lib/payoutFunds'
 
 export const maxDuration = 60
 
@@ -41,23 +42,16 @@ export async function GET(req: NextRequest) {
 
     for (const payout of duePayouts) {
       try {
-        await prisma.$transaction(async (tx) => {
-          // Update status to released
-          await tx.payout.update({
-            where: { id: payout.id },
-            data:  { status: 'released' },
+        const didRelease = await prisma.$transaction(async (tx) => {
+          const claimed = await tx.payout.updateMany({
+            where: { id: payout.id, status: 'approved' },
+            data:  { status: 'released', released_at: new Date() },
           })
-
-          // Deduct from wallet
-          await tx.wallet.update({
-            where: { user_id: payout.user_id },
-            data:  {
-              balance:         { decrement: Number(payout.amount) },
-              total_withdrawn: { increment: Number(payout.amount) },
-            },
-          })
+          if (claimed.count !== 1) return false
+          await finalizePayoutFunds(tx, payout.user_id, Number(payout.amount))
+          return true
         })
-        released++
+        if (didRelease) released++
       } catch (e) {
         errors.push(`Payout ${payout.id}: ${e}`)
       }

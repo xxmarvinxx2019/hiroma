@@ -2,25 +2,56 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
+import PasskeySettings from '@/app/components/security/PasskeySettings'
 
-type ThemeName = 'default' | 'modern'
+type ThemeName = 'default' | 'modern' | 'testing'
+
+function CheckIcon({ className = 'h-3 w-3' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="m5 12 4 4L19 6" />
+    </svg>
+  )
+}
+
+function LockIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect width="16" height="11" x="4" y="11" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      <path d="M12 15v2" />
+    </svg>
+  )
+}
+
+function CloseIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className} aria-hidden="true">
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  )
+}
 
 const themes: Array<{
-  value: Exclude<ThemeName, 'default'>
+  value: ThemeName
   label: string
   description: string
 }> = [
+  { value: 'default', label: 'Default', description: 'Use the standard white dashboard display.' },
   { value: 'modern', label: 'Modern', description: 'Use the premium Hiroma navy dashboard display.' },
+  { value: 'testing', label: 'Testing', description: 'Use the experimental blue-violet dashboard display.' },
 ]
 
 function getStoredTheme(): ThemeName {
   if (typeof window === 'undefined') return 'default'
   const stored = window.localStorage.getItem('hiroma-reseller-theme')
+  if (stored === 'testing') return 'testing'
   return stored === 'modern' || stored === 'on' ? 'modern' : 'default'
 }
 
 export default function ResellerSettingsPage() {
   const [theme, setTheme] = useState<ThemeName>('default')
+  const [themesEnabled, setThemesEnabled] = useState(false)
   const [saved, setSaved] = useState(false)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
   const [securityForm, setSecurityForm] = useState({ current_pin: '', new_pin: '', confirm_pin: '' })
@@ -35,7 +66,9 @@ export default function ResellerSettingsPage() {
   const [visiblePinField, setVisiblePinField] = useState({ current: false, new: false, confirm: false })
 
   useEffect(() => {
-    setTheme(getStoredTheme())
+    const savedTheme = getStoredTheme()
+    setTheme(savedTheme)
+    setThemesEnabled(window.localStorage.getItem('hiroma-reseller-themes-enabled') === 'true' || savedTheme !== 'default')
   }, [])
 
   useEffect(() => {
@@ -80,10 +113,19 @@ export default function ResellerSettingsPage() {
 
   const changeTheme = (nextTheme: ThemeName) => {
     setTheme(nextTheme)
+    setThemesEnabled(nextTheme !== 'default')
     window.localStorage.setItem('hiroma-reseller-theme', nextTheme)
+    window.localStorage.setItem('hiroma-reseller-themes-enabled', String(nextTheme !== 'default'))
     window.dispatchEvent(new CustomEvent<ThemeName>('hiroma-reseller-theme-change', { detail: nextTheme }))
     setSaved(true)
     window.setTimeout(() => setSaved(false), 2500)
+  }
+
+  const toggleThemes = () => {
+    const nextEnabled = !themesEnabled
+    setThemesEnabled(nextEnabled)
+    window.localStorage.setItem('hiroma-reseller-themes-enabled', String(nextEnabled))
+    if (!nextEnabled) changeTheme('default')
   }
 
   const saveSecurityPin = async (action: 'enable' | 'disable' | 'change') => {
@@ -168,15 +210,15 @@ export default function ResellerSettingsPage() {
         <div className="space-y-2 p-5">
           <div className="flex items-center justify-between gap-4 rounded-xl border border-[#0D1B3E]/10 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-[#0D1B3E]">Themes <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${theme === 'modern' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-500'}`}>{theme === 'modern' ? 'On' : 'Off'}</span></p>
-              <p className="mt-1 text-xs text-gray-400">{theme === 'modern' ? 'Modern is active.' : 'Default white theme is active.'}</p>
+              <p className="text-sm font-medium text-[#0D1B3E]">Themes <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${themesEnabled ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-500'}`}>{themesEnabled ? 'On' : 'Off'}</span></p>
+              <p className="mt-1 text-xs text-gray-400">{themesEnabled ? (theme === 'default' ? 'Choose Modern or Testing to apply a dashboard theme.' : `${theme === 'testing' ? 'Testing' : 'Modern'} is active.`) : 'Default white theme is active.'}</p>
             </div>
-            <button type="button" role="switch" aria-checked={theme === 'modern'} onClick={() => changeTheme(theme === 'modern' ? 'default' : 'modern')}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 ${theme === 'modern' ? 'bg-emerald-500' : 'bg-gray-300'}`}>
-              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-[left] duration-200 ${theme === 'modern' ? 'left-[22px]' : 'left-0.5'}`} />
+            <button type="button" role="switch" aria-checked={themesEnabled} onClick={toggleThemes}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 ${themesEnabled ? 'bg-emerald-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-[left] duration-200 ${themesEnabled ? 'left-[22px]' : 'left-0.5'}`} />
             </button>
           </div>
-          {theme === 'modern' && <div className="pt-2">
+          {themesEnabled && <div className="pt-2">
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Choose a theme</p>
           {themes.map((option) => (
             <button
@@ -192,7 +234,7 @@ export default function ResellerSettingsPage() {
               <span className={`flex h-5 w-5 items-center justify-center rounded-full border ${
                 theme === option.value ? 'border-[#C9A84C] bg-[#C9A84C] text-[#0D1B3E]' : 'border-gray-300'
               }`}>
-                {theme === option.value && <span className="text-xs font-bold">✓</span>}
+                {theme === option.value && <CheckIcon />}
               </span>
               <span>
                 <span className="block text-sm font-medium text-[#0D1B3E]">{option.label}</span>
@@ -200,7 +242,8 @@ export default function ResellerSettingsPage() {
               </span>
             </button>
           ))}
-          </div>}
+          </div>
+          }
           {saved && <p className="pt-1 text-xs font-medium text-[#1a7a4a]">Theme preference saved.</p>}
         </div>
       </section>
@@ -212,7 +255,9 @@ export default function ResellerSettingsPage() {
         </div>
         <div className="flex items-center justify-between gap-4 p-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">🔐</div>
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-400'}`} aria-hidden="true">
+              <LockIcon />
+            </div>
             <div>
             <p className="text-sm font-semibold text-[#0D1B3E]">Security PIN <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${displayedSecurityState ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#F0F2F8] text-gray-500'}`}>{displayedSecurityState ? 'On' : 'Off'}</span></p>
               <p className="mt-1 text-xs text-gray-400">{displayedSecurityState ? 'Required at sign-in and sensitive actions.' : 'Protect sign-in, payouts, and account changes.'}</p>
@@ -245,7 +290,9 @@ export default function ResellerSettingsPage() {
                   <h2 id="security-pin-title" className="mt-1 text-base font-semibold text-[#0D1B3E]">{securityAction === 'enable' ? 'Set up your security PIN' : securityAction === 'change' ? 'Change your security PIN' : 'Turn off security PIN?'}</h2>
                   <p className="mt-1 text-xs leading-relaxed text-gray-400">{securityAction === 'enable' ? 'Create and confirm a six-digit PIN. You will need it after signing in and for sensitive actions.' : securityAction === 'change' ? 'Verify using your current PIN, then set a new six-digit PIN.' : 'Enter your current PIN before removing this protection.'}</p>
                 </div>
-                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="text-xl text-gray-400 hover:text-[#0D1B3E]">×</button>
+                <button type="button" aria-label="Close" onClick={closeSecurityModal} className="rounded-md p-1 text-gray-400 transition-colors hover:bg-[#F0F2F8] hover:text-[#0D1B3E]">
+                  <CloseIcon />
+                </button>
               </div>
             </div>
             <div className="space-y-3 px-5 py-4">
@@ -282,6 +329,8 @@ export default function ResellerSettingsPage() {
           </div>
         </div>
       )}
+
+      <PasskeySettings />
 
       <section className="overflow-hidden rounded-xl border border-[#0D1B3E]/8 bg-white">
         <div className="border-b border-[#0D1B3E]/8 px-5 py-4">

@@ -306,19 +306,33 @@ export default function ResellerTreePage() {
       {earnings && meta && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { label: 'Total Earned',   value: fmt(earnings.total_earned),                          sub: `Wallet: ${fmt(earnings.wallet_balance)}`,               color: '#1a7a4a', icon: '💰' },
-            { label: 'Left Affiliates',  value: String(meta.left_count),                              sub: 'Affiliate members',                                     color: '#3b82f6', icon: '👥' },
-            { label: 'Right Affiliates', value: String(meta.right_count),                             sub: 'Affiliate members',                                     color: '#f59e0b', icon: '👥' },
-            { label: 'Pairing Points', value: `${earnings.total_points.toLocaleString()} pts`,      sub: `≈ ${fmt(earnings.total_points * 0.50)}`,                color: '#C9A84C', icon: '⭐' },
-            { label: 'Carry Over',     value: `${earnings.pending_pairing_balance.toLocaleString()} pts`, sub: 'Unmatched binary points',                         color: '#9a6f1e', icon: '🔄' },
+            { label: 'Total Earned',     value: fmt(earnings.total_earned),                                sub: `Wallet: ${fmt(earnings.wallet_balance)}`, color: '#168052', icon: '💰' },
+            { label: 'Left Affiliates',  value: String(meta.left_count),                                   sub: 'Affiliate members',                       color: '#2563EB', icon: '👥' },
+            { label: 'Right Affiliates', value: String(meta.right_count),                                  sub: 'Affiliate members',                       color: '#B86409', icon: '👥' },
+            { label: 'Pairing Points',   value: `${earnings.total_points.toLocaleString()} pts`,           sub: `≈ ${fmt(earnings.total_points * 0.50)}`,  color: '#A17820', icon: '⭐' },
+            { label: 'Carry Over',       value: `${earnings.pending_pairing_balance.toLocaleString()} pts`, sub: 'Unmatched binary points',                   color: '#7C3AED', icon: '🔄' },
           ].map((s) => (
-            <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
-                <span className="text-lg">{s.icon}</span>
+            <div key={s.label}
+              className="group relative min-h-32 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+              style={{
+                background: `linear-gradient(145deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.02) 48%, rgba(0,0,0,0.16) 100%), ${s.color}`,
+                borderColor: 'rgba(255,255,255,0.3)',
+                borderTop: '3px solid rgba(255,255,255,0.62)',
+                boxShadow: `0 10px 26px ${s.color}38`,
+              }}>
+              <div aria-hidden="true" className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white opacity-20 blur-2xl transition-transform duration-300 group-hover:scale-125" />
+              <div aria-hidden="true" className="pointer-events-none absolute -bottom-12 -left-10 h-24 w-24 rounded-full bg-black opacity-10 blur-2xl" />
+              <div className="relative flex items-start justify-between mb-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border text-lg shadow-sm"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.22)', borderColor: 'rgba(255,255,255,0.3)' }}>
+                  {s.icon}
+                </span>
               </div>
-              <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
-              <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
+              <div className="relative">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
+                <p className="text-xl font-extrabold tracking-tight text-white">{s.value}</p>
+                <p className="mt-1 text-[10px] font-medium leading-4 text-white/70">{s.sub}</p>
+              </div>
             </div>
           ))}
         </div>

@@ -141,27 +141,19 @@ export default function AdminOrdersPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {[
-          { label: 'Total',      value: summary.total,      accent: 'navy'  },
-          { label: 'Pending',    value: summary.pending,    accent: 'gold'  },
-          { label: 'Processing', value: summary.processing, accent: 'navy'  },
-          { label: 'Delivered',  value: summary.delivered,  accent: 'green' },
-          { label: 'Cancelled',  value: summary.cancelled,  accent: 'red'   },
+          { label: 'Total',      value: summary.total,      accent: '#0D1B3E' },
+          { label: 'Pending',    value: summary.pending,    accent: '#9a6f1e' },
+          { label: 'Processing', value: summary.processing, accent: '#2563eb' },
+          { label: 'Delivered',  value: summary.delivered,  accent: '#1a7a4a' },
+          { label: 'Cancelled',  value: summary.cancelled,  accent: '#e05252' },
         ].map((s) => (
           <div
             key={s.label}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${
-              s.accent === 'gold'  ? '#C9A84C' :
-              s.accent === 'green' ? '#1a7a4a' :
-              s.accent === 'red'   ? '#e05252' : '#0D1B3E'
-            }` }}
+            className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.accent}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.accent}38` }}
           >
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color:
-              s.accent === 'gold'  ? '#C9A84C' :
-              s.accent === 'green' ? '#1a7a4a' :
-              s.accent === 'red'   ? '#e05252' : '#0D1B3E'
-            }}>{s.value}</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
+            <p className="text-2xl font-extrabold text-white">{s.value}</p>
           </div>
         ))}
       </div>

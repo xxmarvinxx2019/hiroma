@@ -99,10 +99,10 @@ export default function AdminPinRequestsPage() {
           { label: 'Approved', value: summary.approved, accent: '#1a7a4a' },
           { label: 'Rejected', value: summary.rejected, accent: '#e05252' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+          <div key={s.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.accent}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.accent}38` }}>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
+            <p className="text-2xl font-extrabold text-white">{s.value}</p>
           </div>
         ))}
       </div>

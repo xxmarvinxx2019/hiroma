@@ -7,9 +7,10 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAutoLogout } from '@/app/hooks/useAutoLogout'
 import NotificationBell from '@/app/components/ui/NotificationBell'
 import FirstLoginPasswordModal from '@/app/components/security/FirstLoginPasswordModal'
+import HiroFloatingChat from '@/app/components/hiro/HiroFloatingChat'
 import styles from './reseller-theme.module.css'
 
-type ThemeName = 'default' | 'modern'
+type ThemeName = 'default' | 'modern' | 'testing'
 
 const navItems = [
   {
@@ -41,6 +42,21 @@ const navItems = [
       { label: 'My Orders', href: '/dashboard/reseller/orders', icon: '▤', premiumOnly: true },
     ],
   },
+  {
+    section: 'Account',
+    items: [
+      { label: 'Digital ID', href: '/dashboard/reseller/digital-id', icon: String.fromCodePoint(0x1F194) },
+    ],
+  },
+  {
+    section: 'Resources',
+    items: [
+      { label: 'Ask Hiro', href: '/dashboard/reseller/hiro', icon: String.fromCodePoint(0x2728) },
+      { label: 'Support Center', href: '/dashboard/reseller/support-center', icon: String.fromCodePoint(0x1F6DF) },
+      { label: 'Marketing Center', href: '/dashboard/reseller/marketing-center', icon: String.fromCodePoint(0x1F4E3) },
+      { label: 'Learning Center', href: '/dashboard/reseller/learning-center', icon: String.fromCodePoint(0x1F393) },
+    ],
+  },
 ]
 
 function Sidebar({
@@ -49,14 +65,18 @@ function Sidebar({
   onClose,
   onLogout,
   theme,
+  themesEnabled,
   onThemeChange,
+  onThemesToggle,
 }: {
   user: { full_name: string; username: string; profile_photo?: string | null } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
   theme: ThemeName
+  themesEnabled: boolean
   onThemeChange: (theme: ThemeName) => void
+  onThemesToggle: () => void
 }) {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const isActive = (href: string) => {
@@ -65,11 +85,11 @@ function Sidebar({
   }
 
   return (
-    <div className="bg-[#010521] flex flex-col w-56" style={{ height: '100vh' }}>
+    <div className={`${styles.sidebar} bg-[#010521] flex flex-col w-56`} style={{ height: '100vh' }}>
 
       {/* Logo */}
       <div
-        className="px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0"
+        className={`${styles.sidebarBrand} px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0`}
         style={{ height: '56px' }}
       >
         <div className="w-8 h-8 relative flex-shrink-0">
@@ -80,7 +100,7 @@ function Sidebar({
 
       {/* Nav */}
       <nav
-        className="flex-1 py-3 px-3"
+        className={`${styles.sidebarNav} flex-1 py-3 px-3`}
         style={{ overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
@@ -122,7 +142,7 @@ function Sidebar({
           <span className="w-5 text-center text-base" aria-hidden="true">✦</span>
           <span className="flex-1">Themes</span>
           <span className="text-[10px] font-semibold uppercase text-[#C9A84C]">
-            {theme === 'modern' ? 'On' : 'Off'}
+            {themesEnabled ? 'On' : 'Off'}
           </span>
         </button>
 
@@ -141,20 +161,22 @@ function Sidebar({
               <button
                 type="button"
                 role="menuitemcheckbox"
-                aria-checked={theme === 'modern'}
-                onClick={() => onThemeChange(theme === 'modern' ? 'default' : 'modern')}
+                aria-checked={themesEnabled}
+                onClick={onThemesToggle}
                 className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/5"
               >
                 <span>
                   <span className="block text-xs font-semibold text-white">Themes</span>
                   <span className="block text-[10px] text-white/40">Turn on to choose a dashboard theme.</span>
                 </span>
-                <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${theme === 'modern' ? 'bg-emerald-500' : 'bg-white/20'}`}>
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-[left] ${theme === 'modern' ? 'left-[18px]' : 'left-0.5'}`} />
+                <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${themesEnabled ? 'bg-emerald-500' : 'bg-white/20'}`}>
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-[left] ${themesEnabled ? 'left-[18px]' : 'left-0.5'}`} />
                 </span>
               </button>
-              {theme === 'modern' && ([
+              {themesEnabled && ([
+                ['default', 'Default', 'Standard white dashboard display'],
                 ['modern', 'Modern', 'Premium Hiroma navy display'],
+                ['testing', 'Testing', 'Experimental blue-violet display'],
               ] as const).map(([value, label, description]) => (
                 <button
                   key={value}
@@ -188,8 +210,8 @@ function Sidebar({
       </div>
 
       {/* User Footer */}
-      <div className="px-3 py-3 border-t border-white/5 bg-[#010521] flex-shrink-0">
-        <div className="flex items-center gap-2.5 mb-2">
+      <div className={`${styles.sidebarUser} px-3 py-3 border-t border-white/5 bg-[#010521] flex-shrink-0`}>
+        <div className={`${styles.sidebarProfile} flex items-center gap-2.5 mb-2`}>
           <div className="w-7 h-7 overflow-hidden rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
             {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'R'}</span>}
           </div>
@@ -198,12 +220,16 @@ function Sidebar({
             <p className="text-white/40 text-xs truncate">@{user?.username || ''}</p>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="w-full text-left text-white/40 text-xs hover:text-red-400 transition-colors duration-150 px-1 py-1 cursor-pointer"
-        >
-          Sign out →
-        </button>
+        <div className={styles.sidebarStatusRow}>
+          <span className={styles.sidebarOnline}>●&nbsp; Online</span>
+          <button
+            onClick={onLogout}
+            aria-label="Sign out"
+            className={`${styles.sidebarSignOut} text-white/40 text-xs hover:text-red-400 transition-colors duration-150 cursor-pointer`}
+          >
+            Sign out →
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -233,13 +259,16 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
   // Keep the server and first browser render identical. The saved browser
   // preference is applied only after hydration.
   const [theme, setTheme] = useState<ThemeName>('default')
+  const [themesEnabled, setThemesEnabled] = useState(false)
 
   useEffect(() => {
     const stored = window.localStorage.getItem('hiroma-reseller-theme')
-    if (stored === 'modern' || stored === 'on') setTheme('modern')
+    const savedTheme = stored === 'testing' ? 'testing' : stored === 'modern' || stored === 'on' ? 'modern' : 'default'
+    setTheme(savedTheme)
+    setThemesEnabled(window.localStorage.getItem('hiroma-reseller-themes-enabled') === 'true' || savedTheme !== 'default')
     const syncSavedTheme = (event: Event) => {
       const nextTheme = (event as CustomEvent<ThemeName>).detail
-      if (nextTheme === 'default' || nextTheme === 'modern') setTheme(nextTheme)
+      if (nextTheme === 'default' || nextTheme === 'modern' || nextTheme === 'testing') setTheme(nextTheme)
     }
     window.addEventListener('hiroma-reseller-theme-change', syncSavedTheme)
     return () => {
@@ -249,10 +278,19 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
   const handleThemeChange = (nextTheme: ThemeName) => {
     setTheme(nextTheme)
+    setThemesEnabled(nextTheme !== 'default')
     window.localStorage.setItem('hiroma-reseller-theme', nextTheme)
+    window.localStorage.setItem('hiroma-reseller-themes-enabled', String(nextTheme !== 'default'))
   }
 
-  const modernTheme = theme === 'modern'
+  const handleThemesToggle = () => {
+    const nextEnabled = !themesEnabled
+    setThemesEnabled(nextEnabled)
+    window.localStorage.setItem('hiroma-reseller-themes-enabled', String(nextEnabled))
+    if (!nextEnabled) handleThemeChange('default')
+  }
+
+  const themedDashboard = theme !== 'default'
 
   useEffect(() => {
     fetch('/api/auth/me', { cache: 'no-store' })
@@ -284,13 +322,13 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
   return (
     <div
-      className={`${styles.shell} ${modernTheme ? styles.dark : ''}`}
-      data-reseller-theme={modernTheme ? 'modern' : 'default'}
+      className={`${styles.shell} ${themedDashboard ? styles.dark : ''} ${theme === 'testing' ? styles.testing : ''}`}
+      data-reseller-theme={theme}
       style={{
         display: 'flex',
         height: '100vh',
         overflow: 'hidden',
-        background: modernTheme ? '#050D20' : '#F0F2F8',
+        background: themedDashboard ? '#050D20' : '#F0F2F8',
       }}
     >
       <FirstLoginPasswordModal
@@ -300,6 +338,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
           ? { ...current, password_change_required: false }
           : current)}
       />
+      <HiroFloatingChat />
 
       {/* Inactivity warning */}
       {showWarning && (
@@ -322,7 +361,9 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
           onClose={() => {}}
           onLogout={handleLogout}
           theme={theme}
+          themesEnabled={themesEnabled}
           onThemeChange={handleThemeChange}
+          onThemesToggle={handleThemesToggle}
         />
       </div>
 
@@ -340,7 +381,9 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
               onClose={() => setSidebarOpen(false)}
               onLogout={handleLogout}
               theme={theme}
+              themesEnabled={themesEnabled}
               onThemeChange={handleThemeChange}
+              onThemesToggle={handleThemesToggle}
             />
           </div>
         </>
@@ -351,13 +394,16 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
 
         {/* Topbar */}
         <header
-          className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
+          className={`${styles.topbar} bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0`}
           style={{ height: '56px' }}
         >
           <div className="flex items-center gap-3">
             <button
-              className="md:hidden text-white/60 hover:text-white"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label="Open navigation"
+              className="text-white/60 hover:text-white"
+              onClick={() => {
+                if (window.innerWidth < 768) setSidebarOpen(!sidebarOpen)
+              }}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -390,6 +436,11 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
                         className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
                         <span className="text-base">👤</span>
                         <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                      </Link>
+                      <Link href="/dashboard/reseller/digital-id" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="grid h-4 w-4 place-items-center rounded bg-[#7c5dba] text-[9px] font-bold text-white">ID</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Digital ID</span>
                       </Link>
                       <Link href="/dashboard/reseller/settings" onClick={() => setProfileMenuOpen(false)}
                         className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">

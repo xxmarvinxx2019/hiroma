@@ -1,6 +1,9 @@
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
+import prisma from '@/app/lib/prisma'
+import { isAccountSessionCurrent } from '@/app/lib/accountSession'
+import { isFreshStaffSessionAuthorized } from '@/app/lib/staffSession'
 
 // ============================================================
 // TYPES
@@ -25,6 +28,8 @@ export interface JWTPayload {
   actor_name?: string
   owner_id?: string
   permissions?: string[]
+  staff_type?: string
+  session_epoch?: number
 }
 
 // ============================================================
@@ -70,7 +75,16 @@ export async function verifyPassword(
  * Sign a JWT token with user payload
  */
 export async function signToken(payload: JWTPayload): Promise<string> {
-  return new SignJWT({ ...payload })
+  const sessionPayload = { ...payload }
+  if (!payload.is_staff) {
+    const account = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { password_changed_at: true },
+    })
+    sessionPayload.session_epoch = account?.password_changed_at?.getTime()
+  }
+
+  return new SignJWT(sessionPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
@@ -159,7 +173,47 @@ export async function deleteTwoFactorChallengeCookie(): Promise<void> {
 export async function getCurrentUser(): Promise<JWTPayload | null> {
   const token = await getAuthCookie()
   if (!token) return null
-  return verifyToken(token)
+  const payload = await verifyToken(token)
+  if (!payload) return null
+  if (payload.is_staff === true) {
+    if (!payload.actor_id || !payload.owner_id) return null
+    const profile = await prisma.staffProfile.findUnique({
+      where: { user_id: payload.actor_id },
+      select: {
+        is_active: true,
+        permissions: true,
+        staff_type: true,
+        user: { select: { role: true, status: true, login_disabled: true, password_changed_at: true } },
+        owner: { select: { id: true, role: true, status: true } },
+      },
+    })
+    const permissions = profile && Array.isArray(profile.permissions)
+      ? profile.permissions.filter((value): value is string => typeof value === 'string')
+      : []
+    let requiredPermission: string | null = null
+    try { requiredPermission = (await headers()).get('x-hiroma-staff-permission') } catch { /* non-request caller */ }
+    const snapshot = profile ? {
+      is_active: profile.is_active,
+      user_status: profile.user.status,
+      user_role: profile.user.role,
+      user_login_disabled: profile.user.login_disabled,
+      owner_id: profile.owner.id,
+      owner_role: profile.owner.role,
+      owner_status: profile.owner.status,
+      permissions,
+    } : null
+    if (!isFreshStaffSessionAuthorized(payload.owner_id, payload.role, snapshot, requiredPermission)) return null
+    if (!profile) return null
+    if (!isAccountSessionCurrent(payload, profile.user.password_changed_at)) return null
+    return { ...payload, id: profile.owner.id, permissions, staff_type: profile.staff_type }
+  }
+  const account = await prisma.user.findUnique({
+    where: { id: payload.id },
+    select: { role: true, status: true, login_disabled: true, password_changed_at: true },
+  })
+  if (!account || account.status !== 'active' || account.login_disabled || account.role !== payload.role) return null
+  if (!isAccountSessionCurrent(payload, account.password_changed_at)) return null
+  return payload
 }
 
 // ============================================================

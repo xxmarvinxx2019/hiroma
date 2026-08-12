@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
+import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+import { finalizeReservedStock, releaseOrderStock } from '@/app/lib/inventoryReservation'
 
 // ── Product Binary Pairing for reseller orders ──
 async function checkSponsorPairingPoints(buyerUserId: string, currentOrderPU: number) {
@@ -305,15 +307,18 @@ export async function PATCH(req: NextRequest) {
 
     // ── Transaction: update status + payment_status + credit buyer + deduct admin ──
     const updated = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({
-        where: { id: order_id },
-        data: {
-          ...(status         && { status }),
-          ...(payment_status && { payment_status }),
-        },
-      })
+      if (status) {
+        const claimed = await tx.order.updateMany({
+          where: { id: order_id, status: order.status },
+          data: { status, ...(payment_status && { payment_status }) },
+        })
+        if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
+      } else {
+        await tx.order.update({ where: { id: order_id }, data: { ...(payment_status && { payment_status }) } })
+      }
 
       if (status === 'delivered') {
+        await finalizeReservedStock(tx, order.seller_id, order.items)
         for (const item of order.items) {
           // 1. Credit buyer inventory
           await tx.inventory.upsert({
@@ -332,31 +337,12 @@ export async function PATCH(req: NextRequest) {
             },
           })
 
-          // 2. Deduct from admin (seller) inventory
-          const adminInv = await tx.inventory.findFirst({
-            where:  { owner_id: order.seller_id, product_id: item.product_id },
-            select: { id: true },
-          })
-
-          if (adminInv) {
-            await tx.inventory.update({
-              where: { id: adminInv.id },
-              data:  { quantity: { decrement: item.quantity } },
-            })
-          } else {
-            await tx.inventory.create({
-              data: {
-                owner_id:            order.seller_id,
-                product_id:          item.product_id,
-                quantity:            -item.quantity,
-                low_stock_threshold: 10,
-              },
-            })
-          }
         }
+      } else if (status === 'cancelled') {
+        await releaseOrderStock(tx, order.seller_id, order.items)
       }
 
-      return updatedOrder
+      return tx.order.findUniqueOrThrow({ where: { id: order_id } })
     })
 
     // Fire product binary pairing if buyer is reseller
@@ -372,7 +358,7 @@ export async function PATCH(req: NextRequest) {
           const puMap = new Map(products.map((p: any) => [p.id, Number(p.pu_value)]))
           const currentOrderPU = order.items.reduce((sum: number, i: any) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
           if (currentOrderPU > 0) {
-            await checkSponsorPairingPoints(order.buyer_id, currentOrderPU)
+            await processDeliveredProductBinaryOrder(order.id)
           }
         }
       } catch (e) { console.error('[ADMIN ORDERS] Product binary pairing error:', e) }

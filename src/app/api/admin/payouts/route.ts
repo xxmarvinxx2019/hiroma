@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { releasePayoutFunds } from '@/app/lib/payoutFunds'
 
 function generateTransactionNumber() {
   const now  = new Date()
@@ -104,6 +105,9 @@ export async function PATCH(req: NextRequest) {
     if (!payout_id || !action) {
       return NextResponse.json({ error: 'payout_id and action are required.' }, { status: 400 })
     }
+    if (!['approve', 'reject'].includes(action)) {
+      return NextResponse.json({ error: 'Invalid action.' }, { status: 400 })
+    }
 
     const payout = await prisma.payout.findUnique({
       where:  { id: payout_id },
@@ -120,30 +124,33 @@ export async function PATCH(req: NextRequest) {
       const txNumber = generateTransactionNumber()
 
       // Approve only — wallet is deducted when cron releases on payout_date
-      await prisma.payout.update({
-        where: { id: payout_id },
-        data:  { status: 'approved', approved_by: user.id, processed_at: new Date() },
+      const claimed = await prisma.payout.updateMany({
+        where: { id: payout_id, status: 'pending' },
+        data: {
+          status: 'approved', approved_by: user.id, processed_at: new Date(),
+          transaction_number: txNumber, notes: notes || null,
+        },
       })
-      try {
-        await prisma.$executeRaw`
-          UPDATE payouts SET transaction_number = ${txNumber}, notes = ${notes || null}
-          WHERE id = ${payout_id}
-        `
-      } catch { /* columns not migrated yet */ }
+      if (claimed.count !== 1) {
+        return NextResponse.json({ error: 'Payout was already processed by another request.' }, { status: 409 })
+      }
 
       return NextResponse.json({ success: true, transaction_number: txNumber, message: 'Payout approved. Will be released on payout date.' })
     }
 
     if (action === 'reject') {
-      await prisma.payout.update({
-        where: { id: payout_id },
-        data:  { status: 'rejected', approved_by: user.id, processed_at: new Date() },
+      const rejected = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.payout.updateMany({
+          where: { id: payout_id, status: 'pending' },
+          data: { status: 'rejected', approved_by: user.id, processed_at: new Date(), notes: notes || null },
+        })
+        if (claimed.count !== 1) return false
+        await releasePayoutFunds(tx, payout.user_id, Number(payout.amount))
+        return true
       })
-      try {
-        await prisma.$executeRaw`
-          UPDATE payouts SET notes = ${notes || null} WHERE id = ${payout_id}
-        `
-      } catch { /* columns not migrated yet */ }
+      if (!rejected) {
+        return NextResponse.json({ error: 'Payout was already processed by another request.' }, { status: 409 })
+      }
       return NextResponse.json({ success: true, message: 'Payout rejected.' })
     }
 

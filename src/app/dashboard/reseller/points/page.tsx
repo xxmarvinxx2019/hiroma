@@ -113,40 +113,39 @@ export default function ResellerPointsPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
 
           {/* Current points */}
-          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: '2px solid #1a7a4a' }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Current Points</p>
-            <p className="text-2xl font-semibold text-[#1a7a4a]">{summary.total_points.toLocaleString()}</p>
-            <p className="text-xs text-gray-400 mt-1">≈ {fmt(summary.points_in_php)}</p>
+          <div className="group relative overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: 'linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), #168052', borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: '0 10px 26px #16805238' }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative"><p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">Current Points</p><p className="text-2xl font-extrabold text-white">{summary.total_points.toLocaleString()}</p><p className="mt-1 text-xs text-white/70">≈ {fmt(summary.points_in_php)}</p></div>
           </div>
 
           {/* All time points */}
-          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: '2px solid #0D1B3E' }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">All Time Points</p>
-            <p className="text-2xl font-semibold text-[#0D1B3E]">{summary.all_time_points.toLocaleString()}</p>
-            <p className="text-xs text-gray-400 mt-1">≈ {fmt(summary.all_time_amount)}</p>
+          <div className="group relative overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: 'linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), #0D1B3E', borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: '0 10px 26px #0D1B3E38' }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative"><p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">All Time Points</p><p className="text-2xl font-extrabold text-white">{summary.all_time_points.toLocaleString()}</p><p className="mt-1 text-xs text-white/70">≈ {fmt(summary.all_time_amount)}</p></div>
           </div>
 
           {/* Reset countdown */}
-          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${daysLeft !== null && daysLeft <= 5 ? '#e05252' : '#9a6f1e'}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Reset In</p>
+          <div className="group relative overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${daysLeft !== null && daysLeft <= 5 ? '#C23B3B' : '#A17820'}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)' }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative"><p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">Reset In</p>
             {daysLeft !== null ? (
               <>
-                <p className="text-2xl font-semibold"
-                  style={{ color: daysLeft <= 5 ? '#e05252' : '#9a6f1e' }}>
+                <p className="text-2xl font-extrabold text-white">
                   {daysLeft}d
                 </p>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="mt-1 text-xs text-white/70">
                   {summary.next_reset
                     ? new Date(summary.next_reset).toLocaleDateString('en-PH')
                     : '—'}
                 </p>
               </>
             ) : (
-              <p className="text-sm text-gray-400 mt-2">No reset scheduled</p>
+              <p className="mt-2 text-sm text-white/70">No reset scheduled</p>
             )}
+            </div>
           </div>
         </div>
       )}

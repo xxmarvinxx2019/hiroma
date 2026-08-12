@@ -64,10 +64,10 @@ const COMMISSION_LABELS: Record<string, string> = {
 }
 
 const COMMISSION_COLORS: Record<string, string> = {
-  direct_referral: '#C9A84C',
+  direct_referral: '#A17820',
   binary_pairing:  '#0D1B3E',
   multilevel:      '#2563eb',
-  sponsor_point:   '#1a7a4a',
+  sponsor_point:   '#168052',
 }
 
 const PAYOUT_STATUS_COLORS: Record<string, string> = {
@@ -291,6 +291,7 @@ export default function ResellerWalletPage() {
   const [loading, setLoading]             = useState(true)
   const [tab, setTab]                     = useState<'commissions' | 'payouts'>('commissions')
   const [commissionFilter, setCommissionFilter] = useState<CommissionFilter>('all')
+  const [historyDate, setHistoryDate]     = useState('')
   const [page, setPage]                   = useState(1)
   const [showPayout, setShowPayout]       = useState(false)
 
@@ -300,7 +301,8 @@ export default function ResellerWalletPage() {
     setLoading(true)
     const params = new URLSearchParams({ tab, page: String(page), pageSize: String(PAGE_SIZE) })
     if (tab === 'commissions' && commissionFilter !== 'all') params.set('commissionType', commissionFilter)
-    fetch(`/api/reseller/wallet?${params}`)
+    if (historyDate) params.set('date', historyDate)
+    fetch(`/api/reseller/wallet?${params}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (data.wallet)             setWallet(data.wallet)
@@ -310,7 +312,7 @@ export default function ResellerWalletPage() {
         if (data.meta)               setMeta(data.meta)
       })
       .finally(() => setLoading(false))
-  }, [tab, page, commissionFilter])
+  }, [tab, page, commissionFilter, historyDate])
 
   const selectCommissionFilter = (type: CommissionFilter) => {
     setTab('commissions')
@@ -318,41 +320,64 @@ export default function ResellerWalletPage() {
     setPage(1)
   }
 
+  const selectedDateLabel = historyDate
+    ? new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' })
+        .format(new Date(`${historyDate}T00:00:00+08:00`))
+    : null
+
   useEffect(() => { fetchData() }, [fetchData])
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Wallet & Earnings</h1>
           <p className="text-sm text-gray-400 mt-0.5">Your balance and commission history</p>
         </div>
-        <button
-          onClick={() => setShowPayout(true)}
-          className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium"
-        >
-          Request Payout
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-lg border border-[#0D1B3E]/15 bg-white px-2.5 py-2 text-xs text-[#0D1B3E] shadow-sm focus-within:border-[#C9A84C] focus-within:ring-2 focus-within:ring-[#C9A84C]/15">
+            <span aria-hidden="true">📅</span>
+            <span className="font-medium">Date</span>
+            <input
+              type="date"
+              value={historyDate}
+              onChange={(e) => { setHistoryDate(e.target.value); setPage(1) }}
+              className="w-[122px] bg-transparent text-xs font-medium outline-none"
+              aria-label="Filter wallet and earnings by date"
+            />
+          </label>
+          {historyDate && (
+            <button type="button" onClick={() => { setHistoryDate(''); setPage(1) }}
+              className="rounded-lg border border-[#0D1B3E]/15 bg-white px-3 py-2 text-xs font-medium text-[#0D1B3E] hover:border-[#C9A84C] hover:text-[#9a6f1e]">
+              Clear
+            </button>
+          )}
+          <button
+            onClick={() => setShowPayout(true)}
+            className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium"
+          >
+            Request Payout
+          </button>
+        </div>
       </div>
 
       {/* Wallet cards */}
       {wallet && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: 'Available Balance', value: fmt(wallet.balance),         accent: '#C9A84C', icon: '💰', sub: 'Ready to withdraw' },
-            { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#1a7a4a', icon: '📈', sub: 'Lifetime earnings'  },
-            { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#0D1B3E', icon: '💸', sub: 'Paid out'           },
+            { label: 'Available Balance', value: fmt(wallet.balance),         accent: '#A17820', icon: '💰', sub: selectedDateLabel ? `As of ${selectedDateLabel}` : 'Ready to withdraw' },
+            { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#168052', icon: '📈', sub: selectedDateLabel ? `Earned on ${selectedDateLabel}` : 'Lifetime earnings'  },
+            { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#0D1B3E', icon: '💸', sub: selectedDateLabel ? `Paid out on ${selectedDateLabel}` : 'Paid out'           },
           ].map((c) => (
-            <div key={c.label} className="walletStatCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:border-[#C9A84C]/40 hover:shadow-sm transition-all"
-              style={{ borderTop: `2px solid ${c.accent}` }}>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-gray-400 uppercase tracking-wide">{c.label}</p>
-                <span className="text-lg">{c.icon}</span>
+            <div key={c.label} className="walletStatCard group relative min-h-32 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+              style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${c.accent}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 26px ${c.accent}38` }}>
+              <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+              <div className="relative flex items-start justify-between mb-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/30 bg-white/20 text-lg shadow-sm">{c.icon}</span>
               </div>
-              <p className="text-xl font-bold" style={{ color: c.accent }}>{c.value}</p>
-              <p className="text-[10px] text-gray-400 mt-1">{c.sub}</p>
+              <div className="relative"><p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/80">{c.label}</p><p className="text-xl font-extrabold text-white">{c.value}</p><p className="mt-1 text-[10px] font-medium text-white/70">{c.sub}</p></div>
             </div>
           ))}
         </div>
@@ -361,21 +386,22 @@ export default function ResellerWalletPage() {
       {/* Commission summary */}
       {commissionSummary && (
         <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-5">
-          <p className="text-sm font-semibold text-[#0D1B3E] mb-4">Earnings Breakdown</p>
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <p className="text-sm font-semibold text-[#0D1B3E]">Earnings Breakdown</p>
+            {selectedDateLabel && <p className="text-xs font-medium text-[#9a6f1e]">{selectedDateLabel}</p>}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {Object.entries(commissionSummary).filter(([type]) => type !== 'multilevel').map(([type, data]) => (
               <button key={type} type="button" onClick={() => selectCommissionFilter(type as CommissionFilter)}
                 aria-pressed={commissionFilter === type}
-                className={`commissionSummaryCard bg-white rounded-xl border p-4 text-left hover:border-[#C9A84C]/60 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/40 ${
-                  commissionFilter === type ? 'border-[#C9A84C] ring-1 ring-[#C9A84C]/30' : 'border-[#0D1B3E]/8'
-                }`}
-                style={{ borderTop: `2px solid ${COMMISSION_COLORS[type] || '#9ca3af'}` }}>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide">{COMMISSION_LABELS[type] || type}</p>
+                className={`commissionSummaryCard group relative overflow-hidden rounded-xl border p-4 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-white/60 ${commissionFilter === type ? 'ring-2 ring-white/80' : ''}`}
+                style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${COMMISSION_COLORS[type] || '#475569'}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 24px ${COMMISSION_COLORS[type] || '#475569'}30` }}>
+                <div aria-hidden="true" className="absolute -right-8 -top-10 h-24 w-24 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+                <div className="relative flex items-center justify-between mb-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-white/80">{COMMISSION_LABELS[type] || type}</p>
                   <span className="text-base">{COMMISSION_ICONS[type] || '💼'}</span>
                 </div>
-                <p className="text-xl font-bold" style={{ color: COMMISSION_COLORS[type] || '#0D1B3E' }}>{fmt(data.amount)}</p>
-                <p className="text-[10px] text-gray-400 mt-1">{data.count} transaction{data.count !== 1 ? 's' : ''}</p>
+                <div className="relative"><p className="text-xl font-extrabold text-white">{fmt(data.amount)}</p><p className="mt-1 text-[10px] font-medium text-white/70">{data.count} transaction{data.count !== 1 ? 's' : ''}</p></div>
               </button>
             ))}
           </div>
@@ -405,19 +431,21 @@ export default function ResellerWalletPage() {
         {/* Commission history */}
         {tab === 'commissions' && (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#0D1B3E]/8 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#0D1B3E]/8 px-4 py-3">
               <div>
                 <p className="text-xs font-semibold text-[#0D1B3E]">
                   {commissionFilter === 'all' ? 'All commission transactions' : `${COMMISSION_LABELS[commissionFilter]} transactions`}
                 </p>
                 <p className="text-[10px] text-gray-400">Select an earnings card above to filter this history.</p>
               </div>
-              {commissionFilter !== 'all' && (
-                <button type="button" onClick={() => selectCommissionFilter('all')}
-                  className="rounded-lg border border-[#0D1B3E]/15 px-3 py-1.5 text-xs font-medium text-[#0D1B3E] hover:border-[#C9A84C] hover:text-[#9a6f1e]">
-                  Show all
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {commissionFilter !== 'all' && (
+                  <button type="button" onClick={() => { setCommissionFilter('all'); setPage(1) }}
+                    className="rounded-lg border border-[#0D1B3E]/15 px-3 py-1.5 text-xs font-medium text-[#0D1B3E] hover:border-[#C9A84C] hover:text-[#9a6f1e]">
+                    Show all
+                  </button>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
             <div className="min-w-[720px]">

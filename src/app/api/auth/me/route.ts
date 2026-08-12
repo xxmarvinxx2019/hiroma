@@ -21,6 +21,7 @@ export async function GET() {
       where: { id: currentUser.id },
       select: {
         id: true,
+        member_id: true,
         username: true,
         full_name: true,
         email: true,
@@ -61,6 +62,8 @@ export async function GET() {
             dist_level: true,
             coverage_area: true,
             is_active: true,
+            fulfillment_outlet_name: true,
+            fulfillment_outlet_city_muni_name: true,
           },
         },
         // Include wallet balance
@@ -105,6 +108,7 @@ export async function GET() {
         }),
         is_staff: Boolean(currentUser.is_staff),
         permissions: currentUser.permissions || [],
+        staff_type: currentUser.staff_type || null,
         owner_id: currentUser.owner_id || user.id,
       },
     })

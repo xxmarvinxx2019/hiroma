@@ -3,8 +3,13 @@ import { getCurrentUser } from '@/app/lib/auth'
 import { getCutoffDays, getNextCutoffDate, getPayoutDateMap, getPayoutDateFromCutoff } from '@/app/api/admin/settings/route'
 import prisma from '@/app/lib/prisma'
 import { getResellerPayoutMode } from '@/app/lib/resellerPayoutPolicy'
-import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import {
+  getSensitiveResellerPinFailure,
+  isSensitiveResellerPinAccepted,
+  verifyResellerSecurityPin,
+} from '@/app/lib/resellerSecurityPin'
 import { CommissionType } from '@prisma/client'
+import { InsufficientPayoutFundsError, lockPayoutRequestsForUser, reservePayoutFunds } from '@/app/lib/payoutFunds'
 
 // ── GET wallet balance + commission history + payout history ──
 export async function GET(req: NextRequest) {
@@ -18,27 +23,44 @@ export async function GET(req: NextRequest) {
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
     const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '10'))
     const tab      = searchParams.get('tab') || 'commissions' // commissions | payouts
+    const requestedDate = searchParams.get('date')
     const requestedCommissionType = searchParams.get('commissionType')
     const commissionType = requestedCommissionType && Object.values(CommissionType).includes(requestedCommissionType as CommissionType)
       ? requestedCommissionType as CommissionType
       : null
+    const validDate = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      ? requestedDate
+      : null
+    // Use Manila calendar-day boundaries so a reseller selecting Aug 4 sees
+    // precisely the credits made on Aug 4 in the application timezone.
+    const dateRange = validDate
+      ? {
+          gte: new Date(`${validDate}T00:00:00.000+08:00`),
+          lt: new Date(new Date(`${validDate}T00:00:00.000+08:00`).getTime() + 24 * 60 * 60 * 1000),
+        }
+      : undefined
     const commissionWhere = {
       user_id: user.id,
       ...(commissionType ? { type: commissionType } : {}),
+      ...(dateRange ? { created_at: dateRange } : {}),
+    }
+    const payoutHistoryWhere = {
+      user_id: user.id,
+      ...(dateRange ? { requested_at: dateRange } : {}),
     }
 
-    const [wallet, commissionSummary, payouts, commissions, allCommissionCredits, totalCount] = await Promise.all([
+    const [wallet, commissionSummary, payouts, commissions, allCommissionCredits, totalCount, creditsThroughDate, releasedThroughDate, releasedOnDate] = await Promise.all([
 
       // Wallet
       prisma.wallet.findUnique({
         where: { user_id: user.id },
-        select: { balance: true, total_earned: true, total_withdrawn: true },
+        select: { balance: true, reserved_balance: true, total_earned: true, total_withdrawn: true },
       }),
 
       // Commission totals by type
       prisma.commission.groupBy({
         by: ['type'],
-        where: { user_id: user.id },
+        where: { user_id: user.id, ...(dateRange ? { created_at: dateRange } : {}) },
         _sum:   { amount: true },
         _count: { type: true },
       }),
@@ -92,7 +114,28 @@ export async function GET(req: NextRequest) {
       // Total count for pagination
       tab === 'commissions'
         ? prisma.commission.count({ where: commissionWhere })
-        : prisma.payout.count({ where: { user_id: user.id } }),
+        : prisma.payout.count({ where: payoutHistoryWhere }),
+
+      // A chosen day makes the balance a historical snapshot at the end of
+      // that Manila day, while earnings and withdrawals are for that day.
+      dateRange
+        ? prisma.commission.aggregate({
+            where: { user_id: user.id, created_at: { lt: dateRange.lt } },
+            _sum: { amount: true },
+          })
+        : Promise.resolve(null),
+      dateRange
+        ? prisma.payout.aggregate({
+            where: { user_id: user.id, status: 'released', processed_at: { lt: dateRange.lt } },
+            _sum: { amount: true },
+          })
+        : Promise.resolve(null),
+      dateRange
+        ? prisma.payout.aggregate({
+            where: { user_id: user.id, status: 'released', processed_at: dateRange },
+            _sum: { amount: true },
+          })
+        : Promise.resolve(null),
     ])
 
     const balanceAfterCredit = new Map<string, number>()
@@ -138,11 +181,21 @@ export async function GET(req: NextRequest) {
       } catch { /* columns not migrated yet — return payouts without extra fields */ }
     }
 
+    const selectedDateWallet = dateRange
+      ? {
+          balance: Number(creditsThroughDate?._sum.amount || 0) - Number(releasedThroughDate?._sum.amount || 0),
+          total_earned: commissionSummary.reduce((total, row) => total + Number(row._sum.amount || 0), 0),
+          total_withdrawn: Number(releasedOnDate?._sum.amount || 0),
+        }
+      : null
+
     return NextResponse.json({
       wallet: {
-        balance:         Number(wallet?.balance         || 0),
-        total_earned:    Number(wallet?.total_earned    || 0),
-        total_withdrawn: Number(wallet?.total_withdrawn || 0),
+        balance:         selectedDateWallet?.balance ?? Number(wallet?.balance || 0),
+        reserved_balance: selectedDateWallet ? 0 : Number(wallet?.reserved_balance || 0),
+        available_balance: selectedDateWallet?.balance ?? (Number(wallet?.balance || 0) - Number(wallet?.reserved_balance || 0)),
+        total_earned:    selectedDateWallet?.total_earned ?? Number(wallet?.total_earned || 0),
+        total_withdrawn: selectedDateWallet?.total_withdrawn ?? Number(wallet?.total_withdrawn || 0),
       },
       commission_summary: summary,
       commissions: commissionsWithBalances,
@@ -170,8 +223,9 @@ export async function POST(req: NextRequest) {
 
     const { amount, payment_method, payment_reference, security_pin } = await req.json()
     const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
-    if (!pinVerification.valid) {
-      return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+    if (!isSensitiveResellerPinAccepted(pinVerification)) {
+      const failure = getSensitiveResellerPinFailure(pinVerification)
+      return NextResponse.json({ error: failure.error }, { status: failure.status })
     }
     const payoutMode = await getResellerPayoutMode()
 
@@ -210,72 +264,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Insufficient balance.' }, { status: 400 })
     }
 
-    // Check no pending payout already exists
-    const existingPending = await prisma.payout.findFirst({
-      where: { user_id: user.id, status: 'pending' },
-    })
-    if (existingPending) {
-      return NextResponse.json({
-        error: 'You already have a pending payout request. Please wait for it to be processed.',
-      }, { status: 400 })
-    }
-
     // Compute next cutoff and payout dates from admin settings
     const cutoffDays    = await getCutoffDays()
     const payoutDateMap = await getPayoutDateMap()
     const cutoffDate    = getNextCutoffDate(cutoffDays)
     const payoutDate    = getPayoutDateFromCutoff(cutoffDate, payoutDateMap, cutoffDays)
-    console.log('[WALLET] cutoffDays:', cutoffDays)
-    console.log('[WALLET] payoutDateMap:', payoutDateMap)
-    console.log('[WALLET] cutoffDate:', cutoffDate)
-    console.log('[WALLET] payoutDate:', payoutDate)
-
     // Create payout — do NOT deduct balance here
     // Balance is deducted only when admin approves the payout
-    const payout = await prisma.payout.create({
-      data: {
+    const payout = await prisma.$transaction(async (tx) => {
+      await lockPayoutRequestsForUser(tx, user.id)
+      const existingPending = await tx.payout.findFirst({
+        where: { user_id: user.id, status: 'pending' },
+        select: { id: true },
+      })
+      if (existingPending) throw new Error('PENDING_PAYOUT_EXISTS')
+      await reservePayoutFunds(tx, user.id, requestedAmount)
+      return tx.payout.create({ data: {
         user_id:           user.id,
         amount:            requestedAmount,
         status:            'pending',
         payment_method:    resolvedMethod,
         payment_reference: resolvedReference || payment_reference?.trim() || null,
-      },
+        cutoff_date:       cutoffDate,
+        payout_date:       payoutDate,
+      } })
     })
-
-    // Set cutoff_date and payout_date via raw SQL
-    console.log('[WALLET] payout.id:', payout.id)
-    console.log('[WALLET] cutoffDate to save:', cutoffDate)
-    console.log('[WALLET] payoutDate to save:', payoutDate)
-    try {
-      const updateResult = await prisma.$executeRaw`
-        UPDATE payouts SET cutoff_date = ${cutoffDate}, payout_date = ${payoutDate} WHERE id::text = ${payout.id}
-      `
-      console.log('[WALLET] UPDATE result (rows affected):', updateResult)
-    } catch (e) {
-      console.error('[WALLET] cutoff/payout date update FAILED:', e)
-    }
-
-    // Verify it was saved
-    try {
-      const verify = await prisma.$queryRaw<any[]>`
-        SELECT id, cutoff_date, payout_date FROM payouts WHERE id::text = ${payout.id}
-      `
-      console.log('[WALLET] Verified saved payout:', verify)
-    } catch (e) {
-      console.error('[WALLET] Verify query failed:', e)
-    }
 
     return NextResponse.json({
       success: true,
       payout,
-      debug: {
-        cutoffDays,
-        payoutDateMap,
-        cutoffDate,
-        payoutDate,
-      }
     })
   } catch (error) {
+    if (error instanceof InsufficientPayoutFundsError) {
+      return NextResponse.json({ error: 'Insufficient available balance. Existing payouts may have reserved part of your wallet.' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'PENDING_PAYOUT_EXISTS') {
+      return NextResponse.json({ error: 'You already have a pending payout request. Please wait for it to be processed.' }, { status: 409 })
+    }
     console.error('[RESELLER WALLET POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

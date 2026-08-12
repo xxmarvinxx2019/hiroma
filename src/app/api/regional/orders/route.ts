@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 // ── Regional always buys from Admin ──
 async function resolveSupplier() {
   const admin = await prisma.user.findFirst({
@@ -112,6 +113,8 @@ export async function POST(req: NextRequest) {
 
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
+    if (!validateStockItems(items))
+      return NextResponse.json({ error: 'Each item must have a valid product and positive whole-number quantity.' }, { status: 400 })
     if (!['online', 'offline'].includes(order_type))
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
 
@@ -159,8 +162,9 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    const order = await prisma.order.create({
-      data: {
+    const order = await prisma.$transaction(async (tx) => {
+      await reserveOrderStock(tx, supplier.id, items)
+      return tx.order.create({ data: {
         buyer_id:            user.id,
         seller_id:           supplier.id,
         order_type,
@@ -174,6 +178,7 @@ export async function POST(req: NextRequest) {
         items:               { create: orderItems },
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
+      })
     })
     return NextResponse.json({
       success: true,
@@ -181,6 +186,8 @@ export async function POST(req: NextRequest) {
       order, supplier,
     })
   } catch (error) {
+    if (error instanceof InsufficientStockError)
+      return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved it.' }, { status: 409 })
     console.error('[REGIONAL ORDERS POST ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
@@ -221,28 +228,35 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
 
     const updated = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({
-        where: { id: order_id },
-        data: {
+      if (status) {
+        const claimed = await tx.order.updateMany({
+          where: { id: order_id, status: order.status },
+          data: {
+            status,
+            ...(payment_status && { payment_status }),
+          },
+        })
+        if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
+      } else {
+        await tx.order.update({ where: { id: order_id }, data: {
           ...(status         && { status }),
           ...(payment_status && { payment_status }),
-        },
-      })
+        } })
+      }
 
       if (status === 'delivered') {
+        await finalizeReservedStock(tx, order.seller_id, order.items)
         for (const item of order.items) {
           await tx.inventory.upsert({
             where: { owner_id_product_id: { owner_id: order.buyer_id, product_id: item.product_id } },
             update: { quantity: { increment: item.quantity } },
             create: { owner_id: order.buyer_id, product_id: item.product_id, quantity: item.quantity, low_stock_threshold: 10 },
           })
-          await tx.inventory.updateMany({
-            where: { owner_id: order.seller_id, product_id: item.product_id },
-            data:  { quantity: { decrement: item.quantity } },
-          })
         }
+      } else if (status === 'cancelled') {
+        await releaseOrderStock(tx, order.seller_id, order.items)
       }
-      return updatedOrder
+      return tx.order.findUniqueOrThrow({ where: { id: order_id } })
     })
 
     return NextResponse.json({ success: true, order: updated })
