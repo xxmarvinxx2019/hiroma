@@ -66,9 +66,12 @@ export default function ResellerSettingsPage() {
   const [visiblePinField, setVisiblePinField] = useState({ current: false, new: false, confirm: false })
 
   useEffect(() => {
-    const savedTheme = getStoredTheme()
-    setTheme(savedTheme)
-    setThemesEnabled(window.localStorage.getItem('hiroma-reseller-themes-enabled') === 'true' || savedTheme !== 'default')
+    const timer = window.setTimeout(() => {
+      const savedTheme = getStoredTheme()
+      setTheme(savedTheme)
+      setThemesEnabled(window.localStorage.getItem('hiroma-reseller-themes-enabled') === 'true' || savedTheme !== 'default')
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
