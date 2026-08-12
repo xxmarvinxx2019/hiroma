@@ -16,7 +16,7 @@ test('audit log migration creates the expected durable evidence table', () => {
 })
 
 test('Prisma audit model matches the table and preserves nullable actor fields', () => {
-  const model = schema.match(/model AuditLog \{[\s\S]*?@@map\("audit_logs"\)\n\}/)?.[0] || ''
+  const model = schema.match(/model AuditLog \{[\s\S]*?@@map\("audit_logs"\)\r?\n\}/)?.[0] || ''
   assert.ok(model)
   for (const field of ['user_id', 'user_name', 'user_role', 'member_id', 'ip_address', 'device']) {
     assert.match(model, new RegExp(`\\b${field}\\s+String\\?`))
