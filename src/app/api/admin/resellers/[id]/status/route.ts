@@ -30,6 +30,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!reseller) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
+    if (reseller.role !== 'reseller') {
+      return NextResponse.json({ error: 'Reseller not found' }, { status: 404 })
+    }
 
     const isDeactivating = reseller.status !== 'inactive' && status === 'inactive'
 
@@ -127,10 +130,11 @@ return NextResponse.json({
       } else if (reseller.status !== 'inactive' && status === 'inactive' && reseller.identity_document_hash) {
         await releaseIdentityAccountSlot(tx, reseller.identity_document_hash)
       }
-      await tx.user.update({
-        where: { id: userId },
+      const claimed = await tx.user.updateMany({
+        where: { id: userId, role: 'reseller', status: reseller.status },
         data:  { status },
       })
+      if (claimed.count !== 1) throw new ConcurrentDeactivationError()
       await tx.$executeRaw`
         UPDATE reseller_profiles
         SET is_active = ${status === 'active'}
@@ -144,14 +148,15 @@ return NextResponse.json({
       status,
     })
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof ReservedPayoutBlocksDeactivationError || error instanceof ConcurrentDeactivationError) {
       return NextResponse.json({ error: error.message }, { status: 409 })
     }
     if (error instanceof IdentityAccountLimitError) {
       return NextResponse.json({ error: error.message }, { status: 409 })
     }
-    console.error('[RESELLER STATUS ERROR]', error?.message || error)
-    return NextResponse.json({ error: error?.message || 'Something went wrong.' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Something went wrong.'
+    console.error('[RESELLER STATUS ERROR]', message)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

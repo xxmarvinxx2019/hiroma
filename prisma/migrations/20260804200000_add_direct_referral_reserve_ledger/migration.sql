@@ -59,13 +59,19 @@ DECLARE
   lot RECORD;
   consumed DECIMAL(12,2);
 BEGIN
-  IF payout_amount <= 0 OR EXISTS (
-    SELECT 1 FROM "direct_referral_payout_consumptions" WHERE "payout_id" = target_payout_id
-  ) THEN
+  IF payout_amount <= 0 THEN
     RETURN;
   END IF;
 
-  remaining := payout_amount;
+  -- Serialize all FIFO reserve allocation for one member. Waiting for a lot is
+  -- required: lock contention must never be interpreted as exhausted funds.
+  PERFORM pg_advisory_xact_lock(hashtextextended(target_user_id, 0));
+
+  SELECT GREATEST(payout_amount - COALESCE(SUM("amount"), 0), 0)
+  INTO remaining
+  FROM "direct_referral_payout_consumptions"
+  WHERE "payout_id" = target_payout_id;
+
   WHILE remaining > 0 LOOP
     SELECT "id", "remaining_amount"
     INTO lot
@@ -74,7 +80,7 @@ BEGIN
       AND "remaining_amount" > 0
       AND "allocated_at" <= allocation_time
     ORDER BY "allocated_at" ASC, "id" ASC
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE
     LIMIT 1;
 
     EXIT WHEN NOT FOUND;

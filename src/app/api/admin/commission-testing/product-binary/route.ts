@@ -28,16 +28,15 @@ export async function GET(req: NextRequest) {
       `,
       prisma.$queryRaw<Record<string, unknown>[]>`
         SELECT
-          COALESCE(SUM(CASE WHEN p.status='approved' THEN c.amount ELSE 0 END),0)::float approved,
-          COALESCE(SUM(CASE WHEN p.status='released' THEN c.amount ELSE 0 END),0)::float paid
+          COALESCE(SUM(CASE WHEN p.status='approved' AND COALESCE(p.processed_at,p.requested_at)>=${from} AND COALESCE(p.processed_at,p.requested_at)<=${to} THEN c.amount ELSE 0 END),0)::float approved,
+          COALESCE(SUM(CASE WHEN p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at)>=${from} AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at)<=${to} THEN c.amount ELSE 0 END),0)::float paid
         FROM product_binary_payout_consumptions c JOIN payouts p ON p.id=c.payout_id
-        WHERE COALESCE(p.processed_at,p.requested_at)>=${from} AND COALESCE(p.processed_at,p.requested_at)<=${to}
       `,
       prisma.$queryRaw<Record<string, unknown>[]>`
         SELECT
           (COALESCE(SUM(l.original_amount),0)-COALESCE((
             SELECT SUM(c.amount) FROM product_binary_payout_consumptions c JOIN payouts p ON p.id=c.payout_id
-            WHERE p.status='released' AND COALESCE(p.processed_at,p.requested_at)<=${to}
+            WHERE p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at)<=${to}
           ),0))::float payable_liability,
           COALESCE(SUM(l.original_amount),0)::float lifetime_earned
         FROM product_binary_payable_lots l WHERE l.allocated_at<=${to}

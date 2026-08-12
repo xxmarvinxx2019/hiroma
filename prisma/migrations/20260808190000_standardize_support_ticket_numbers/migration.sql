@@ -9,4 +9,12 @@ SET "ticket_number" = 'HSP' || lpad(numbered.number::text, 6, '0')
 FROM numbered
 WHERE request.id = numbered.id;
 
-SELECT setval('"support_ticket_number_seq"', (SELECT COALESCE(MAX(row_number), 0) FROM (SELECT row_number() OVER (ORDER BY created_at ASC, id ASC) FROM "support_requests") numbered), true);
+SELECT setval(
+  '"support_ticket_number_seq"',
+  COALESCE(MAX(row_number), 1),
+  MAX(row_number) IS NOT NULL
+)
+FROM (
+  SELECT row_number() OVER (ORDER BY created_at ASC, id ASC)
+  FROM "support_requests"
+) numbered;
