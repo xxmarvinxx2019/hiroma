@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { generateMemberId } from '@/app/lib/memberId'
 
 // ── GET all distributors ──
 export async function GET(req: NextRequest) {
@@ -226,8 +227,10 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hashPassword(password)
 
     const newDist = await prisma.$transaction(async (tx) => {
+      const memberId = await generateMemberId(tx)
       const newUser = await tx.user.create({
         data: {
+          member_id: memberId,
           username: username.trim().toLowerCase(),
           full_name: full_name.trim(),
           mobile: mobile.trim(),
@@ -320,7 +323,7 @@ export async function PATCH(req: NextRequest) {
       const { password } = body
       if (!password) return NextResponse.json({ error: 'Password required.' }, { status: 400 })
       const hashed = await hashPassword(password)
-      await prisma.user.update({ where: { id: distributor_id }, data: { password_hash: hashed } })
+      await prisma.user.update({ where: { id: distributor_id }, data: { password_hash: hashed, password_changed_at: new Date() } })
       return NextResponse.json({ success: true, message: 'Password reset successfully.' })
     }
 

@@ -78,16 +78,26 @@ export default function AdminRegisterResellerPage() {
   const [form, setForm] = useState({
     full_name: '', username: '', email: '', mobile: '', password: '', confirmPassword: '',
     first_name: '', middle_name: '', last_name: '', suffix: '', no_middle_name: false,
-    birthday: '', birthplace: '',
+    birthday: '', birthplace: '', identity_document_type: '', identity_document_number: '',
   })
   const [nameCapInfo, setNameCapInfo] = useState<{
     count: number; max: number; remaining: number; remaining_after_registration?: number
     account_number?: number; first_account?: boolean; proposed_username?: string; ready?: boolean; error?: string
+    confirmation_required?: boolean; matching_usernames?: string[]
   } | null>(null)
   const [formLoading, setFormLoading]             = useState(false)
   const [agreedToTerms, setAgreedToTerms]         = useState(false)
   const [formError, setFormError]                 = useState('')
-  const [successData, setSuccessData]             = useState<{ id: string; full_name: string; username: string; package: any } | null>(null)
+  const [identityConfirmation, setIdentityConfirmation] = useState<'same' | 'different' | null>(null)
+  const [identityPromptOpen, setIdentityPromptOpen] = useState(false)
+  const [successData, setSuccessData]             = useState<{
+    id: string
+    full_name: string
+    username: string
+    address: string
+    birthday: string
+    package: any
+  } | null>(null)
   const [smsPromptOpen, setSmsPromptOpen]         = useState(false)
   const [smsSending, setSmsSending]               = useState(false)
   const [smsStatus, setSmsStatus]                 = useState<{ type: 'success' | 'error' | 'skipped'; message: string } | null>(null)
@@ -98,7 +108,7 @@ export default function AdminRegisterResellerPage() {
     const distId = id || adminId
     if (!distId) return
     setPinsLoading(true)
-    fetch(`/api/admin/pins?status=unused&pageSize=200&city_dist_id=${distId}`)
+    fetch(`/api/admin/pins?status=unused&all_dates=true&pageSize=200&city_dist_id=${encodeURIComponent(distId)}`)
       .then((r) => r.json())
       .then((d) => setPins(d.pins || []))
       .catch(() => {})
@@ -183,10 +193,11 @@ export default function AdminRegisterResellerPage() {
     setLocation({ region_code: '', region_name: '', province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', street: '', zip_code: '' })
     setReferralInput(''); setReferralData(null); setReferralError('')
     setAvailableSlots([]); setSlotSearch(''); setSelectedSlot(null)
-    setForm({ full_name: '', first_name: '', middle_name: '', last_name: '', suffix: '', no_middle_name: false, username: '', email: '', mobile: '', password: '', confirmPassword: '', birthday: '', birthplace: '' })
+    setForm({ full_name: '', first_name: '', middle_name: '', last_name: '', suffix: '', no_middle_name: false, username: '', email: '', mobile: '', password: '', confirmPassword: '', birthday: '', birthplace: '', identity_document_type: '', identity_document_number: '' })
     setAgreedToTerms(false)
     setNameCapInfo(null)
     setFormError('')
+    setIdentityConfirmation(null); setIdentityPromptOpen(false)
     setSmsPromptOpen(false); setSmsSending(false); setSmsStatus(null)
   }, [])
 
@@ -218,6 +229,7 @@ export default function AdminRegisterResellerPage() {
     name: string,
     birthday = form.birthday,
     birthplace = form.birthplace,
+    confirmation = identityConfirmation,
   ) => {
     const normalizedName = normalizePersonName(name)
     if (!normalizedName || !birthday || !birthplace.trim()) {
@@ -226,7 +238,16 @@ export default function AdminRegisterResellerPage() {
       return
     }
 
-    const query = new URLSearchParams({ name: normalizedName, birthday, birthplace: birthplace.trim() })
+    const query = new URLSearchParams({
+      name: normalizedName,
+      birthday,
+      birthplace: birthplace.trim(),
+      identity_document_type: form.identity_document_type,
+      identity_document_number: form.identity_document_number,
+      mobile: form.mobile,
+      email: form.email,
+      identity_confirmation: confirmation || '',
+    })
     const res = await fetch(`/api/city/resellers/check-name?${query.toString()}`)
     const data = await res.json()
     if (!res.ok) {
@@ -235,6 +256,7 @@ export default function AdminRegisterResellerPage() {
       return
     }
     setNameCapInfo(data)
+    if (data.confirmation_required && !confirmation) setIdentityPromptOpen(true)
     const temporaryPassword = generateTemporaryPassword(normalizedName)
     setForm((current) => ({
       ...current,
@@ -268,6 +290,8 @@ export default function AdminRegisterResellerPage() {
     if (!form.birthday) { setFormError('Please enter date of birth.'); return }
     if (!form.username) { setFormError('Complete the name, date of birth, and place of birth so the system can generate a username.'); return }
     if (!form.birthplace) { setFormError('Please enter place of birth.'); return }
+    if (!form.identity_document_type || !form.identity_document_number.trim()) { setFormError('Please select a valid ID and enter its number.'); return }
+    if (nameCapInfo?.confirmation_required && !identityConfirmation) { setIdentityPromptOpen(true); setFormError('Please confirm the possible matching person.'); return }
     if (!agreedToTerms) { setFormError('You must agree to the Terms and Conditions before registering.'); return }
     if (!selectedSlot) { setFormError('No placement slot selected.'); return }
     if (!location.city_muni_name) { setFormError('Please select a complete location.'); return }
@@ -289,6 +313,9 @@ export default function AdminRegisterResellerPage() {
         address: fullAddress,
         zip_code: location.zip_code,
         birthday: form.birthday, birthplace: form.birthplace,
+        identity_document_type: form.identity_document_type,
+        identity_document_number: form.identity_document_number,
+        identity_confirmation: identityConfirmation,
         pin_id: pinData?.id,
         referrer_username: referralData?.username,
         actual_parent_node_id: selectedSlot.parent_node_id,
@@ -300,7 +327,14 @@ export default function AdminRegisterResellerPage() {
     if (!res.ok) {
       setFormError(data.error || 'Registration failed.')
     } else {
-      setSuccessData({ id: data.reseller.id, full_name: data.reseller.full_name, username: form.username.toLowerCase(), package: data.package || null })
+      setSuccessData({
+        id: data.reseller.id,
+        full_name: data.reseller.full_name,
+        username: form.username.toLowerCase(),
+        address: fullAddress,
+        birthday: form.birthday,
+        package: data.package || null,
+      })
       setSmsStatus(null)
       setSmsPromptOpen(true)
     }
@@ -684,6 +718,28 @@ export default function AdminRegisterResellerPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Valid ID <span className="text-[#C9A84C]">*</span></label>
+                <select value={form.identity_document_type}
+                  onChange={(e) => { setForm({ ...form, identity_document_type: e.target.value, username: '' }); setNameCapInfo(null) }}
+                  onBlur={() => checkNameCap(form.full_name, form.birthday, form.birthplace)}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]">
+                  <option value="">Select valid ID</option>
+                  {['National ID', 'Passport', 'Driver’s License', 'TIN ID', 'UMID', 'PhilHealth ID', 'Voter’s ID', 'Postal ID', 'PRC ID'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">ID number <span className="text-[#C9A84C]">*</span></label>
+                <input value={form.identity_document_number}
+                  onChange={(e) => { setForm({ ...form, identity_document_number: e.target.value, username: '' }); setNameCapInfo(null) }}
+                  onBlur={() => checkNameCap(form.full_name, form.birthday, form.birthplace)}
+                  placeholder="Enter ID number"
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+                <p className="text-[11px] text-gray-400 mt-1">Used only to match the member securely; the number is not stored in plain text.</p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Temporary password <span className="text-[#C9A84C]">*</span></label>
@@ -725,6 +781,22 @@ export default function AdminRegisterResellerPage() {
           </div>
         )}
       </div>
+
+      {identityPromptOpen && nameCapInfo && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#C9A84C]">Possible duplicate</p>
+            <h3 className="mt-1 text-lg font-bold text-[#0D1B3E]">Is this the same person?</h3>
+            <p className="mt-2 text-sm text-gray-500">The system found {nameCapInfo.matching_usernames?.length || 1} active account with the same legal name and birth date.</p>
+            <p className="mt-3 text-xs text-gray-500">Existing account{(nameCapInfo.matching_usernames?.length || 0) === 1 ? '' : 's'}: <span className="font-mono text-[#0D1B3E]">{nameCapInfo.matching_usernames?.map((username) => `@${username}`).join(', ')}</span></p>
+            <p className="mt-3 text-xs text-gray-400">Verify the presented valid ID before confirming. No password, PIN, or ID number is shown here.</p>
+            <div className="mt-5 flex gap-2">
+              <button onClick={() => { setIdentityConfirmation('different'); setIdentityPromptOpen(false); checkNameCap(form.full_name, form.birthday, form.birthplace, 'different') }} className="flex-1 rounded-xl bg-[#F0F2F8] py-3 text-sm font-semibold text-[#0D1B3E]">No, different</button>
+              <button onClick={() => { setIdentityConfirmation('same'); setIdentityPromptOpen(false); checkNameCap(form.full_name, form.birthday, form.birthplace, 'same') }} className="flex-1 rounded-xl bg-[#C9A84C] py-3 text-sm font-bold text-[#0D1B3E]">Yes, same person</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Optional welcome SMS confirmation */}
       {successData && smsPromptOpen && (
@@ -802,6 +874,16 @@ export default function AdminRegisterResellerPage() {
                   <div className="flex justify-between text-xs">
                     <span className="text-gray-500">Username</span>
                     <span className="font-medium text-[#0D1B3E] font-mono">@{successData.username}</span>
+                  </div>
+                  <div className="flex justify-between gap-4 text-xs">
+                    <span className="text-gray-500 shrink-0">Address</span>
+                    <span className="font-medium text-[#0D1B3E] text-right">{successData.address}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Birth date</span>
+                    <span className="font-medium text-[#0D1B3E]">
+                      {new Intl.DateTimeFormat('en-PH', { dateStyle: 'long' }).format(new Date(`${successData.birthday}T00:00:00`))}
+                    </span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-gray-500">Status</span>

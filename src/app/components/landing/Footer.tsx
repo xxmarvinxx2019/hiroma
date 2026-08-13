@@ -15,7 +15,7 @@ const footerLinks = {
     { label: 'Starter packages', href: '#opportunity' },
     { label: 'Income streams', href: '#opportunity' },
     { label: 'Binary tree explained', href: '#opportunity' },
-    { label: 'Sign in', href: '/login' },
+    { label: 'Sign in', href: '/login/member' },
   ],
   'For distributors': [
     { label: 'Regional distributor', href: '#distributor' },

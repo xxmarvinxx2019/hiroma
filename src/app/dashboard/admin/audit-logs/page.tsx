@@ -157,17 +157,17 @@ export default function AuditLogPage() {
         {[
           { label: "Today's Activities", value: summary.total_today,        color: '#2563eb', icon: '📋' },
           { label: 'Failed Logins',      value: summary.failed_logins,      color: '#e05252', icon: '🔒' },
-          { label: 'Suspicious',         value: summary.suspicious,         color: '#f59e0b', icon: '⚠️' },
+          { label: 'Suspicious',         value: summary.suspicious,         color: '#b86f00', icon: '⚠️' },
           { label: 'Duplicate Entries',  value: summary.duplicates,         color: '#7c3aed', icon: '📋' },
           { label: 'Admin Actions',      value: summary.admin_actions,      color: '#0D1B3E', icon: '⚙️' },
           { label: 'Wallet Adjustments', value: summary.wallet_adjustments, color: '#1a7a4a', icon: '👛' },
         ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all" style={{ borderTop: `2px solid ${s.color}` }}>
+          <div key={s.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg" style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.color}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.color}38` }}>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-[9px] text-gray-400 uppercase tracking-wide font-semibold leading-tight">{s.label}</p>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base" style={{ backgroundColor: s.color + '15' }}>{s.icon}</div>
+              <p className="text-[9px] font-bold uppercase leading-tight tracking-wide text-white/80">{s.label}</p>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base" style={{ backgroundColor: 'rgba(255,255,255,.2)' }}>{s.icon}</div>
             </div>
-            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value.toLocaleString()}</p>
+            <p className="text-2xl font-extrabold text-white">{s.value.toLocaleString()}</p>
           </div>
         ))}
       </div>

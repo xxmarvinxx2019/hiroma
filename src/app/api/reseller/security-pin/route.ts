@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import { isValidSecurityPin, verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 import prisma from '@/app/lib/prisma'
+import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
 
 export async function GET() {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'reseller') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!user || user.is_staff || !isSecurityPinEligibleRole(user.role)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const security = await prisma.user.findUnique({
       where: { id: user.id },
@@ -25,7 +26,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'reseller') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!user || user.is_staff || !isSecurityPinEligibleRole(user.role)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { action, current_pin, new_pin, confirm_pin } = await req.json()
     if (!['enable', 'disable', 'change'].includes(action)) {

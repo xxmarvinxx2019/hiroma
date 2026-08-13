@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAutoLogout } from '@/app/hooks/useAutoLogout'
+import { adminStaffPermissionForPath, firstAdminStaffRoute } from '@/app/lib/staffPermissions'
 
 const navItems = [
   {
@@ -34,7 +35,20 @@ const navItems = [
       { label: 'Payouts', href: '/dashboard/admin/payouts', icon: '💸' },
       { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑' },
-      { label: 'Commissions',       href: '/dashboard/admin/commissions', icon: '💰' },
+      { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
+      {
+        label: 'Commission Testing',
+        icon: '🧪',
+        children: [
+          { label: 'Direct Referral', href: '/dashboard/admin/commission-testing/direct-referral' },
+          { label: 'Binary Commission', href: '/dashboard/admin/commission-testing/binary-commission' },
+          { label: 'Product Binary', href: '/dashboard/admin/commission-testing/product-binary' },
+          { label: 'Ranking Engine', href: '/dashboard/admin/commission-testing/ranking-engine' },
+          { label: 'Reserve Ledger', href: '/dashboard/admin/commission-testing/reserve-ledger' },
+          { label: 'Payout Ledger', href: '/dashboard/admin/commission-testing/payout-ledger' },
+          { label: 'Flushout Report', href: '/dashboard/admin/commission-testing/flushout-report' },
+        ],
+      },
       { label: 'Reports',            href: '/dashboard/admin/reports',     icon: '📈' },
       { label: 'Report Testing',     href: '/dashboard/admin/report-testing', icon: '🧪' },
       { label: 'Flushout/Overflow',  href: '/dashboard/admin/flushout',    icon: '⚡' },
@@ -44,6 +58,8 @@ const navItems = [
     section: 'Security',
     items: [
       { label: 'Audit Logs',         href: '/dashboard/admin/audit-logs',  icon: '🛡️' },
+      { label: 'Support Center',     href: '/dashboard/admin/support-center', icon: '🎧' },
+      { label: 'Staff Access',       href: '/dashboard/admin/support-staff', icon: '🧑‍💼' },
     ],
   },
 ]
@@ -54,17 +70,32 @@ function Sidebar({
   onClose,
   onLogout,
 }: {
-  user: { id: string; full_name: string; username: string } | null
+  user: { id: string; full_name: string; username: string; profile_photo?: string | null; is_staff?: boolean; permissions?: string[] } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
 }) {
+  const [commissionTestingOpen, setCommissionTestingOpen] = useState(() =>
+    pathname.startsWith('/dashboard/admin/commission-testing')
+  )
+
   const isActive = (href: string) => {
     if (href === '/dashboard/admin') return pathname === href
     // Exact match for these to avoid parent highlighting child routes
     if (href === '/dashboard/admin/resellers') return pathname === href
     return pathname.startsWith(href)
   }
+
+  const visibleNavItems = navItems.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => {
+      if (!user) return false
+      if (!user.is_staff) return true
+      if ('children' in item) return false
+      const required = adminStaffPermissionForPath(item.href)
+      return required !== '__owner_only__' && required !== null && Boolean(user.permissions?.includes(required))
+    }),
+  })).filter((group) => group.items.length > 0)
 
   return (
     <div
@@ -99,12 +130,47 @@ function Sidebar({
         }}
       >
         <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
-        {navItems.map((group) => (
+        {visibleNavItems.map((group) => (
           <div key={group.section} className="mb-3">
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">
               {group.section}
             </p>
-            {group.items.map((item) => (
+            {group.items.map((item) => 'children' in item ? (
+              <div key={item.label} className="mb-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCommissionTestingOpen((open) => !open)}
+                  aria-expanded={commissionTestingOpen}
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-all duration-150 ${
+                    item.children.some((child) => isActive(child.href))
+                      ? 'bg-[#C9A84C]/15 text-[#C9A84C]'
+                      : 'text-white/50 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <span className="text-base">{item.icon}</span>
+                  <span className="flex-1">{item.label}</span>
+                  <span className={`text-xs transition-transform ${commissionTestingOpen ? 'rotate-180' : ''}`}>⌄</span>
+                </button>
+                {commissionTestingOpen && (
+                  <div className="ml-5 mt-1 border-l border-white/20 pl-2">
+                    {item.children.map((child) => (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        onClick={onClose}
+                        className={`mb-0.5 flex rounded-md px-3 py-1.5 text-xs transition-colors ${
+                          isActive(child.href)
+                            ? 'bg-[#C9A84C]/15 text-[#C9A84C]'
+                            : 'text-white/50 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        {child.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
               <Link
                 key={item.href}
                 href={item.href}
@@ -128,10 +194,8 @@ function Sidebar({
         className="px-3 py-3 border-t border-white/5 bg-[#010521] flex-shrink-0"
       >
         <div className="flex items-center gap-2.5 mb-2">
-          <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#C9A84C] text-xs font-bold">
-              {user?.full_name?.charAt(0) || 'A'}
-            </span>
+          <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'A'}</span>}
           </div>
           <div className="overflow-hidden">
             <p className="text-white text-xs font-medium truncate">
@@ -165,7 +229,7 @@ export default function AdminLayout({
   })
   const [sidebarOpen, setSidebarOpen]   = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ id: string; full_name: string; username: string } | null>(null)
+  const [user, setUser] = useState<{ id: string; full_name: string; username: string; profile_photo?: string | null; is_staff?: boolean; permissions?: string[] } | null>(null)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -173,6 +237,20 @@ export default function AdminLayout({
       .then((data) => { if (data.user) setUser(data.user) })
       .catch(() => router.push('/login'))
   }, [router])
+
+  useEffect(() => {
+    if (!user?.is_staff) return
+    const required = adminStaffPermissionForPath(pathname)
+    if (required === '__owner_only__' || (required && !user.permissions?.includes(required))) {
+      router.replace(firstAdminStaffRoute(user.permissions || []))
+    }
+  }, [pathname, router, user])
+
+  useEffect(() => {
+    const updatePhoto = (event: Event) => setUser((current) => current ? { ...current, profile_photo: (event as CustomEvent<string | null>).detail } : current)
+    window.addEventListener('hiroma-profile-photo-change', updatePhoto)
+    return () => window.removeEventListener('hiroma-profile-photo-change', updatePhoto)
+  }, [])
 
   useEffect(() => {
   }, [])
@@ -276,10 +354,8 @@ export default function AdminLayout({
             <div className="relative">
               <button
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
-                <span className="text-[#C9A84C] text-xs font-bold">
-                  {user?.full_name?.charAt(0) || 'A'}
-                </span>
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center overflow-hidden hover:border-[#C9A84C] transition-colors">
+                {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'A'}</span>}
               </button>
               {profileMenuOpen && (
                 <>

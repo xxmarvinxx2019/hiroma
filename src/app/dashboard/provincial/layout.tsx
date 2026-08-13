@@ -32,7 +32,13 @@ const navItems = [
       { label: 'Distributors', href: '/dashboard/provincial/distributors', icon: '🏢' },
       { label: 'Resellers',    href: '/dashboard/provincial/resellers',    icon: '👥' },
     ],
-  }
+  },
+  {
+    section: 'Account',
+    items: [
+      { label: 'Digital ID', href: '/dashboard/provincial/digital-id', icon: 'ID' },
+    ],
+  },
 ]
 
 // ============================================================
@@ -45,7 +51,7 @@ function Sidebar({
   onClose,
   onLogout,
 }: {
-  user: { full_name: string; username: string; distributor_profile?: { coverage_area: string } } | null
+  user: { id: string; full_name: string; username: string; profile_photo?: string | null; distributor_profile?: { coverage_area: string } } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
@@ -98,10 +104,8 @@ function Sidebar({
       {/* Footer */}
       <div className="px-3 py-3 border-t border-white/5 flex-shrink-0 bg-[#010521]">
         <div className="flex items-center gap-2.5 mb-2">
-          <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#C9A84C] text-xs font-bold">
-              {user?.full_name?.charAt(0) || 'P'}
-            </span>
+          <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'P'}</span>}
           </div>
           <div className="overflow-hidden">
             <p className="text-white text-xs font-medium truncate">{user?.full_name || 'Provincial Dist.'}</p>
@@ -133,7 +137,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
   })
   const [sidebarOpen, setSidebarOpen]     = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<Parameters<typeof Sidebar>[0]['user']>(null)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -144,6 +148,12 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
       })
       .catch(() => router.push('/login'))
   }, [router])
+
+  useEffect(() => {
+    const updatePhoto = (event: Event) => setUser((current) => current ? { ...current, profile_photo: (event as CustomEvent<string | null>).detail } : current)
+    window.addEventListener('hiroma-profile-photo-change', updatePhoto)
+    return () => window.removeEventListener('hiroma-profile-photo-change', updatePhoto)
+  }, [])
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -207,8 +217,8 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
             </span>
             <div className="relative">
               <button onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center hover:border-[#C9A84C] transition-colors">
-                <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'P'}</span>
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center overflow-hidden hover:border-[#C9A84C] transition-colors">
+                {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'P'}</span>}
               </button>
               {profileMenuOpen && (
                 <>
@@ -223,6 +233,16 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
                         className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
                         <span className="text-base">👤</span>
                         <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                      </Link>
+                      <Link href="/dashboard/provincial/digital-id" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="grid h-4 w-4 place-items-center rounded bg-[#7c5dba] text-[9px] font-bold text-white">ID</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Digital ID</span>
+                      </Link>
+                      <Link href="/dashboard/provincial/settings" onClick={() => setProfileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <span className="text-base" aria-hidden="true">&#9881;</span>
+                        <span className="text-xs text-[#0D1B3E] font-medium">Settings</span>
                       </Link>
                     </div>
                     <div className="border-t border-[#0D1B3E]/8 py-1">

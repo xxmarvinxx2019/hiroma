@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { orderParticipantScope } from '@/app/lib/orderSecurity'
 
 export async function GET(
   req: NextRequest,
@@ -15,9 +16,9 @@ export async function GET(
     // Find by order_number or id
     const order = await prisma.order.findFirst({
       where: {
-        OR: [
-          { id },
-          { order_number: id },
+        AND: [
+          { OR: [{ id }, { order_number: id }] },
+          orderParticipantScope(user.id, user.role),
         ],
       },
       select: {
@@ -70,21 +71,6 @@ export async function GET(
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
-    }
-
-    // Check access:
-    // - admin can view all
-    // - buyer or seller can view their own orders
-    // - distributors (regional, provincial, city) can view orders in their network
-    const isDistributor = ['regional', 'provincial', 'city'].includes(user.role)
-    const canView =
-      user.role === 'admin' ||
-      order.buyer?.id  === user.id ||
-      order.seller?.id === user.id ||
-      isDistributor  // distributors can view orders for oversight
-
-    if (!canView) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 })
     }
 
     return NextResponse.json({ order })

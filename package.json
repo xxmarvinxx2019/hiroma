@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3003",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:binary-accounting": "tsx --test tests/binaryAccounting.test.ts tests/dateRangePresets.test.ts",
+    "verify:binary-accounting": "tsx scripts/verify-binary-accounting.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
@@ -15,15 +17,22 @@
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.2",
     "@supabase/supabase-js": "^2.110.7",
+    "@types/qrcode": "^1.5.6",
     "bcryptjs": "^3.0.3",
     "cookies-next": "^6.1.1",
+    "html-to-image": "^1.11.13",
+    "html5-qrcode": "^2.3.8",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
     "next": "16.2.4",
     "prisma": "^7.8.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "resend": "^6.18.1",
     "ws": "^8.20.0",
     "xlsx": "^0.18.5"
   },

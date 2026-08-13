@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import PasskeySettings from '@/app/components/security/PasskeySettings'
+import DistributorSecurityPinSettings from '@/app/components/security/DistributorSecurityPinSettings'
+import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
 
 // ============================================================
 // TYPES
@@ -12,6 +15,7 @@ interface AdminProfile {
   username: string
   email: string | null
   mobile: string
+  profile_photo: string | null
 }
 
 // ============================================================
@@ -47,6 +51,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
 
   // Profile form
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null)
   const [profileForm, setProfileForm] = useState({
     full_name: '',
     email: '',
@@ -74,6 +79,7 @@ export default function SettingsPage() {
       .then((data) => {
         if (data.user) {
           setProfile(data.user)
+          setProfilePhoto(data.user.profile_photo || null)
           setProfileForm({
             full_name: data.user.full_name,
             email: data.user.email || '',
@@ -176,6 +182,7 @@ export default function SettingsPage() {
           desc="Update your name, email and mobile number"
         >
           <div className="flex flex-col gap-3">
+            <ProfilePhotoUploader profilePhoto={profilePhoto} fullName={profileForm.full_name} onChange={setProfilePhoto} />
             <div>
               <label className="block text-xs text-gray-400 mb-1">
                 Username
@@ -305,6 +312,10 @@ export default function SettingsPage() {
             </button>
           </div>
         </SettingsSection>
+
+        <DistributorSecurityPinSettings />
+
+        <PasskeySettings />
 
         {/* Danger Zone */}
         <SettingsSection

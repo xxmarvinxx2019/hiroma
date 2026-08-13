@@ -1,8 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
+import {
+  getSensitiveResellerPinFailure,
+  isSensitiveResellerPinAccepted,
+  verifyResellerSecurityPin,
+} from '@/app/lib/resellerSecurityPin'
 import { Role } from '@prisma/client'
+import { canReadPaymentMethodTarget } from '@/app/lib/paymentMethodAccess'
+import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
+
+async function resolveAuthorizedSupplier(user: { id: string; role: string }, req: NextRequest): Promise<string | null> {
+  if (user.role === 'regional') return prisma.user.findFirst({ where: { role: 'admin', status: 'active' }, select: { id: true } }).then((item) => item?.id || null)
+  if (user.role === 'city' || user.role === 'provincial') {
+    const profile = await prisma.distributorProfile.findUnique({ where: { user_id: user.id }, select: { region_code: true, province_code: true, parent: { select: { user_id: true, is_active: true } } } })
+    if (profile?.parent?.is_active) return profile.parent.user_id
+    if (user.role === 'city' && profile?.province_code) {
+      const provincial = await prisma.distributorProfile.findFirst({ where: { dist_level: 'provincial', province_code: profile.province_code, is_active: true }, select: { user_id: true } })
+      if (provincial) return provincial.user_id
+    }
+    if (profile?.region_code) {
+      const regional = await prisma.distributorProfile.findFirst({ where: { dist_level: 'regional', region_code: profile.region_code, is_active: true }, select: { user_id: true } })
+      if (regional) return regional.user_id
+    }
+    return prisma.user.findFirst({ where: { role: 'admin', status: 'active' }, select: { id: true } }).then((item) => item?.id || null)
+  }
+  if (user.role === 'reseller') {
+    const profile = await prisma.resellerProfile.findUnique({ where: { user_id: user.id }, select: { city_dist_id: true } })
+    if (!profile?.city_dist_id) return null
+    const candidates = await prisma.distributorProfile.findMany({ where: { dist_level: 'city', is_active: true, user: { status: 'active' } }, select: { user_id: true, coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true, user: { select: { full_name: true } } } })
+    const params = req.nextUrl.searchParams
+    return recommendFulfillmentDistributor(candidates.map((candidate) => ({ id: candidate.user_id, full_name: candidate.user.full_name, coverage_area: candidate.coverage_area, region_name: candidate.region_name, province_name: candidate.province_name, city_muni_name: candidate.city_muni_name, barangay_name: candidate.barangay_name })), profile.city_dist_id, { address: params.get('delivery_address') || '', region: params.get('region') || '', province: params.get('province') || '', city: params.get('city') || '', barangay: params.get('barangay') || '' })?.distributor.id || null
+  }
+  return null
+}
 
 // ── GET ──
 export async function GET(req: NextRequest) {
@@ -20,7 +51,7 @@ export async function GET(req: NextRequest) {
     let methods: Array<{
       id: string; type: string; account_name: string; account_number: string; bank_name: string | null
       status: string; created_at: Date | null; updated_at: Date | null
-      user: { full_name: string; username: string; role: Role }
+      user: { id: string; full_name: string; username: string; role: Role }
     }>
 
     // Special case: role=admin — return admin's approved payment methods
@@ -31,10 +62,11 @@ export async function GET(req: NextRequest) {
         select: { id: true },
       })
       if (!adminUser) return NextResponse.json({ methods: [] })
+      if (!['admin', 'regional', 'provincial', 'city'].includes(user.role)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
         where: { user_id: adminUser.id, status: 'approved' },
         orderBy: { created_at: 'desc' },
-        include: { user: { select: { full_name: true, username: true, role: true } } },
+        include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
       return NextResponse.json({ methods })
     }
@@ -43,10 +75,12 @@ export async function GET(req: NextRequest) {
       // If user_id param — return that user's approved methods (supplier's methods)
       // Otherwise — return own methods
       const targetId = user_id || user.id
+      const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
+      if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
         where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
         orderBy: { created_at: 'desc' },
-        include: { user: { select: { full_name: true, username: true, role: true } } },
+        include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
     } else if (user.role === 'admin') {
       const allowedRole = Object.values(Role).includes(roleParam as Role)
@@ -59,22 +93,27 @@ export async function GET(req: NextRequest) {
           ...(requestedStatus ? { status: requestedStatus } : {}),
         },
         orderBy: { created_at: 'desc' },
-        include: { user: { select: { full_name: true, username: true, role: true } } },
+        include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
     } else if (user.role === 'provincial' || user.role === 'regional') {
       // If user_id param provided — fetch that user's approved methods (e.g. supplier's methods)
       // Otherwise — fetch own methods
       const targetId = user_id || user.id
+      const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
+      if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
         where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
         orderBy: { created_at: 'desc' },
-        include: { user: { select: { full_name: true, username: true, role: true } } },
+        include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
     } else if (user.role === 'reseller') {
+      const targetId = user_id || user.id
+      const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
+      if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
-        where: { user_id: user.id, ...(requestedStatus ? { status: requestedStatus } : {}) },
+        where: { user_id: targetId, ...(user_id ? { status: 'approved' } : requestedStatus ? { status: requestedStatus } : {}) },
         orderBy: { created_at: 'desc' },
-        include: { user: { select: { full_name: true, username: true, role: true } } },
+        include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
     } else {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -112,8 +151,9 @@ export async function POST(req: NextRequest) {
 
     if (user.role === 'reseller') {
       const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
-      if (!pinVerification.valid) {
-        return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+      if (!isSensitiveResellerPinAccepted(pinVerification)) {
+        const failure = getSensitiveResellerPinFailure(pinVerification)
+        return NextResponse.json({ error: failure.error }, { status: failure.status })
       }
     }
 
@@ -218,8 +258,9 @@ export async function DELETE(req: NextRequest) {
 
     if (user.role === 'reseller') {
       const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
-      if (!pinVerification.valid) {
-        return NextResponse.json({ error: pinVerification.error || 'Security PIN is required.' }, { status: pinVerification.locked ? 429 : 401 })
+      if (!isSensitiveResellerPinAccepted(pinVerification)) {
+        const failure = getSensitiveResellerPinFailure(pinVerification)
+        return NextResponse.json({ error: failure.error }, { status: failure.status })
       }
     }
 

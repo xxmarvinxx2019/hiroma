@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma, TreePosition } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+
+function parseJoinedDateSearch(value: string) {
+  const trimmed = value.trim()
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  const parts = slashMatch
+    ? { month: Number(slashMatch[1]), day: Number(slashMatch[2]), year: Number(slashMatch[3]) }
+    : isoMatch
+      ? { month: Number(isoMatch[2]), day: Number(isoMatch[3]), year: Number(isoMatch[1]) }
+      : null
+
+  if (!parts || parts.month < 1 || parts.month > 12 || parts.day < 1 || parts.day > 31) return null
+
+  const start = new Date(`${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}T00:00:00+08:00`)
+  if (Number.isNaN(start.getTime())) return null
+  return { gte: start, lt: new Date(start.getTime() + 24 * 60 * 60 * 1000) }
+}
 
 // ── GET reseller's full downline as a flat list ──
 export async function GET(req: NextRequest) {
@@ -51,21 +69,44 @@ export async function GET(req: NextRequest) {
     }
 
     // Build filter
-    const where: any = {
+    const where: Prisma.BinaryTreeNodeWhereInput = {
       id: { in: allDescendantIds },
     }
 
-    if (position !== 'all') {
-      where.position = position
+    if (position === 'left' || position === 'right') {
+      where.position = position as TreePosition
     }
 
     if (search) {
-      where.user = {
-        OR: [
-          { full_name: { contains: search, mode: 'insensitive' } },
-          { username:  { contains: search, mode: 'insensitive' } },
-        ],
+      const term = search.trim()
+      const normalizedTerm = term.toLowerCase()
+      const pointsMatch = normalizedTerm.match(/^-?\d+(?:\s*pts?)?$/)
+      const joinedDate = parseJoinedDateSearch(term)
+      const searchFilters: Prisma.BinaryTreeNodeWhereInput[] = [
+        { user: { full_name: { contains: term, mode: 'insensitive' } } },
+        { user: { username: { contains: term.replace(/^@/, ''), mode: 'insensitive' } } },
+        {
+          user: {
+            reseller_profile: {
+              is: { package: { name: { contains: term, mode: 'insensitive' } } },
+            },
+          },
+        },
+      ]
+
+      if (normalizedTerm === 'left' || normalizedTerm === 'right') {
+        searchFilters.push({ position: normalizedTerm as TreePosition })
       }
+      if (pointsMatch) {
+        searchFilters.push({
+          user: {
+            reseller_profile: { is: { total_points: Number.parseInt(normalizedTerm, 10) } },
+          },
+        })
+      }
+      if (joinedDate) searchFilters.push({ created_at: joinedDate })
+
+      where.OR = searchFilters
     }
 
     const [total, nodes] = await Promise.all([

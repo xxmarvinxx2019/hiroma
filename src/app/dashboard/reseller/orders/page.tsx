@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 // ============================================================
@@ -47,7 +47,12 @@ interface CityDist {
   id: string
   full_name: string
   username: string
-  distributor_profile: { coverage_area: string; dist_level?: string } | null
+  mobile?: string
+  address?: string | null
+  fulfillment_address?: string | null
+  fulfillment_location_source?: 'physical_outlet' | 'registered_address'
+  fulfillment_outlet_name?: string | null
+  distributor_profile: { coverage_area: string; dist_level?: string; region_name?: string | null; province_name?: string | null; city_muni_name?: string | null; barangay_name?: string | null } | null
 }
 
 interface PaymentMethodInfo {
@@ -61,6 +66,16 @@ interface PaymentMethodInfo {
 interface CartItem {
   product: Product
   quantity: number
+}
+
+interface Place { code: string; name: string }
+
+interface DeliveryLocation {
+  region_code: string; region_name: string
+  province_code: string; province_name: string
+  city_muni_code: string; city_muni_name: string
+  barangay_code: string; barangay_name: string
+  street: string; zip_code: string
 }
 
 const PAGE_SIZE = 15
@@ -100,6 +115,23 @@ function CreateOrderModal({
 }) {
   const [assignedDist, setAssignedDist]   = useState<CityDist | null>(null)
   const [selectedDistId, setSelectedDistId] = useState('')
+  const [recommendedDist, setRecommendedDist] = useState<CityDist | null>(null)
+  const [recommendationBasis, setRecommendationBasis] = useState('assigned_fallback')
+  const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [registeredAddress, setRegisteredAddress] = useState('')
+  const [addressSource, setAddressSource] = useState<'registered' | 'manual'>('registered')
+  const [step, setStep] = useState<'address' | 'order'>('address')
+  const [regions, setRegions] = useState<Place[]>([])
+  const [provinces, setProvinces] = useState<Place[]>([])
+  const [cityMunis, setCityMunis] = useState<Place[]>([])
+  const [barangays, setBarangays] = useState<Place[]>([])
+  const [loadingProv, setLoadingProv] = useState(false)
+  const [loadingCity, setLoadingCity] = useState(false)
+  const [loadingBarangay, setLoadingBarangay] = useState(false)
+  const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation>({
+    region_code: '', region_name: '', province_code: '', province_name: '',
+    city_muni_code: '', city_muni_name: '', barangay_code: '', barangay_name: '', street: '', zip_code: '',
+  })
   const [distSearch, setDistSearch]       = useState('')
   const [showDistDrop, setShowDistDrop]   = useState(false)
   const [products, setProducts]           = useState<Product[]>([])
@@ -114,26 +146,157 @@ function CreateOrderModal({
   const [paymentMethod, setPaymentMethod]     = useState('cash_on_pickup')
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentMethods, setPaymentMethods]   = useState<PaymentMethodInfo[]>([])
+  const recommendationRequestId = useRef(0)
 
-  useEffect(() => {
-    fetch('/api/reseller/city-distributors')
+  const loadFulfillmentRecommendation = useCallback((address?: string, location?: DeliveryLocation) => {
+    const requestId = ++recommendationRequestId.current
+    const params = new URLSearchParams()
+    if (address?.trim()) params.set('address', address.trim())
+    if (location?.region_name) params.set('region', location.region_name)
+    if (location?.province_name) params.set('province', location.province_name)
+    if (location?.city_muni_name) params.set('city', location.city_muni_name)
+    if (location?.barangay_name) params.set('barangay', location.barangay_name)
+    const query = params.size ? `?${params}` : ''
+    return fetch(`/api/reseller/city-distributors${query}`)
       .then((r) => r.json())
       .then((d) => {
+        if (requestId !== recommendationRequestId.current) return
         const assigned = d.assigned_distributor || d.distributors?.[0] || null
         setAssignedDist(assigned)
-        if (assigned?.id) setSelectedDistId(assigned.id)
+        setRegisteredAddress(d.registered_address || '')
+        const recommended = d.recommended_distributor || assigned
+        setRecommendedDist(recommended)
+        setRecommendationBasis(d.recommendation_basis || 'assigned_fallback')
+        if (recommended?.id) setSelectedDistId(recommended.id)
         else setError(d.error || 'No active distributor is assigned to your account.')
       })
-      .finally(() => setLoadingDists(false))
+      .finally(() => {
+        if (requestId === recommendationRequestId.current) setLoadingDists(false)
+      })
   }, [])
+
+  useEffect(() => { void loadFulfillmentRecommendation() }, [loadFulfillmentRecommendation])
+
+  // Keep the registered-address choice available even if the fulfillment lookup
+  // is temporarily unavailable or an older reseller profile lacks its relation.
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((response) => response.json())
+      .then((data) => {
+        const address = data?.user?.address?.trim()
+        if (address) setRegisteredAddress((current) => current || address)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  // "Use registered address" is the default choice, so populate it as soon as
+  // the account profile finishes loading. A manual delivery address is never overwritten.
+  useEffect(() => {
+    if (addressSource === 'registered' && !deliveryAddress && registeredAddress) {
+      setDeliveryAddress(registeredAddress)
+    }
+  }, [addressSource, deliveryAddress, registeredAddress])
+
+  useEffect(() => {
+    fetch('https://psgc.gitlab.io/api/regions/')
+      .then((response) => response.json())
+      .then((data) => setRegions(Array.isArray(data) ? data.map((item: Place) => ({ code: item.code, name: item.name })).sort((a: Place, b: Place) => a.name.localeCompare(b.name)) : []))
+      .catch(() => setRegions([]))
+  }, [])
+
+  useEffect(() => {
+    if (!deliveryLocation.region_code) { setProvinces([]); setCityMunis([]); return }
+    setLoadingProv(true)
+    setDeliveryLocation((current) => ({ ...current, province_code: '', province_name: '', city_muni_code: '', city_muni_name: '', barangay_code: '', barangay_name: '' }))
+    setCityMunis([]); setBarangays([])
+    fetch(`https://psgc.gitlab.io/api/regions/${deliveryLocation.region_code}/provinces/`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!Array.isArray(data) || data.length === 0) {
+          setProvinces([]); setLoadingCity(true)
+          return fetch(`https://psgc.gitlab.io/api/regions/${deliveryLocation.region_code}/cities-municipalities/`)
+            .then((response) => response.json())
+            .then((cities) => {
+              setCityMunis(Array.isArray(cities) ? cities.map((item: Place) => ({ code: item.code, name: item.name })).sort((a: Place, b: Place) => a.name.localeCompare(b.name)) : [])
+              setDeliveryLocation((current) => ({ ...current, province_code: 'DIRECT', province_name: '' }))
+            })
+            .finally(() => setLoadingCity(false))
+        }
+        setProvinces(data.map((item: Place) => ({ code: item.code, name: item.name })).sort((a: Place, b: Place) => a.name.localeCompare(b.name)))
+      })
+      .catch(() => setProvinces([]))
+      .finally(() => setLoadingProv(false))
+  }, [deliveryLocation.region_code])
+
+  useEffect(() => {
+    if (!deliveryLocation.province_code || deliveryLocation.province_code === 'DIRECT') {
+      if (deliveryLocation.province_code !== 'DIRECT') setCityMunis([])
+      return
+    }
+    setLoadingCity(true); setBarangays([])
+    setDeliveryLocation((current) => ({ ...current, city_muni_code: '', city_muni_name: '', barangay_code: '', barangay_name: '' }))
+    fetch(`https://psgc.gitlab.io/api/provinces/${deliveryLocation.province_code}/cities-municipalities/`)
+      .then((response) => response.json())
+      .then((data) => setCityMunis(Array.isArray(data) ? data.map((item: Place) => ({ code: item.code, name: item.name })).sort((a: Place, b: Place) => a.name.localeCompare(b.name)) : []))
+      .catch(() => setCityMunis([]))
+      .finally(() => setLoadingCity(false))
+  }, [deliveryLocation.province_code])
+
+  useEffect(() => {
+    if (!deliveryLocation.city_muni_code) { setBarangays([]); return }
+    setLoadingBarangay(true)
+    setDeliveryLocation((current) => ({ ...current, barangay_code: '', barangay_name: '' }))
+    fetch(`https://psgc.gitlab.io/api/cities-municipalities/${deliveryLocation.city_muni_code}/barangays/`)
+      .then((response) => response.json())
+      .then((data) => setBarangays(Array.isArray(data) ? data.map((item: Place) => ({ code: item.code, name: item.name })).sort((a: Place, b: Place) => a.name.localeCompare(b.name)) : []))
+      .catch(() => setBarangays([]))
+      .finally(() => setLoadingBarangay(false))
+  }, [deliveryLocation.city_muni_code])
+
+  useEffect(() => {
+    if (addressSource !== 'manual') return
+    const formatted = [deliveryLocation.street, deliveryLocation.barangay_name, deliveryLocation.city_muni_name, deliveryLocation.province_name, deliveryLocation.region_name, deliveryLocation.zip_code].filter(Boolean).join(', ')
+    setDeliveryAddress(formatted)
+  }, [addressSource, deliveryLocation])
+
+  // Refresh the fulfillment recommendation as the delivery address changes.
+  // A short delay prevents a request on every keystroke in the street field.
+  useEffect(() => {
+    const canRecommend = addressSource === 'registered'
+      ? Boolean(deliveryAddress.trim())
+      : Boolean(deliveryLocation.city_muni_code)
+    if (!canRecommend) {
+      recommendationRequestId.current += 1
+      setLoadingDists(false)
+      setRecommendedDist(null)
+      setSelectedDistId('')
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setLoadingDists(true)
+      void loadFulfillmentRecommendation(
+        deliveryAddress,
+        addressSource === 'manual' ? deliveryLocation : undefined
+      )
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [addressSource, deliveryAddress, deliveryLocation, loadFulfillmentRecommendation])
 
   useEffect(() => {
     if (!selectedDistId) { setProducts([]); setLoadingProducts(false); setPaymentMethods([]); return }
     setLoadingProducts(true)
     // Fetch products and payment methods in parallel
     Promise.all([
-      fetch('/api/reseller/products').then((r) => r.json()),
-      fetch(`/api/payment-methods?user_id=${selectedDistId}&status=approved`).then((r) => r.json()),
+      fetch(`/api/reseller/products?city_dist_id=${selectedDistId}`).then((r) => r.json()),
+      fetch(`/api/payment-methods?${new URLSearchParams({
+        user_id: selectedDistId,
+        status: 'approved',
+        delivery_address: deliveryAddress,
+        region: deliveryLocation.region_name,
+        province: deliveryLocation.province_name,
+        city: deliveryLocation.city_muni_name,
+        barangay: deliveryLocation.barangay_name,
+      })}`).then((r) => r.json()),
     ]).then(([prodData, pmData]) => {
       setProducts(prodData.products || [])
       setPaymentMethods(pmData.methods || [])
@@ -171,6 +334,29 @@ function CreateOrderModal({
   const total = cart.reduce((s, c) => s + c.product.price * c.quantity, 0)
   const cityDists = assignedDist ? [assignedDist] : []
 
+  const proceedToOrder = async () => {
+    if (addressSource === 'manual') {
+      const hasProvince = deliveryLocation.province_code === 'DIRECT' || Boolean(deliveryLocation.province_code)
+      if (!deliveryLocation.region_code || !hasProvince || !deliveryLocation.city_muni_code || !deliveryLocation.barangay_code || !deliveryLocation.street.trim() || !/^\d{4}$/.test(deliveryLocation.zip_code)) {
+        setError('Complete the region, province, city/municipality, barangay, street, and 4-digit ZIP code.'); return
+      }
+    }
+    if (!deliveryAddress.trim()) { setError('Enter the delivery address before proceeding.'); return }
+    setError('')
+    setLoadingDists(true)
+    await loadFulfillmentRecommendation(deliveryAddress, addressSource === 'manual' ? deliveryLocation : undefined)
+    setStep('order')
+  }
+
+  const recommendationLabel: Record<string, string> = {
+    exact_barangay: 'Exact barangay coverage',
+    exact_city: 'Exact city/municipality coverage',
+    exact_province: 'Province coverage',
+    same_region: 'Regional fallback',
+    address_keywords: 'Closest available address match',
+    assigned_fallback: 'Assigned distributor fallback',
+  }
+
   const handleSubmit = async () => {
     if (!selectedDistId) { setError('No active distributor is assigned to your account.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
@@ -184,6 +370,14 @@ function CreateOrderModal({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        city_dist_id:     selectedDistId,
+        delivery_address: deliveryAddress.trim(),
+        delivery_location: {
+          region: deliveryLocation.region_name,
+          province: deliveryLocation.province_name,
+          city: deliveryLocation.city_muni_name,
+          barangay: deliveryLocation.barangay_name,
+        },
         order_type:        orderType,
         notes,
         payment_method:    paymentMethod,
@@ -201,6 +395,55 @@ function CreateOrderModal({
     else setError(data.error || 'Something went wrong.')
   }
 
+  if (step === 'address') {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between">
+            <div><h2 className="text-sm font-semibold text-[#0D1B3E]">Delivery address</h2><p className="text-xs text-gray-400 mt-0.5">We use this only to recommend the best fulfillment distributor.</p></div>
+            <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">×</button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => { setDeliveryAddress(registeredAddress); setAddressSource('registered') }} disabled={!registeredAddress}
+                className={`text-xs px-3 py-2 rounded-lg border transition-colors ${addressSource === 'registered' ? 'border-[#C9A84C] bg-[#fef9ee] text-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500'} disabled:opacity-40`}>Use registered address</button>
+              <button onClick={() => { setDeliveryAddress(''); setAddressSource('manual'); setRecommendedDist(null); setSelectedDistId(''); setError('') }} className={`text-xs px-3 py-2 rounded-lg border transition-colors ${addressSource === 'manual' ? 'border-[#C9A84C] bg-[#fef9ee] text-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500'}`}>Enter different address</button>
+            </div>
+            {!registeredAddress && <p className="text-xs text-amber-700 bg-[#fef9ee] rounded-lg px-3 py-2">No registered address is available. Please enter the delivery address.</p>}
+            {addressSource === 'manual' ? (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500">Select the exact delivery location. All fields are required.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><label className="block text-xs text-gray-500 mb-1">Region <span className="text-[#a03030]">*</span></label><select value={deliveryLocation.region_code} onChange={(e) => { const item = regions.find((region) => region.code === e.target.value); setDeliveryLocation((current) => ({ ...current, region_code: e.target.value, region_name: item?.name || '' })) }} className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"><option value="">Select region...</option>{regions.map((region) => <option key={region.code} value={region.code}>{region.name}</option>)}</select></div>
+                  {provinces.length > 0 && <div><label className="block text-xs text-gray-500 mb-1">Province <span className="text-[#a03030]">*</span></label><select value={deliveryLocation.province_code} disabled={!deliveryLocation.region_code || loadingProv} onChange={(e) => { const item = provinces.find((province) => province.code === e.target.value); setDeliveryLocation((current) => ({ ...current, province_code: e.target.value, province_name: item?.name || '' })) }} className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"><option value="">{loadingProv ? 'Loading...' : 'Select province...'}</option>{provinces.map((province) => <option key={province.code} value={province.code}>{province.name}</option>)}</select></div>}
+                  <div><label className="block text-xs text-gray-500 mb-1">City / Municipality <span className="text-[#a03030]">*</span></label><select value={deliveryLocation.city_muni_code} disabled={!deliveryLocation.province_code || loadingCity} onChange={(e) => { const item = cityMunis.find((city) => city.code === e.target.value); setDeliveryLocation((current) => ({ ...current, city_muni_code: e.target.value, city_muni_name: item?.name || '' })) }} className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"><option value="">{loadingCity ? 'Loading...' : 'Select city/municipality...'}</option>{cityMunis.map((city) => <option key={city.code} value={city.code}>{city.name}</option>)}</select></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Barangay <span className="text-[#a03030]">*</span></label><select value={deliveryLocation.barangay_code} disabled={!deliveryLocation.city_muni_code || loadingBarangay} onChange={(e) => { const item = barangays.find((barangay) => barangay.code === e.target.value); setDeliveryLocation((current) => ({ ...current, barangay_code: e.target.value, barangay_name: item?.name || '' })) }} className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"><option value="">{loadingBarangay ? 'Loading...' : 'Select barangay...'}</option>{barangays.map((barangay) => <option key={barangay.code} value={barangay.code}>{barangay.name}</option>)}</select></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Street / house no. <span className="text-[#a03030]">*</span></label><input value={deliveryLocation.street} onChange={(e) => setDeliveryLocation((current) => ({ ...current, street: e.target.value }))} placeholder="e.g. Rizal Street, House 12" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">ZIP code <span className="text-[#a03030]">*</span></label><input value={deliveryLocation.zip_code} inputMode="numeric" maxLength={4} onChange={(e) => setDeliveryLocation((current) => ({ ...current, zip_code: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="e.g. 6606" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" /></div>
+                </div>
+                {deliveryAddress && <div className="rounded-lg bg-[#e8f7ef] border border-[#1a7a4a]/30 px-3 py-2"><p className="text-[10px] text-gray-400">Delivery address preview</p><p className="text-xs text-[#1a7a4a] font-medium mt-0.5">{deliveryAddress}</p></div>}
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">Delivery address <span className="text-[#a03030]">*</span></label>
+                <textarea value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} rows={3} placeholder="Street, barangay, city/municipality, province, region, ZIP code" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] resize-none" />
+              </div>
+            )}
+            {((addressSource === 'registered' && deliveryAddress.trim()) || (addressSource === 'manual' && deliveryLocation.city_muni_code)) && <div className="rounded-xl border border-[#C9A84C]/40 bg-[#fef9ee] px-4 py-3">
+              <p className="text-[10px] uppercase tracking-wide text-[#9a6f1e] font-semibold">Recommended fulfillment distributor</p>
+              {loadingDists ? <p className="text-xs text-gray-400 mt-1">Updating recommended distributor…</p> : recommendedDist ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">{recommendedDist.full_name}</p><p className="text-xs text-gray-500">@{recommendedDist.username}{recommendedDist.distributor_profile?.coverage_area ? ` · ${recommendedDist.distributor_profile.coverage_area}` : ''}</p><p className="text-[11px] text-[#9a6f1e] mt-1.5">{recommendationLabel[recommendationBasis] || 'Available fulfillment distributor'}</p><p className="text-[11px] text-gray-500 mt-1">Final product stock is checked again before the order is placed.</p></> : <p className="text-xs text-[#a03030] mt-1">No active fulfillment distributor is available.</p>}
+            </div>}
+            {error && <p className="text-xs text-[#a03030]">{error}</p>}
+          </div>
+          <div className="px-5 py-4 border-t border-[#0D1B3E]/8 flex gap-2 justify-end">
+            <button onClick={onClose} className="text-xs px-4 py-2 rounded-lg bg-[#F0F2F8] text-[#0D1B3E]">Cancel</button>
+            <button onClick={proceedToOrder} disabled={loadingDists || !deliveryAddress.trim()} className="text-xs px-4 py-2 rounded-lg bg-[#C9A84C] text-white font-medium disabled:opacity-50">Proceed to order</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -210,7 +453,7 @@ function CreateOrderModal({
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Place New Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {assignedDist ? `Ordering from: ${assignedDist.full_name}` : 'No assigned distributor'}
+              {recommendedDist ? `Fulfilled by: ${recommendedDist.full_name}` : 'No fulfillment distributor available'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
@@ -222,16 +465,21 @@ function CreateOrderModal({
           <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
 
-              {/* Searchable city distributor dropdown */}
+              <div className="flex items-start justify-between gap-3 rounded-lg bg-[#fef9ee] border border-[#C9A84C]/30 px-3 py-2">
+                <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-[#9a6f1e]">Delivery address</p><p className="text-xs text-[#0D1B3E] truncate mt-0.5">{deliveryAddress}</p></div>
+                <button onClick={() => setStep('address')} className="text-[11px] text-[#9a6f1e] hover:underline flex-shrink-0">Change</button>
+              </div>
+
+              {/* Fulfillment distributor is selected from the delivery address; it is not the referral sponsor. */}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Assigned Distributor</label>
+                <label className="block text-xs text-gray-400 mb-1">Fulfillment Distributor</label>
                 {loadingDists ? (
                   <div className="h-[58px] rounded-xl bg-[#F0F2F8] animate-pulse" />
                 ) : (
                   <div className="relative">
                     <input
                       type="text"
-                      value={assignedDist?.full_name || ''}
+                      value={recommendedDist?.full_name || ''}
                       readOnly
                       onChange={(e) => {
                         setDistSearch(e.target.value)
@@ -280,6 +528,25 @@ function CreateOrderModal({
                   </div>
                 )}
               </div>
+              {recommendedDist && (
+                <div className="rounded-lg border border-[#0D1B3E]/10 bg-[#F0F2F8]/60 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">Fulfillment Contact Information</p>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[#0D1B3E]/10 text-[#0D1B3E]">
+                      {recommendedDist.distributor_profile?.dist_level === 'branch' ? 'Branch' : 'City Distributor'}
+                    </span>
+                  </div>
+                  {recommendedDist.fulfillment_location_source === 'physical_outlet' && (
+                    <p className="text-[10px] text-[#1a7a4a] mt-1">Physical outlet{recommendedDist.fulfillment_outlet_name ? ` · ${recommendedDist.fulfillment_outlet_name}` : ''}</p>
+                  )}
+                  <p className="text-xs font-medium text-[#0D1B3E] mt-1">{recommendedDist.fulfillment_address || recommendedDist.address || recommendedDist.distributor_profile?.coverage_area || 'Address not available'}</p>
+                  {recommendedDist.mobile ? (
+                    <a href={`tel:${recommendedDist.mobile}`} className="inline-flex items-center gap-1 text-xs text-[#9a6f1e] hover:underline mt-1.5">
+                      <span aria-hidden="true">☎</span> {recommendedDist.mobile}
+                    </a>
+                  ) : <p className="text-xs text-gray-400 mt-1.5">Contact number not available</p>}
+                </div>
+              )}
 
               <input
                 value={search}
@@ -512,17 +779,17 @@ export default function ResellerOrdersPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
         {[
-          { label: 'Total',      value: summary.total,      accent: '#0D1B3E' },
-          { label: 'Pending',    value: summary.pending,    accent: '#C9A84C' },
-          { label: 'Processing', value: summary.processing, accent: '#0D1B3E' },
-          { label: 'Ready for Pickup', value: summary.ready_for_pickup, accent: '#2563eb' },
-          { label: 'Delivered',  value: summary.delivered,  accent: '#1a7a4a' },
-          { label: 'Cancelled',  value: summary.cancelled,  accent: '#e05252' },
+          { label: 'Total',            value: summary.total,            accent: '#0D1B3E' },
+          { label: 'Pending',          value: summary.pending,          accent: '#A17820' },
+          { label: 'Processing',       value: summary.processing,       accent: '#475569' },
+          { label: 'Ready for Pickup', value: summary.ready_for_pickup, accent: '#2563EB' },
+          { label: 'Delivered',        value: summary.delivered,        accent: '#168052' },
+          { label: 'Cancelled',        value: summary.cancelled,        accent: '#C23B3B' },
         ].map((s) => (
-          <div key={s.label} className="orderSummaryCard bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>{s.value}</p>
+          <div key={s.label} className="orderSummaryCard group relative min-h-24 overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.16)), ${s.accent}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 26px ${s.accent}38` }}>
+            <div aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/20 blur-2xl transition-transform group-hover:scale-125" />
+            <div className="relative"><p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p><p className="text-2xl font-extrabold text-white">{s.value}</p></div>
           </div>
         ))}
       </div>

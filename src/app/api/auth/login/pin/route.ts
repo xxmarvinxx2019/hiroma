@@ -5,17 +5,19 @@ import {
   getDashboardRoute,
   getTwoFactorChallenge,
   JWTPayload,
+  UserRole,
   setAuthCookie,
   signToken,
 } from '@/app/lib/auth'
 import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
 
 export async function POST(req: NextRequest) {
   const { ip_address, device } = getClientInfo(req)
   try {
     const challenge = await getTwoFactorChallenge()
-    if (!challenge || challenge.role !== 'reseller') {
+    if (!challenge || !isSecurityPinEligibleRole(challenge.role)) {
       return NextResponse.json({ error: 'Your sign-in verification has expired. Please sign in again.' }, { status: 401 })
     }
 
@@ -29,7 +31,7 @@ export async function POST(req: NextRequest) {
       where: { id: challenge.id },
       select: { id: true, username: true, full_name: true, role: true, status: true },
     })
-    if (!user || user.status !== 'active' || user.role !== 'reseller') {
+    if (!user || user.status !== 'active' || !isSecurityPinEligibleRole(user.role) || user.role !== challenge.role) {
       await deleteTwoFactorChallengeCookie()
       return NextResponse.json({ error: 'Your account is not available for sign-in.' }, { status: 403 })
     }
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
     const payload: JWTPayload = {
       id: user.id,
       username: user.username,
-      role: 'reseller',
+      role: user.role as UserRole,
       full_name: user.full_name,
     }
     await setAuthCookie(await signToken(payload))
@@ -57,7 +59,7 @@ export async function POST(req: NextRequest) {
       status: 'normal',
     })
 
-    return NextResponse.json({ success: true, redirect: getDashboardRoute('reseller') })
+    return NextResponse.json({ success: true, redirect: getDashboardRoute(user.role as UserRole) })
   } catch (error) {
     console.error('[LOGIN PIN ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })

@@ -48,6 +48,10 @@ export default function ResellersPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [selected, setSelected]   = useState<Reseller | null>(null)
   const [showEdit, setShowEdit]     = useState(false)
+  const [showResetConfirmation, setShowResetConfirmation] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState('')
+  const [resetSuccess, setResetSuccess] = useState('')
   const [editForm, setEditForm]     = useState({ full_name: '', username: '', mobile: '', address: '', email: '', password: '' })
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError]   = useState('')
@@ -107,6 +111,9 @@ export default function ResellersPage() {
     })
     setEditError('')
     setEditSuccess('')
+    setShowResetConfirmation(false)
+    setResetError('')
+    setResetSuccess('')
     setShowEdit(true)
   }
 
@@ -131,6 +138,32 @@ export default function ResellersPage() {
     }
   }
 
+  const handlePasswordResetEmail = async () => {
+    if (!selected) return
+    setResetLoading(true); setResetError(''); setResetSuccess('')
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 30000)
+    try {
+      const response = await fetch(`/api/admin/resellers/${selected.id}/password-reset`, {
+        method: 'POST',
+        signal: controller.signal,
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setResetError(data.error || 'Unable to send the reset email. Please try again.')
+        return
+      }
+      setResetSuccess(data.message)
+    } catch (error) {
+      setResetError(error instanceof DOMException && error.name === 'AbortError'
+        ? 'Email sending took too long. Please check the server connection and try again.'
+        : 'Unable to contact the email service. Please try again.')
+    } finally {
+      window.clearTimeout(timeout)
+      setResetLoading(false)
+    }
+  }
+
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -150,19 +183,29 @@ export default function ResellersPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
           { label: 'Total Resellers', value: stats.total,     accent: '#0D1B3E' },
           { label: 'Active',           value: stats.active,    accent: '#1a7a4a' },
-          { label: 'Inactive',         value: stats.inactive,  accent: '#C9A84C' },
+          { label: 'Inactive',         value: stats.inactive,  accent: '#9a6f1e' },
         ].map((s) => (
           <div
             key={s.label}
-            className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4"
-            style={{ borderTop: `2px solid ${s.accent}` }}
+            className="group relative overflow-hidden rounded-xl border p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+            style={{
+              background: `linear-gradient(145deg, rgba(255,255,255,0.15), rgba(0,0,0,0.14)), ${s.accent}`,
+              borderColor: 'rgba(255,255,255,0.3)',
+              boxShadow: `0 9px 24px ${s.accent}38`,
+            }}
           >
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
-            <p className="text-2xl font-semibold" style={{ color: s.accent }}>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-7 -top-9 h-24 w-24 rounded-full bg-white opacity-20 blur-2xl transition-transform group-hover:scale-125"
+            />
+            <p className="relative mb-2 text-xs font-bold uppercase tracking-wide text-white/80">
+              {s.label}
+            </p>
+            <p className="relative text-2xl font-extrabold tracking-tight text-white">
               {s.value}
             </p>
           </div>
@@ -425,6 +468,21 @@ export default function ResellersPage() {
                   placeholder="Enter new password"
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
                 />
+                <div className="mt-3 rounded-lg border border-[#C9A84C]/25 bg-[#fef9ee] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-[#0D1B3E]">Password reset by email</p>
+                      <p className="mt-0.5 text-[10px] text-gray-500">A reset link will be sent to this reseller&apos;s registered email.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setResetError(''); setResetSuccess(''); setShowResetConfirmation(true) }}
+                      className="rounded-lg border border-[#C9A84C]/45 bg-white px-3 py-1.5 text-xs font-semibold text-[#9a6f1e] hover:border-[#C9A84C] hover:bg-[#fffdf7] transition-colors"
+                    >
+                      Reset Password via Email
+                    </button>
+                  </div>
+                </div>
               </div>
               {editError   && <p className="text-xs text-[#a03030]">{editError}</p>}
               {editSuccess && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-3 py-2 rounded-lg">{editSuccess}</p>}
@@ -437,6 +495,39 @@ export default function ResellersPage() {
                   className="flex-1 bg-[#C9A84C] text-white text-sm rounded-lg py-2.5 hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
                   {editLoading ? 'Saving...' : 'Save Changes'}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Static password-reset confirmation — no reset email is sent yet. */}
+      {showResetConfirmation && selected && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-[#0D1B3E]/8 px-5 py-4">
+              <div>
+                <h2 id="reset-password-title" className="text-sm font-semibold text-[#0D1B3E]">Confirm password reset</h2>
+                <p className="mt-0.5 text-xs text-gray-400">Confirm the registered email before proceeding.</p>
+              </div>
+              <button type="button" onClick={() => setShowResetConfirmation(false)} className="text-lg leading-none text-gray-400 hover:text-[#0D1B3E]" aria-label="Close confirmation">✕</button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="rounded-xl border border-[#C9A84C]/25 bg-[#fef9ee] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9a6f1e]">Reseller account</p>
+                <p className="mt-1 text-sm font-semibold text-[#0D1B3E]">{selected.full_name}</p>
+                <p className="mt-0.5 text-xs text-gray-500">@{selected.username}</p>
+                <div className="mt-3 border-t border-[#C9A84C]/20 pt-3">
+                  <p className="text-[10px] font-medium text-gray-400">Registered email</p>
+                  <p className="mt-0.5 break-all text-sm font-medium text-[#0D1B3E]">{selected.email || 'No registered email'}</p>
+                </div>
+              </div>
+              <p className="text-xs leading-5 text-gray-500">A secure, single-use reset link will be sent to the registered email. The link expires after 30 minutes.</p>
+              {resetError && <p className="rounded-lg bg-[#fdecea] px-3 py-2 text-xs text-[#a03030]">{resetError}</p>}
+              {resetSuccess && <p className="rounded-lg bg-[#e8f7ef] px-3 py-2 text-xs text-[#1a7a4a]">{resetSuccess}</p>}
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setShowResetConfirmation(false)} className="flex-1 rounded-lg bg-[#F0F2F8] py-2.5 text-sm text-[#0D1B3E] hover:bg-[#e4e7f0] transition-colors">No, go back</button>
+                <button type="button" disabled={resetLoading || Boolean(resetSuccess) || !selected.email} onClick={handlePasswordResetEmail} className="flex-1 rounded-lg bg-[#C9A84C] py-2.5 text-sm font-medium text-white hover:bg-[#b8963e] transition-colors disabled:opacity-50">{resetLoading ? 'Sending...' : resetSuccess ? 'Email Sent' : 'Proceed Reset'}</button>
               </div>
             </div>
           </div>

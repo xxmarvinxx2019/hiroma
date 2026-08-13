@@ -175,18 +175,18 @@ export default function PinsPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'TOTAL PINS', value: summary.total, color: '#2563eb', icon: '📋', sub: 'View details below' },
-          { label: 'UNUSED',     value: summary.unused,    color: '#C9A84C', icon: '🔒', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
+          { label: 'UNUSED',     value: summary.unused,    color: '#9a6f1e', icon: '🔒', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
           { label: 'USED',       value: summary.used,      color: '#1a7a4a', icon: '✅', sub: `${summary.total > 0 ? ((summary.used / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
           { label: 'EXPIRED',    value: summary.expired,   color: '#be123c', icon: '⌛', sub: `${summary.total > 0 ? ((summary.expired / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
           { label: 'CANCELLED',  value: summary.cancelled,   color: '#64748b', icon: '🚫', sub: `${summary.total > 0 ? ((summary.cancelled / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
         ].map(s => (
-          <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
+          <div key={s.label} className="rounded-2xl border p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg" style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.color}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.color}38` }}>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold">{s.label} <span className="text-gray-300">({displayDate})</span></p>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: s.color + '15' }}>{s.icon}</div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-white/80">{s.label} <span className="text-white/60">({displayDate})</span></p>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: 'rgba(255,255,255,.2)' }}>{s.icon}</div>
             </div>
-            <p className="text-3xl font-bold" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
+            <p className="text-3xl font-extrabold text-white">{s.value}</p>
+            <p className="mt-1 text-[10px] font-medium text-white/70">{s.sub}</p>
           </div>
         ))}
       </div>

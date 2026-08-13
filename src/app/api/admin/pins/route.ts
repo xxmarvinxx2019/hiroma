@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
     const cityDistId    = searchParams.get('city_dist_id')  || ''
     const dateFrom      = searchParams.get('from')          || ''
     const dateTo        = searchParams.get('to')            || ''
+    const allDates      = searchParams.get('all_dates') === 'true'
 
     const normalizedSearch = search.trim().toLowerCase()
     const searchedStatus = Object.values(PinStatus).find((value) => value === normalizedSearch)
@@ -58,7 +59,10 @@ export async function GET(req: NextRequest) {
     const toDate = validSearchDate ? new Date(new Date(validSearchDate).setHours(23, 59, 59, 999)) : dateTo ? new Date(dateTo + 'T23:59:59') : new Date(new Date().setHours(23, 59, 59, 999))
 
     const baseWhere: Prisma.PinWhereInput = {
-      created_at: { gte: fromDate, lte: toDate },
+      // PIN management keeps its date-based reporting default. Registration can
+      // explicitly request all historical unused PINs, because an unused PIN
+      // remains valid regardless of when it was generated.
+      ...(!allDates && { created_at: { gte: fromDate, lte: toDate } }),
       ...(cityDistId && { city_dist_id: cityDistId }),
       ...(search && !searchedStatus && !validSearchDate && {
         OR: [

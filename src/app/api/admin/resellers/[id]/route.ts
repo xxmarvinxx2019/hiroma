@@ -55,7 +55,7 @@ export async function PATCH(
 
     // Hash new password if provided
     const passwordData = password?.trim()
-      ? { password_hash: await hashPassword(password.trim()) }
+      ? { password_hash: await hashPassword(password.trim()), password_changed_at: new Date() }
       : {}
 
     const updated = await prisma.user.update({

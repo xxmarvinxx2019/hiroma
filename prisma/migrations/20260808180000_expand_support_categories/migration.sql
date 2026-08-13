@@ -1,0 +1,15 @@
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'account_access';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'profile_and_verification';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'digital_id';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'registration_and_pin';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'referral_and_sponsorship';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'binary_tree_and_genealogy';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'commissions_and_points';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'wallet_and_payout';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'orders_and_delivery';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'products_and_pricing';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'payment_issue';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'website_or_app_problem';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'security_and_account_safety';
+ALTER TYPE "SupportRequestCategory" ADD VALUE IF NOT EXISTS 'other';
+ALTER TABLE "support_requests" ADD COLUMN "category_detail" TEXT;

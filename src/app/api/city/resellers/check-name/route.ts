@@ -12,6 +12,11 @@ export async function GET(req: NextRequest) {
     const name = req.nextUrl.searchParams.get('name')?.trim() || ''
     const birthday = req.nextUrl.searchParams.get('birthday')?.trim() || ''
     const birthplace = req.nextUrl.searchParams.get('birthplace')?.trim() || ''
+    const identityDocumentType = req.nextUrl.searchParams.get('identity_document_type')?.trim() || ''
+    const identityDocumentNumber = req.nextUrl.searchParams.get('identity_document_number')?.trim() || ''
+    const mobile = req.nextUrl.searchParams.get('mobile')?.trim() || ''
+    const email = req.nextUrl.searchParams.get('email')?.trim() || ''
+    const identityConfirmation = req.nextUrl.searchParams.get('identity_confirmation')
     if (!name || !birthday || !birthplace) {
       return NextResponse.json({
         ready: false,
@@ -22,7 +27,16 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const plan = await generateUsernamePlan({ fullName: name, birthday, birthplace })
+    const plan = await generateUsernamePlan({
+      fullName: name,
+      birthday,
+      birthplace,
+      identityDocumentType,
+      identityDocumentNumber,
+      mobile,
+      email,
+      identityConfirmation: identityConfirmation === 'same' || identityConfirmation === 'different' ? identityConfirmation : undefined,
+    })
     return NextResponse.json({
       ready: true,
       count: plan.existingAccountCount,
@@ -32,6 +46,8 @@ export async function GET(req: NextRequest) {
       account_number: plan.accountNumber,
       first_account: plan.isFirstAccount,
       proposed_username: plan.username,
+      confirmation_required: plan.confirmationRequired,
+      matching_usernames: plan.matchingUsernames,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to generate username.'

@@ -3,6 +3,7 @@ import prisma from '@/app/lib/prisma'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 import { STAFF_PERMISSION_KEYS } from '@/app/lib/staffPermissions'
+import { generateMemberId } from '@/app/lib/memberId'
 
 function cleanPermissions(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -75,8 +76,10 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await hashPassword(password)
     const staff = await prisma.$transaction(async (tx) => {
+      const memberId = await generateMemberId(tx)
       const staffUser = await tx.user.create({
         data: {
+          member_id: memberId,
           full_name: fullName,
           username,
           password_hash: passwordHash,
@@ -151,7 +154,7 @@ export async function PATCH(req: NextRequest) {
         data: {
           ...(isActive !== undefined && { status: isActive ? 'active' : 'inactive' }),
           ...(body.password && String(body.password).length >= 8
-            ? { password_hash: await hashPassword(String(body.password)) }
+            ? { password_hash: await hashPassword(String(body.password)), password_changed_at: new Date() }
             : {}),
         },
       }),

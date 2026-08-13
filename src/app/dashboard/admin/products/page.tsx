@@ -186,17 +186,17 @@ export default function ProductsPage() {
           { label: 'Active',         value: stats.active,   color: '#1a7a4a', icon: '✅', sub: 'Available for sale' },
           { label: 'Inactive',       value: stats.inactive, color: '#e05252', icon: '❌', sub: 'Hidden from orders', badge: stats.inactive > 0 ? 'Hidden' : undefined },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
-            style={{ borderTop: `2px solid ${s.color}` }}>
+          <div key={s.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.color}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.color}38` }}>
             <div className="flex items-start justify-between mb-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
-                style={{ backgroundColor: s.color + '15' }}>{s.icon}</div>
+                style={{ backgroundColor: 'rgba(255,255,255,.2)' }}>{s.icon}</div>
               {s.badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: s.color + '15', color: s.color }}>{s.badge}</span>}
+                style={{ backgroundColor: 'rgba(255,255,255,.2)', color: '#fff' }}>{s.badge}</span>}
             </div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
+            <p className="text-2xl font-extrabold text-white">{s.value}</p>
+            <p className="mt-1 text-[10px] font-medium text-white/70">{s.sub}</p>
           </div>
         ))}
       </div>
