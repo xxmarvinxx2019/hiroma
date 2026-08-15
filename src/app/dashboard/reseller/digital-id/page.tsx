@@ -38,6 +38,12 @@ export default function DigitalIdPage() {
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
   const cardRef = useRef<HTMLElement>(null)
+  const cardStageRef = useRef<HTMLElement>(null)
+  const modalCardStageRef = useRef<HTMLDivElement>(null)
+  const [cardScale, setCardScale] = useState(1)
+  const [rotateCardForPortrait, setRotateCardForPortrait] = useState(false)
+  const [modalCardScale, setModalCardScale] = useState(1)
+  const [rotateModalCardForPortrait, setRotateModalCardForPortrait] = useState(false)
 
   useEffect(() => {
     fetch('/api/reseller/profile')
@@ -62,6 +68,51 @@ export default function DigitalIdPage() {
       color: { dark: '#080f25', light: '#fffdf8' },
     }).then(setQrDataUrl).catch(() => setQrDataUrl(''))
   }, [member?.member_id])
+
+  useEffect(() => {
+    const stage = cardStageRef.current
+    if (!stage) return
+
+    const updateScale = () => {
+      const rotateForPortrait = window.matchMedia('(max-width: 760px) and (orientation: portrait)').matches
+      setRotateCardForPortrait(rotateForPortrait)
+      setCardScale(Math.min(1, stage.clientWidth / (rotateForPortrait ? (860 * 638 / 1011) : 860)))
+    }
+    updateScale()
+    const observer = new ResizeObserver(updateScale)
+    observer.observe(stage)
+    window.addEventListener('orientationchange', updateScale)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('orientationchange', updateScale)
+    }
+  }, [member])
+
+  useEffect(() => {
+    if (enlargedView !== 'id') return
+    const stage = modalCardStageRef.current
+    if (!stage) return
+
+    const updateScale = () => {
+      const rotateForPortrait = window.matchMedia('(max-width: 760px) and (orientation: portrait)').matches
+      const stageStyles = window.getComputedStyle(stage)
+      const contentWidth = stage.clientWidth
+        - Number.parseFloat(stageStyles.paddingLeft || '0')
+        - Number.parseFloat(stageStyles.paddingRight || '0')
+      setRotateModalCardForPortrait(rotateForPortrait)
+      const widthScale = contentWidth / (rotateForPortrait ? (860 * 638 / 1011) : 860)
+      const heightScale = (window.innerHeight - (rotateForPortrait ? 170 : 150)) / (rotateForPortrait ? 860 : (860 * 638 / 1011))
+      setModalCardScale(Math.min(1, widthScale, heightScale))
+    }
+    updateScale()
+    const observer = new ResizeObserver(updateScale)
+    observer.observe(stage)
+    window.addEventListener('orientationchange', updateScale)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('orientationchange', updateScale)
+    }
+  }, [enlargedView])
 
   useEffect(() => {
     if (!enlargedView) return
@@ -132,8 +183,9 @@ export default function DigitalIdPage() {
 
       {downloadError ? <p className={styles.downloadError} role="alert">{downloadError}</p> : null}
 
-      <section className={styles.cards} aria-label="Digital member identity card">
-        <article ref={cardRef} className={`${styles.idCard} ${styles.frontCard}`}>
+      <section ref={cardStageRef} className={styles.cards} aria-label="Digital member identity card" style={{ height: `${(rotateCardForPortrait ? 860 : (860 * 638 / 1011)) * cardScale}px` }}>
+        <div className={styles.scaledCardCanvas} style={{ transform: rotateCardForPortrait ? `translateX(${(860 * 638 / 1011) * cardScale}px) rotate(90deg) scale(${cardScale})` : `scale(${cardScale})` }}>
+          <article ref={cardRef} className={`${styles.idCard} ${styles.frontCard} ${styles.scaledCard}`}>
           <div className={styles.hologramSecurity} aria-hidden="true">
             <span className={styles.hologramSheen} />
             <span className={styles.hologramScanlines} />
@@ -190,7 +242,8 @@ export default function DigitalIdPage() {
           <div className={styles.crestMark} aria-hidden="true">H</div>
 
           <footer className={styles.frontFooter}>One Vision. One Community. <b>One Hiroma.</b></footer>
-        </article>
+          </article>
+        </div>
       </section>
 
       <div className={styles.enlargeActions} aria-label="Digital ID viewing options">
@@ -213,8 +266,9 @@ export default function DigitalIdPage() {
             </div>
 
             {enlargedView === 'id' ? (
-              <div className={styles.modalCardViewport}>
-                <div className={`${styles.flipScene} ${showBack ? styles.isFlipped : ''}`}>
+              <div ref={modalCardStageRef} className={styles.modalCardViewport}>
+                <div className={styles.modalCardStage} style={{ height: `${(rotateModalCardForPortrait ? 860 : (860 * 638 / 1011)) * modalCardScale}px` }}>
+                  <div className={`${styles.flipScene} ${showBack ? styles.isFlipped : ''}`} style={{ transform: rotateModalCardForPortrait ? `translateX(${(860 * 638 / 1011) * modalCardScale}px) rotate(90deg) scale(${modalCardScale})` : `scale(${modalCardScale})` }}>
                   <div className={styles.flipInner}>
                     <article
                       className={`${styles.idCard} ${styles.frontCard} ${styles.flipFace} ${styles.flipFront}`}
@@ -284,6 +338,7 @@ export default function DigitalIdPage() {
                     </article>
                   </div>
                 </div>
+                  </div>
                 <div className={styles.modalCardActions}>
                   <button type="button" className={styles.modalActionButton} onClick={() => setShowBack((isBack) => !isBack)}>
                     {showBack ? 'Show front ID' : 'Show back ID'}

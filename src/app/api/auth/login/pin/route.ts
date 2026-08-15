@@ -12,6 +12,7 @@ import {
 import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
+import { isAccountSessionCurrent } from '@/app/lib/accountSession'
 
 export async function POST(req: NextRequest) {
   const { ip_address, device } = getClientInfo(req)
@@ -29,9 +30,24 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: challenge.id },
-      select: { id: true, username: true, full_name: true, role: true, status: true },
+      select: {
+        id: true,
+        username: true,
+        full_name: true,
+        role: true,
+        status: true,
+        login_disabled: true,
+        password_changed_at: true,
+      },
     })
-    if (!user || user.status !== 'active' || !isSecurityPinEligibleRole(user.role) || user.role !== challenge.role) {
+    if (
+      !user ||
+      user.status !== 'active' ||
+      user.login_disabled ||
+      !isSecurityPinEligibleRole(user.role) ||
+      user.role !== challenge.role ||
+      !isAccountSessionCurrent(challenge, user.password_changed_at)
+    ) {
       await deleteTwoFactorChallengeCookie()
       return NextResponse.json({ error: 'Your account is not available for sign-in.' }, { status: 403 })
     }

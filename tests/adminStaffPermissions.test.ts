@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   adminStaffPermissionForPath,
@@ -13,6 +14,19 @@ test('admin staff routes require the matching checked permission', () => {
   assert.equal(adminStaffPermissionForPath('/api/admin/payouts', 'PATCH'), 'payouts:process')
   assert.equal(adminStaffPermissionForPath('/api/admin/orders/abc', 'POST'), 'orders:manage')
   assert.equal(adminStaffPermissionForPath('/dashboard/admin/inventory'), 'inventory:view')
+})
+
+test('support API uses the checked view and reply permissions at the matching operation', () => {
+  const route = readFileSync(new URL('../src/app/api/admin/support-requests/route.ts', import.meta.url), 'utf8')
+  const messagesRoute = readFileSync(new URL('../src/app/api/support/tickets/[id]/messages/route.ts', import.meta.url), 'utf8')
+  assert.match(route, /getAgent\("support_center:view"\)/)
+  assert.match(route, /getAgent\("support_center:reply"\)/)
+  assert.doesNotMatch(route, /permissions\?\.includes\("support_center"\)/)
+  assert.match(messagesRoute, /accessTicket\(id, 'support_center:view'\)/)
+  assert.match(messagesRoute, /accessTicket\(id, 'support_center:reply'\)/)
+  assert.match(messagesRoute, /permissions\?\.includes\(requiredStaffPermission\)/)
+  assert.match(messagesRoute, /ticket\.assigned_to === user\.actor_id/)
+  assert.doesNotMatch(messagesRoute, /permissions\?\.includes\(['"]support_center['"]\)/)
 })
 
 test('sensitive and unknown admin areas remain owner-only', () => {

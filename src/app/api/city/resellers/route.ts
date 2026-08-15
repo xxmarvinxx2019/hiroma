@@ -17,7 +17,11 @@ import { generateMemberId } from "@/app/lib/memberId";
 import { settleDirectReferral } from "@/app/lib/directReferral";
 import { settleBinaryCommission } from "@/app/lib/binaryCommission";
 import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
-import { isBinaryTreeSlotConflict } from "@/app/lib/binaryTreePlacement";
+import {
+  assertPlacementWithinReferrerSubtree,
+  InvalidBinaryTreePlacementError,
+  isBinaryTreeSlotConflict,
+} from "@/app/lib/binaryTreePlacement";
 import { claimIdentityAccountSlot, IdentityAccountLimitError } from "@/app/lib/identityAccountLimit";
 import { Prisma } from "@prisma/client";
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
@@ -849,6 +853,11 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hashPassword(password);
 
     const registration = await prisma.$transaction(async (tx) => {
+      await assertPlacementWithinReferrerSubtree(
+        tx,
+        referrer.id,
+        actual_parent_node_id,
+      );
       await claimUnusedPin(tx, pin.id);
       await claimIdentityAccountSlot(tx, identityDocumentHash);
       const memberId = await generateMemberId(tx);
@@ -1217,6 +1226,9 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     if (error instanceof PinAlreadyClaimedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof InvalidBinaryTreePlacementError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (isBinaryTreeSlotConflict(error)) {
       return NextResponse.json(

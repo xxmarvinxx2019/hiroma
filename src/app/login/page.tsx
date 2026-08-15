@@ -419,20 +419,20 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
       </div>
 
       {requiresPin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="security-pin-login-title">
-          <form onSubmit={handlePinSubmit} className="w-full max-w-lg overflow-hidden rounded-[28px] border border-[#7594f5]/45 bg-[radial-gradient(circle_at_15%_0%,rgba(26,66,151,.48),transparent_42%),linear-gradient(135deg,rgba(11,23,53,.98),rgba(5,11,28,.98))] shadow-[0_28px_90px_rgba(0,0,0,.62),inset_0_1px_0_rgba(255,255,255,.08)]">
-            <div className="border-b border-[#7190ea]/25 px-6 py-7 text-center sm:px-10">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#C9A84C]/65 bg-[#C9A84C]/10 shadow-[0_0_32px_rgba(201,168,76,.25)]"><svg aria-hidden="true" className="h-8 w-8 text-[#E8C96A]" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v5c0 4.8-2.9 8.6-7 10-4.1-1.4-7-5.2-7-10V6l7-3z" /><rect x="8.5" y="10.5" width="7" height="5.5" rx="1" /><path strokeLinecap="round" d="M10.5 10.5V9a1.5 1.5 0 013 0v1.5" /></svg></div>
-              <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#E8C96A]">Account security</p>
-              <h2 id="security-pin-login-title" className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Enter your security PIN</h2>
-              <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#aebee8] sm:text-base">Enter the six-digit PIN configured for this account to continue.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#010521]/75 p-2 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-labelledby="security-pin-login-title">
+          <form onSubmit={handlePinSubmit} className="my-auto max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[28px] border border-[#7594f5]/45 bg-[radial-gradient(circle_at_15%_0%,rgba(26,66,151,.48),transparent_42%),linear-gradient(135deg,rgba(11,23,53,.98),rgba(5,11,28,.98))] shadow-[0_28px_90px_rgba(0,0,0,.62),inset_0_1px_0_rgba(255,255,255,.08)]">
+            <div className="border-b border-[#7190ea]/25 px-4 py-5 text-center sm:px-10 sm:py-7">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center sm:h-16 sm:w-16 rounded-full border border-[#C9A84C]/65 bg-[#C9A84C]/10 shadow-[0_0_32px_rgba(201,168,76,.25)]"><svg aria-hidden="true" className="h-6 w-6 text-[#E8C96A] sm:h-8 sm:w-8" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v5c0 4.8-2.9 8.6-7 10-4.1-1.4-7-5.2-7-10V6l7-3z" /><rect x="8.5" y="10.5" width="7" height="5.5" rx="1" /><path strokeLinecap="round" d="M10.5 10.5V9a1.5 1.5 0 013 0v1.5" /></svg></div>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.24em] sm:mt-4 sm:text-[11px] sm:tracking-[0.32em] text-[#E8C96A]">Account security</p>
+              <h2 id="security-pin-login-title" className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-3xl">Enter your security PIN</h2>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed sm:mt-3 text-[#aebee8] sm:text-base">Enter the six-digit PIN configured for this account to continue.</p>
             </div>
-            <div className="space-y-4 px-6 py-6 sm:px-10">
-              <div className="flex items-center justify-between gap-3"><label className="block text-base font-medium text-white">Six-digit PIN</label><button type="button" onClick={() => setShowSecurityPin((visible) => !visible)} className="text-sm font-medium text-[#E8C96A] hover:text-[#fff2b5]">{showSecurityPin ? 'Hide digits' : 'Show digits'}</button></div>
-              <div className="grid grid-cols-6 gap-2.5 sm:gap-4 [&>input]:rounded-2xl [&>input]:border-[#5374c9]/65 [&>input]:bg-[#0a1733]/90 [&>input]:text-2xl [&>input]:text-white [&>input]:focus:-translate-y-1 [&>input]:focus:border-[#ffd85c] [&>input]:focus:bg-[#10234b] [&>input]:focus:shadow-[0_0_0_1px_rgba(255,216,92,.35),0_0_26px_rgba(255,195,64,.3)]" aria-label="Six-digit security PIN">
+            <div className="space-y-3 px-4 py-5 sm:space-y-4 sm:px-10 sm:py-6">
+              <div className="flex items-center justify-between gap-3"><label className="block text-sm font-medium text-white sm:text-base">Six-digit PIN</label><button type="button" onClick={() => setShowSecurityPin((visible) => !visible)} className="shrink-0 text-sm font-medium text-[#E8C96A] hover:text-[#fff2b5]">{showSecurityPin ? 'Hide digits' : 'Show digits'}</button></div>
+              <div className="grid grid-cols-6 gap-1.5 sm:gap-4 [&>input]:rounded-xl sm:[&>input]:rounded-2xl [&>input]:border-[#5374c9]/65 [&>input]:bg-[#0a1733]/90 [&>input]:text-xl [&>input]:text-white sm:[&>input]:text-2xl [&>input]:focus:-translate-y-1 [&>input]:focus:border-[#ffd85c] [&>input]:focus:bg-[#10234b] [&>input]:focus:shadow-[0_0_0_1px_rgba(255,216,92,.35),0_0_26px_rgba(255,195,64,.3)]" aria-label="Six-digit security PIN">
                 {Array.from({ length: 6 }, (_, index) => <input key={index} ref={(element) => { pinInputRefs.current[index] = element }} type="text" inputMode="numeric" autoComplete={index === 0 ? 'one-time-code' : 'off'} autoFocus={index === 0} maxLength={6} value={securityPin[index] ? (showSecurityPin ? securityPin[index] : '\u2022') : ''} onChange={(event) => updatePinDigit(index, event.target.value)} onKeyDown={(event) => handlePinKeyDown(index, event)} onPaste={(event) => { event.preventDefault(); updatePinDigit(index, event.clipboardData.getData('text')) }} aria-label={`PIN digit ${index + 1}`} className={`aspect-square min-w-0 rounded-xl border bg-[#F0F2F8] text-center text-xl font-semibold text-[#0D1B3E] outline-none transition-all duration-200 focus:-translate-y-0.5 focus:border-[#C9A84C] focus:bg-white focus:shadow-[0_8px_18px_rgba(201,168,76,0.18)] ${error ? 'border-red-300' : securityPin[index] ? 'border-[#C9A84C]/70' : 'border-[#0D1B3E]/15'}`} />)}
               </div>
-              <p className="text-sm text-[#aebee8]">Enter each digit, or paste the complete six-digit PIN.</p>
+              <p className="text-xs leading-relaxed text-[#aebee8] sm:text-sm">Enter each digit, or paste the complete six-digit PIN.</p>
               <div className="relative hidden">
                 <input
                   type={showSecurityPin ? 'text' : 'password'}
@@ -456,9 +456,9 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
               </div>
               {error && <p className="text-xs text-red-200">{error}</p>}
             </div>
-            <div className="flex flex-col-reverse gap-3 border-t border-[#7190ea]/25 px-6 py-5 sm:flex-row sm:justify-end sm:px-10">
-              <button type="button" onClick={() => { setRequiresPin(false); setSecurityPin(''); setShowSecurityPin(false); setError('') }} className="rounded-xl border border-[#7190ea]/35 bg-[#152444]/75 px-5 py-3 text-sm font-medium text-white hover:bg-[#1c315b]">Cancel</button>
-              <button type="submit" disabled={loading} className="rounded-xl bg-gradient-to-r from-[#f6d75d] to-[#dca23c] px-5 py-3 text-sm font-bold text-[#09112b] shadow-[0_8px_24px_rgba(214,157,48,.26)] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+            <div className="flex flex-col-reverse gap-2 border-t border-[#7190ea]/25 px-4 py-4 sm:flex-row sm:justify-end sm:gap-3 sm:px-10 sm:py-5">
+              <button type="button" onClick={() => { setRequiresPin(false); setSecurityPin(''); setShowSecurityPin(false); setError('') }} className="w-full rounded-xl border border-[#7190ea]/35 bg-[#152444]/75 px-5 py-3 text-sm font-medium text-white hover:bg-[#1c315b] sm:w-auto">Cancel</button>
+              <button type="submit" disabled={loading} className="w-full rounded-xl bg-gradient-to-r from-[#f6d75d] to-[#dca23c] px-5 py-3 text-sm font-bold text-[#09112b] shadow-[0_8px_24px_rgba(214,157,48,.26)] transition-transform hover:-translate-y-0.5 disabled:opacity-60 sm:w-auto">
                 {loading ? 'Verifying...' : 'Verify & sign in'}
               </button>
             </div>

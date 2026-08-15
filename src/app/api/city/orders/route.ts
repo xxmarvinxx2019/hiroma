@@ -6,6 +6,7 @@ import { cityOrderListScope } from '@/app/lib/orderSecurity'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
 import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
+import { canUpdateOrderPaymentStatus, isAllowedOrderPaymentStatus } from '@/app/lib/orderPaymentAuthorization'
 // ============================================================
 // HELPER — resolve who the city distributor buys from
 // ============================================================
@@ -563,6 +564,9 @@ export async function PATCH(req: NextRequest) {
     if (status && !allowed.includes(status)) {
       return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
     }
+    if (payment_status && !isAllowedOrderPaymentStatus(payment_status)) {
+      return NextResponse.json({ error: 'Invalid payment status.' }, { status: 400 })
+    }
 
     const order = await prisma.order.findFirst({
       where: {
@@ -577,6 +581,9 @@ export async function PATCH(req: NextRequest) {
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found or action not allowed.' }, { status: 404 })
+    }
+    if (payment_status && !canUpdateOrderPaymentStatus(user.id, order)) {
+      return NextResponse.json({ error: 'Only the seller can confirm payment.' }, { status: 403 })
     }
 
     // Allow payment_status updates even on finalized orders

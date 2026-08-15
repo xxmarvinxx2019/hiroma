@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { generateMemberId } from '@/app/lib/memberId'
+import {
+  getSensitiveResellerPinFailure,
+  isSensitiveResellerPinAccepted,
+  verifyResellerSecurityPin,
+} from '@/app/lib/resellerSecurityPin'
+import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── GET all distributors ──
 export async function GET(req: NextRequest) {
@@ -320,20 +326,70 @@ export async function PATCH(req: NextRequest) {
 
     // ── Reset password ──
     if (action === 'reset_password') {
-      const { password } = body
-      if (!password) return NextResponse.json({ error: 'Password required.' }, { status: 400 })
+      if (user.is_staff) {
+        return NextResponse.json({ error: 'Only the admin owner can reset distributor passwords.' }, { status: 403 })
+      }
+      const { password, security_pin } = body
+      if (typeof password !== 'string' || password.length < 8) {
+        return NextResponse.json({ error: 'Password must contain at least 8 characters.' }, { status: 400 })
+      }
+      const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+      if (!isSensitiveResellerPinAccepted(pinVerification)) {
+        const failure = getSensitiveResellerPinFailure(pinVerification)
+        return NextResponse.json({ error: failure.error }, { status: failure.status })
+      }
       const hashed = await hashPassword(password)
-      await prisma.user.update({ where: { id: distributor_id }, data: { password_hash: hashed, password_changed_at: new Date() } })
+      const revokedPasskeys = await prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: distributor_id }, data: { password_hash: hashed, password_changed_at: new Date() } })
+        return tx.passkeyCredential.deleteMany({ where: { user_id: distributor_id } })
+      })
+      createAuditLog({
+        user_id: user.id,
+        user_name: user.full_name,
+        user_role: 'admin',
+        member_id: formatMemberId(user.id, 'admin'),
+        activity_type: 'distributor_password_reset',
+        category: 'distributor',
+        description: 'Admin owner confirmed a distributor password reset with the Security PIN.',
+        metadata: { distributor_id, revoked_passkey_count: revokedPasskeys.count, distributor_sessions_revoked: true },
+        risk_level: 'high',
+        status: 'completed',
+        ...getClientInfo(req),
+      })
       return NextResponse.json({ success: true, message: 'Password reset successfully.' })
     }
 
     // ── Edit profile ──
     if (action === 'edit') {
+      const currentDistributor = await prisma.user.findUnique({
+        where: { id: distributor_id },
+        select: { email: true, mobile: true },
+      })
+      if (!currentDistributor) {
+        return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
+      }
+      const requestedEmail = typeof email === 'string' && email.trim()
+        ? email.trim().toLowerCase()
+        : currentDistributor.email
+      const requestedMobile = typeof mobile === 'string' && mobile.trim()
+        ? mobile.trim()
+        : currentDistributor.mobile
+      const changesSensitiveContact = requestedEmail !== currentDistributor.email || requestedMobile !== currentDistributor.mobile
+      if (changesSensitiveContact) {
+        if (user.is_staff) {
+          return NextResponse.json({ error: 'Only the admin owner can change distributor email or mobile.' }, { status: 403 })
+        }
+        const pinVerification = await verifyResellerSecurityPin(user.id, body.security_pin)
+        if (!isSensitiveResellerPinAccepted(pinVerification)) {
+          const failure = getSensitiveResellerPinFailure(pinVerification)
+          return NextResponse.json({ error: failure.error }, { status: failure.status })
+        }
+      }
       const updates: any = {}
       if (full_name)    updates.full_name = full_name.trim()
-      if (mobile)       updates.mobile    = mobile.trim()
+      if (mobile)       updates.mobile    = requestedMobile
       if (address)      updates.address   = address.trim()
-      if (email)        updates.email     = email.trim().toLowerCase()
+      if (email)        updates.email     = requestedEmail
 
       await prisma.user.update({ where: { id: distributor_id }, data: updates })
       if (coverage_area) {

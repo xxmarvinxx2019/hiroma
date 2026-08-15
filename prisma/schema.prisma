@@ -961,6 +961,28 @@ model SupportCaptchaChallenge {
   @@map("support_captcha_challenges")
 }
 
+model PublicVerificationRateLimit {
+  bucket_key    String   @db.VarChar(80)
+  window_start DateTime @db.Timestamptz(6)
+  request_count Int
+  expires_at    DateTime @db.Timestamptz(6)
+
+  @@id([bucket_key, window_start])
+  @@index([expires_at])
+  @@map("public_verification_rate_limits")
+}
+
+model LoginRateLimit {
+  bucket_key    String   @db.VarChar(80)
+  window_start DateTime @db.Timestamptz(6)
+  request_count Int
+  expires_at    DateTime @db.Timestamptz(6)
+
+  @@id([bucket_key, window_start])
+  @@index([expires_at])
+  @@map("login_rate_limits")
+}
+
 model SupportMessage {
   id          String         @id @default(uuid())
   request_id  String
@@ -1132,4 +1154,18 @@ enum SupportRequestPriority {
   normal
   high
   urgent
+}
+
+model WalkInMemberScanProof {
+  id             String    @id @default(uuid())
+  token_hash     String    @unique @db.VarChar(64)
+  reseller_id    String
+  distributor_id String
+  expires_at     DateTime  @db.Timestamptz(6)
+  used_at        DateTime? @db.Timestamptz(6)
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([distributor_id, expires_at])
+  @@index([expires_at])
+  @@map("walk_in_member_scan_proofs")
 }

@@ -33,7 +33,8 @@ test('security PIN verification serializes and increments failures atomically', 
 test('payout summaries are computed independently from the bounded detail ledger', () => {
   const route = readFileSync('src/app/api/admin/commission-testing/payout-ledger/route.ts', 'utf8')
   assert.match(route, /const \[summaryRows, rows\] = await Promise\.all/)
-  assert.match(route, /LIMIT 500/)
+  assert.match(route, /LIMIT \$\{pageSize\}/)
+  assert.match(route, /Math\.min\(Math\.max\(requestedPageSize,1\),100\)/)
   assert.match(route, /summaryRows\[0\]/)
 })
 

@@ -78,26 +78,38 @@ export default function DistributorsPage() {
   const [editForm, setEditForm] = useState({ full_name: '', mobile: '', address: '', email: '', coverage_area: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+  const [editSecurityPin, setEditSecurityPin] = useState('')
   const [togglingId, setTogglingId]   = useState<string | null>(null)
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [resetResult, setResetResult] = useState<{ id: string; password: string } | null>(null)
+  const [resetTarget, setResetTarget] = useState<Distributor | null>(null)
+  const [resetSecurityPin, setResetSecurityPin] = useState('')
+  const [resetError, setResetError] = useState('')
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#'
     return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
   }
 
-  const handleResetPassword = async (distId: string) => {
-    setResettingId(distId)
+  const handleResetPassword = async () => {
+    if (!resetTarget || resetSecurityPin.length !== 6) return
+    setResettingId(resetTarget.id)
+    setResetError('')
     const newPassword = generatePassword()
     const res = await fetch('/api/admin/distributors', {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ distributor_id: distId, action: 'reset_password', password: newPassword }),
+      body:    JSON.stringify({ distributor_id: resetTarget.id, action: 'reset_password', password: newPassword, security_pin: resetSecurityPin }),
     })
     const data = await res.json()
     setResettingId(null)
-    if (data.success) setResetResult({ id: distId, password: newPassword })
+    if (res.ok && data.success) {
+      setResetResult({ id: resetTarget.id, password: newPassword })
+      setResetTarget(null)
+      setResetSecurityPin('')
+    } else {
+      setResetError(data.error || 'Unable to reset the distributor password.')
+    }
   }
   const [assignError, setAssignError] = useState('')
   const [assignSuccess, setAssignSuccess] = useState('')
@@ -303,6 +315,7 @@ export default function DistributorsPage() {
       coverage_area: dist.distributor_profile?.coverage_area || '',
     })
     setEditError('')
+    setEditSecurityPin('')
   }
 
   const handleEditSave = async () => {
@@ -311,7 +324,7 @@ export default function DistributorsPage() {
     const res = await fetch('/api/admin/distributors', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ distributor_id: editTarget.id, action: 'edit', ...editForm }),
+      body: JSON.stringify({ distributor_id: editTarget.id, action: 'edit', ...editForm, security_pin: editSecurityPin }),
     })
     const data = await res.json()
     setEditSaving(false)
@@ -448,6 +461,18 @@ export default function DistributorsPage() {
                 {f}
               </button>
             ))}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Admin Security PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={editSecurityPin}
+                onChange={(e) => setEditSecurityPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Required only when changing email or mobile"
+                className="w-full border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+              />
+            </div>
           </div>
         </div>
 
@@ -546,7 +571,7 @@ export default function DistributorsPage() {
                 {/* Reset Password */}
                 <button
                   disabled={resettingId === dist.id}
-                  onClick={() => handleResetPassword(dist.id)}
+                  onClick={() => { setResetTarget(dist); setResetSecurityPin(''); setResetError('') }}
                   className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#010521] flex items-center justify-center transition-colors group disabled:opacity-50"
                   title="Reset password">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
@@ -854,6 +879,23 @@ export default function DistributorsPage() {
           </div>
         </div>
       )}
+    {/* Owner-confirmed Reset Password Modal */}
+    {resetTarget && (
+      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+          <h2 className="text-base font-semibold text-[#0D1B3E]">Reset distributor password</h2>
+          <p className="mt-1 text-xs leading-5 text-gray-500">This signs out existing sessions and removes registered passkeys for <span className="font-semibold text-[#0D1B3E]">{resetTarget.full_name}</span>.</p>
+          <label className="mt-4 mb-1 block text-xs text-gray-500">Admin Security PIN</label>
+          <input type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetSecurityPin} onChange={(event) => setResetSecurityPin(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit Security PIN" className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+          {resetError && <p className="mt-3 rounded-lg bg-[#fdecea] px-3 py-2 text-xs text-[#a03030]">{resetError}</p>}
+          <div className="mt-5 flex gap-2">
+            <button type="button" onClick={() => setResetTarget(null)} disabled={Boolean(resettingId)} className="flex-1 rounded-lg bg-[#F0F2F8] py-2.5 text-sm text-[#0D1B3E] disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void handleResetPassword()} disabled={Boolean(resettingId) || resetSecurityPin.length !== 6} className="flex-1 rounded-lg bg-[#C9A84C] py-2.5 text-sm font-medium text-white disabled:opacity-50">{resettingId ? 'Resetting...' : 'Confirm Reset'}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* Reset Password Result Modal */}
     {resetResult && (
       <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

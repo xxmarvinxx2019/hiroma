@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser, hashPassword } from '@/app/lib/auth'
+import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import {
+  getSensitiveResellerPinFailure,
+  isSensitiveResellerPinAccepted,
+  verifyResellerSecurityPin,
+} from '@/app/lib/resellerSecurityPin'
+import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── PATCH — edit reseller details ──
 export async function PATCH(
@@ -14,26 +20,55 @@ export async function PATCH(
     }
 
     const { id } = await params
-    const { full_name, username, mobile, address, email, password } = await req.json()
+    const { full_name, username, mobile, address, email, password, security_pin } = await req.json()
 
     if (!full_name?.trim()) {
       return NextResponse.json({ error: 'Full name is required.' }, { status: 400 })
     }
-    if (!username?.trim()) {
-      return NextResponse.json({ error: 'Username is required.' }, { status: 400 })
-    }
-
     // Check reseller exists first
     const reseller = await prisma.user.findFirst({
       where:  { id, role: 'reseller' },
-      select: { id: true, email: true, username: true },
+      select: { id: true, full_name: true, email: true, username: true, mobile: true, address: true },
     })
     if (!reseller) {
       return NextResponse.json({ error: 'Reseller not found.' }, { status: 404 })
     }
 
+    if (typeof password === 'string' && password.trim()) {
+      return NextResponse.json(
+        { error: 'Passwords cannot be assigned from the profile editor. Use the secure password-reset email.' },
+        { status: 400 }
+      )
+    }
+
+    const cleanUsername = typeof username === 'string' ? username.trim().toLowerCase() : reseller.username
+    const cleanEmail = email === undefined ? reseller.email : (typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null)
+    const cleanMobile = mobile === undefined ? reseller.mobile : (typeof mobile === 'string' && mobile.trim() ? mobile.trim() : null)
+    const cleanAddress = address === undefined ? reseller.address : (typeof address === 'string' && address.trim() ? address.trim() : null)
+    const protectedFields = [
+      ...(cleanUsername !== reseller.username ? ['username'] : []),
+      ...(cleanEmail !== reseller.email ? ['email'] : []),
+      ...(cleanMobile !== reseller.mobile ? ['mobile'] : []),
+    ]
+
+    if (!cleanUsername) {
+      return NextResponse.json({ error: 'Username is required.' }, { status: 400 })
+    }
+    if (user.is_staff && protectedFields.length > 0) {
+      return NextResponse.json(
+        { error: 'Only the admin owner can change reseller username, email, or mobile.' },
+        { status: 403 }
+      )
+    }
+    if (protectedFields.length > 0) {
+      const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
+      if (!isSensitiveResellerPinAccepted(pinVerification)) {
+        const failure = getSensitiveResellerPinFailure(pinVerification)
+        return NextResponse.json({ error: failure.error }, { status: failure.status })
+      }
+    }
+
     // Only check username uniqueness if it actually changed
-    const cleanUsername = username.trim().toLowerCase()
     if (cleanUsername !== reseller.username) {
       const existingUsername = await prisma.user.findFirst({
         where: { username: cleanUsername, id: { not: id } },
@@ -44,32 +79,44 @@ export async function PATCH(
     }
 
     // Check email uniqueness if changed
-    if (email?.trim() && email.trim().toLowerCase() !== reseller.email?.toLowerCase()) {
+    if (cleanEmail && cleanEmail !== reseller.email) {
       const existing = await prisma.user.findFirst({
-        where: { email: email.trim().toLowerCase(), id: { not: id } },
+        where: { email: cleanEmail, id: { not: id } },
       })
       if (existing) {
         return NextResponse.json({ error: 'Email already in use.' }, { status: 400 })
       }
     }
 
-    // Hash new password if provided
-    const passwordData = password?.trim()
-      ? { password_hash: await hashPassword(password.trim()), password_changed_at: new Date() }
-      : {}
-
     const updated = await prisma.user.update({
       where: { id },
       data: {
         full_name: full_name.trim(),
-        username:  username.trim().toLowerCase(),
-        mobile:    mobile?.trim()  || null,
-        address:   address?.trim() || null,
-        email:     email?.trim()   ? email.trim().toLowerCase() : null,
-        ...passwordData,
+        username: cleanUsername,
+        mobile: cleanMobile,
+        address: cleanAddress,
+        email: cleanEmail,
+        ...(protectedFields.length > 0 && { password_changed_at: new Date() }),
       },
       select: { id: true, full_name: true, username: true, email: true, mobile: true, address: true },
     })
+
+    if (protectedFields.length > 0) {
+      const actorId = user.actor_id || user.id
+      createAuditLog({
+        user_id: actorId,
+        user_name: user.full_name,
+        user_role: user.is_staff ? 'staff' : 'admin',
+        member_id: formatMemberId(actorId, user.is_staff ? 'staff' : 'admin'),
+        activity_type: 'reseller_sensitive_profile_updated',
+        category: 'reseller',
+        description: 'Admin owner confirmed a sensitive reseller profile update with the Security PIN.',
+        metadata: { reseller_id: reseller.id, protected_fields: protectedFields },
+        risk_level: 'medium',
+        status: 'completed',
+        ...getClientInfo(req),
+      })
+    }
 
     return NextResponse.json({ success: true, reseller: updated })
   } catch (error) {
