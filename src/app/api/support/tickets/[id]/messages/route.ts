@@ -3,12 +3,18 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { getSupportAttachmentUrl } from '@/app/lib/supportAttachment'
 
-async function accessTicket(id: string) {
+type SupportStaffTicketPermission = 'support_center:view' | 'support_center:reply'
+
+async function accessTicket(id: string, requiredStaffPermission: SupportStaffTicketPermission) {
   const user = await getCurrentUser()
   if (!user) return null
   const ticket = await prisma.supportRequest.findUnique({ where: { id }, include: { submitter: { select: { full_name: true, username: true } }, attachments: true, messages: { orderBy: { created_at: 'asc' }, select: { id: true, author_name: true, author_role: true, message: true, created_at: true } } } })
   if (!ticket) return null
-  const isAgent = Boolean(user.is_staff && user.permissions?.includes('support_center') && ticket.assigned_to === user.actor_id)
+  const isAgent = Boolean(
+    user.is_staff
+    && user.permissions?.includes(requiredStaffPermission)
+    && ticket.assigned_to === user.actor_id
+  )
   const isAdmin = user.role === 'admin' && !user.is_staff
   const isOwner = user.role === 'reseller' && ticket.user_id === user.id
   if (!(isAdmin || isAgent || isOwner)) return null
@@ -17,14 +23,14 @@ async function accessTicket(id: string) {
 }
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params; const result = await accessTicket(id)
+  const { id } = await params; const result = await accessTicket(id, 'support_center:view')
   if (!result) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 })
   return NextResponse.json({ ticket: result.ticket })
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params; const result = await accessTicket(id)
+    const { id } = await params; const result = await accessTicket(id, 'support_center:reply')
     if (!result) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 })
     const { user, ticket, isAgent, isAdmin } = result; const body = await request.json()
     if (ticket.status === 'resolved') return NextResponse.json({ error: 'This ticket is permanently resolved. Create a new ticket for further assistance.' }, { status: 409 })

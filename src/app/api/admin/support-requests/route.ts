@@ -32,10 +32,12 @@ const categoryLabels: Record<string, string> = {
   other: "support request",
 };
 
-async function getAgent() {
+type SupportStaffPermission = "support_center:view" | "support_center:reply";
+
+async function getAgent(requiredPermission: SupportStaffPermission) {
   const user = await getCurrentUser();
   if (!user) return null;
-  if (user.is_staff && user.permissions?.includes("support_center"))
+  if (user.is_staff && user.permissions?.includes(requiredPermission))
     return {
       user,
       agentId: user.actor_id || user.id,
@@ -49,7 +51,7 @@ async function getAgent() {
 
 export async function GET(request: NextRequest) {
   try {
-    const agent = await getAgent();
+    const agent = await getAgent("support_center:view");
     if (!agent)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     await deleteExpiredResolvedSupportTickets();
@@ -130,7 +132,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const agent = await getAgent();
+    const agent = await getAgent("support_center:reply");
     if (!agent)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await request.json();

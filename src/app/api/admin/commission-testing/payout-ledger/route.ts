@@ -17,6 +17,11 @@ export async function GET(req:NextRequest){
  const user=await getCurrentUser();if(!user||user.role!=='admin')return NextResponse.json({error:'Unauthorized'},{status:401})
  const now=new Date(),from=parse(req.nextUrl.searchParams.get('from'))||new Date(now.getFullYear(),now.getMonth(),1),to=parse(req.nextUrl.searchParams.get('to'),true)||now
  const status=req.nextUrl.searchParams.get('status')||'all',source=req.nextUrl.searchParams.get('source')||'all',search=(req.nextUrl.searchParams.get('search')||'').trim().toLowerCase()
+ const requestedPage=Number.parseInt(req.nextUrl.searchParams.get('page')||'1',10)
+ const requestedPageSize=Number.parseInt(req.nextUrl.searchParams.get('page_size')||'100',10)
+ const page=Number.isSafeInteger(requestedPage)&&requestedPage>0?requestedPage:1
+ const pageSize=Number.isSafeInteger(requestedPageSize)?Math.min(Math.max(requestedPageSize,1),100):100
+ const offset=(page-1)*pageSize
  try{
   const [summaryRows, rows] = await Promise.all([
    prisma.$queryRaw<PayoutLedgerSummary[]>`
@@ -59,10 +64,15 @@ export async function GET(req:NextRequest){
       OR (${source}='binary' AND EXISTS(SELECT 1 FROM binary_payout_consumptions WHERE payout_id=p.id))
       OR (${source}='product_binary' AND EXISTS(SELECT 1 FROM product_binary_payout_consumptions WHERE payout_id=p.id)))
      AND (${search}='' OR LOWER(CONCAT_WS(' ',p.transaction_number,u.full_name,u.username,p.payment_reference)) LIKE ${`%${search}%`})
-    ORDER BY COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) DESC LIMIT 500
+    ORDER BY COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) DESC
+    LIMIT ${pageSize} OFFSET ${offset}
    `,
   ])
   const payouts=rows.map(r=>({...r,unallocated:Math.max(0,n(r.amount)-n(r.direct_referral)-n(r.binary)-n(r.product_binary)),event_at:r.status==='released'?(r.released_at||r.payout_date||r.processed_at||r.requested_at):((r.status==='approved'||r.status==='rejected')?(r.processed_at||r.requested_at):r.requested_at)}))
-  return NextResponse.json({summary:summaryRows[0],payouts})
+  const totalCount=n(summaryRows[0]?.payout_count)
+  return NextResponse.json({
+   summary:summaryRows[0],payouts,
+   pagination:{page,page_size:pageSize,total_count:totalCount,total_pages:Math.max(1,Math.ceil(totalCount/pageSize))},
+  })
  }catch(error){console.error('[PAYOUT LEDGER]',error);return NextResponse.json({error:'Unable to load payout ledger.'},{status:500})}
 }

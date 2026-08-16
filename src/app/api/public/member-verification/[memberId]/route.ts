@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
+import { consumePublicVerificationAllowance } from '@/app/lib/publicVerificationProtection'
+import { maskVerificationName } from '@/app/lib/publicVerificationPolicy'
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ memberId: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ memberId: string }> }) {
   const { memberId } = await params
   const normalizedMemberId = decodeURIComponent(memberId).trim().toUpperCase()
 
@@ -10,19 +12,22 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }
 
   try {
+    if (!(await consumePublicVerificationAllowance(request.headers))) {
+      return NextResponse.json({ error: 'Too many verification requests. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': '300', 'Cache-Control': 'no-store' } })
+    }
     const member = await prisma.user.findUnique({
       where: { member_id: normalizedMemberId },
       select: { member_id: true, full_name: true, status: true },
     })
 
-    if (!member) return NextResponse.json({ error: 'Member not found.' }, { status: 404 })
+    if (!member || member.status !== 'active') return NextResponse.json({ verified: false, member: { member_id: normalizedMemberId, full_name: null, status: 'not_verified' } }, { headers: { 'Cache-Control': 'no-store' } })
 
     return NextResponse.json({
-      verified: member.status === 'active',
+      verified: true,
       member: {
         member_id: member.member_id,
-        full_name: member.full_name,
-        status: member.status,
+        full_name: maskVerificationName(member.full_name),
+        status: 'active',
       },
     }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error: unknown) {

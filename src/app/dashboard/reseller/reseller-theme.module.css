@@ -2775,3 +2775,91 @@
     transition: none;
   }
 }
+
+/* Keep the hero metrics balanced and readable on narrow touch screens. */
+@media (max-width: 767px) {
+  .testing .testingHeroRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "identity identity"
+      "potential wallet";
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .testing .testingIdentityCard {
+    grid-area: identity;
+    min-width: 0;
+  }
+
+  .testing .testingPotentialMetric {
+    grid-area: potential;
+  }
+
+  .testing .testingWalletMetric {
+    grid-area: wallet;
+  }
+
+  .testing .testingHeroMetric {
+    width: 100%;
+    min-width: 0;
+    min-height: 164px;
+    height: 100%;
+    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr auto;
+    align-content: start;
+    column-gap: 8px;
+    padding: 14px 12px;
+  }
+
+  .testing .testingMetricIcon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    font-size: 16px;
+  }
+
+  .testing .testingHeroMetric > span {
+    min-width: 0;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+  }
+
+  .testing .testingHeroMetric > strong {
+    grid-column: 1 / -1;
+    margin-top: 10px;
+    font-size: clamp(18px, 5.5vw, 24px);
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .testing .testingHeroMetric > small {
+    align-self: end;
+    margin-top: 8px;
+    line-height: 1.35;
+  }
+
+  .testing .testingWalletMetric > a {
+    align-self: end;
+    margin-top: 8px;
+    padding-inline: 8px;
+  }
+
+  .testing .testingMetricProgress {
+    margin-top: 8px;
+  }
+}
+
+@media (max-width: 359px) {
+  .testing .testingHeroRow {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "identity"
+      "potential"
+      "wallet";
+  }
+
+  .testing .testingHeroMetric {
+    min-height: 150px;
+  }
+}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
+import { canUpdateOrderPaymentStatus, isAllowedOrderPaymentStatus } from '@/app/lib/orderPaymentAuthorization'
 // ── Resolve provincial's supplier ──
 async function resolveSupplier(provincialUserId: string) {
   const profile = await prisma.distributorProfile.findUnique({
@@ -266,6 +267,8 @@ export async function PATCH(req: NextRequest) {
 
     if (status && !allowed.includes(status))
       return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
+    if (payment_status && !isAllowedOrderPaymentStatus(payment_status))
+      return NextResponse.json({ error: 'Invalid payment status.' }, { status: 400 })
 
     const order = await prisma.order.findFirst({
       where: {
@@ -279,6 +282,8 @@ export async function PATCH(req: NextRequest) {
     })
 
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
+    if (payment_status && !canUpdateOrderPaymentStatus(user.id, order))
+      return NextResponse.json({ error: 'Only the seller can confirm payment.' }, { status: 403 })
     // Allow payment_status updates on finalized orders
     if ((order.status === 'delivered' || order.status === 'cancelled') && status)
       return NextResponse.json({ error: 'Order already finalized.' }, { status: 400 })

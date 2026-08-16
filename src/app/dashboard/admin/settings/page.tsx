@@ -60,6 +60,7 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileSuccess, setProfileSuccess] = useState('')
   const [profileError, setProfileError] = useState('')
+  const [profileSecurityPin, setProfileSecurityPin] = useState('')
 
   // Password form
   const [passwordForm, setPasswordForm] = useState({
@@ -95,6 +96,10 @@ export default function SettingsPage() {
       setProfileError('Full name and mobile are required.')
       return
     }
+    if (!/^\d{6}$/.test(profileSecurityPin)) {
+      setProfileError('Enter your six-digit Security PIN to update your profile.')
+      return
+    }
     setProfileSaving(true)
     setProfileError('')
     setProfileSuccess('')
@@ -102,7 +107,7 @@ export default function SettingsPage() {
     const res = await fetch('/api/admin/settings/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profileForm),
+      body: JSON.stringify({ ...profileForm, security_pin: profileSecurityPin }),
     })
     const data = await res.json()
 
@@ -110,6 +115,7 @@ export default function SettingsPage() {
       setProfileError(data.error || 'Failed to update profile.')
     } else {
       setProfileSuccess('Profile updated successfully!')
+      setProfileSecurityPin('')
       setTimeout(() => setProfileSuccess(''), 3000)
     }
     setProfileSaving(false)
@@ -224,6 +230,22 @@ export default function SettingsPage() {
                 placeholder="admin@hiroma.com"
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
               />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Security PIN <span className="text-[#C9A84C]">*</span>
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={profileSecurityPin}
+                onChange={(e) => setProfileSecurityPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Enter your six-digit PIN to confirm"
+                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+              />
+              <p className="text-xs text-gray-400 mt-1">Required to change official identity or contact information.</p>
             </div>
 
             {profileError && (

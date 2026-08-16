@@ -85,7 +85,7 @@ function Sidebar({
   }
 
   return (
-    <div className={`${styles.sidebar} bg-[#010521] flex flex-col w-56`} style={{ height: '100vh' }}>
+    <div className={`${styles.sidebar} bg-[#010521] flex min-h-0 flex-col w-56`} style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' }}>
 
       {/* Logo */}
       <div
@@ -100,8 +100,8 @@ function Sidebar({
 
       {/* Nav */}
       <nav
-        className={`${styles.sidebarNav} flex-1 py-3 px-3`}
-        style={{ overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        className={`${styles.sidebarNav} min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-3 px-3`}
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
       >
         <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
         {navItems.map((group) => (
@@ -374,7 +374,7 @@ export default function ResellerLayout({ children }: { children: React.ReactNode
             className="fixed inset-0 bg-black/50 z-20 md:hidden"
             onClick={() => setSidebarOpen(false)}
           />
-          <div className="fixed top-0 left-0 z-30 md:hidden">
+          <div className="fixed inset-y-0 left-0 z-30 max-h-[100dvh] overflow-hidden md:hidden">
             <Sidebar
               user={user}
               pathname={pathname}

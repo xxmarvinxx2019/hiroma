@@ -52,7 +52,8 @@ export default function ResellersPage() {
   const [resetLoading, setResetLoading] = useState(false)
   const [resetError, setResetError] = useState('')
   const [resetSuccess, setResetSuccess] = useState('')
-  const [editForm, setEditForm]     = useState({ full_name: '', username: '', mobile: '', address: '', email: '', password: '' })
+  const [editForm, setEditForm]     = useState({ full_name: '', username: '', mobile: '', address: '', email: '', security_pin: '' })
+  const [resetSecurityPin, setResetSecurityPin] = useState('')
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError]   = useState('')
   const [editSuccess, setEditSuccess] = useState('')
@@ -107,13 +108,14 @@ export default function ResellersPage() {
       mobile:    r.mobile  || '',
       address:   r.address || '',
       email:     r.email   || '',
-      password:  '',
+      security_pin: '',
     })
     setEditError('')
     setEditSuccess('')
     setShowResetConfirmation(false)
     setResetError('')
     setResetSuccess('')
+    setResetSecurityPin('')
     setShowEdit(true)
   }
 
@@ -146,6 +148,8 @@ export default function ResellersPage() {
     try {
       const response = await fetch(`/api/admin/resellers/${selected.id}/password-reset`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ security_pin: resetSecurityPin }),
         signal: controller.signal,
       })
       const data = await response.json().catch(() => ({}))
@@ -457,15 +461,15 @@ export default function ResellersPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  New Password
-                  <span className="text-gray-300 ml-1">(leave blank to keep current)</span>
-                </label>
+                <label className="block text-xs text-gray-400 mb-1">Admin Security PIN for username, email, or mobile changes</label>
                 <input
                   type="password"
-                  value={editForm.password}
-                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                  placeholder="Enter new password"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={editForm.security_pin}
+                  onChange={(e) => setEditForm({ ...editForm, security_pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                  placeholder="6-digit Security PIN"
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
                 />
                 <div className="mt-3 rounded-lg border border-[#C9A84C]/25 bg-[#fef9ee] p-3">
@@ -523,11 +527,15 @@ export default function ResellersPage() {
                 </div>
               </div>
               <p className="text-xs leading-5 text-gray-500">A secure, single-use reset link will be sent to the registered email. The link expires after 30 minutes.</p>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Admin Security PIN</label>
+                <input type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetSecurityPin} onChange={(event) => setResetSecurityPin(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit Security PIN" className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+              </div>
               {resetError && <p className="rounded-lg bg-[#fdecea] px-3 py-2 text-xs text-[#a03030]">{resetError}</p>}
               {resetSuccess && <p className="rounded-lg bg-[#e8f7ef] px-3 py-2 text-xs text-[#1a7a4a]">{resetSuccess}</p>}
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={() => setShowResetConfirmation(false)} className="flex-1 rounded-lg bg-[#F0F2F8] py-2.5 text-sm text-[#0D1B3E] hover:bg-[#e4e7f0] transition-colors">No, go back</button>
-                <button type="button" disabled={resetLoading || Boolean(resetSuccess) || !selected.email} onClick={handlePasswordResetEmail} className="flex-1 rounded-lg bg-[#C9A84C] py-2.5 text-sm font-medium text-white hover:bg-[#b8963e] transition-colors disabled:opacity-50">{resetLoading ? 'Sending...' : resetSuccess ? 'Email Sent' : 'Proceed Reset'}</button>
+                <button type="button" disabled={resetLoading || Boolean(resetSuccess) || !selected.email || resetSecurityPin.length !== 6} onClick={handlePasswordResetEmail} className="flex-1 rounded-lg bg-[#C9A84C] py-2.5 text-sm font-medium text-white hover:bg-[#b8963e] transition-colors disabled:opacity-50">{resetLoading ? 'Sending...' : resetSuccess ? 'Email Sent' : 'Proceed Reset'}</button>
               </div>
             </div>
           </div>

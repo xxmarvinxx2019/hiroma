@@ -388,6 +388,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [showMemberScanner, setShowMemberScanner] = useState(false)
   const [isScannedMemberLocked, setIsScannedMemberLocked] = useState(false)
+  const [scanProof, setScanProof] = useState('')
   const scanningMember = useRef(false)
 
   useEffect(() => {
@@ -445,6 +446,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         reseller_id: selectedResellerId || null,
+        scan_proof: selectedResellerId ? scanProof : null,
         customer_name: customerName,
         order_type: orderType,
         notes,
@@ -465,12 +467,13 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     try {
       const response = await fetch(`/api/city/orders/reseller-orders?member_id=${encodeURIComponent(memberId)}`)
       const data = await response.json()
-      if (!response.ok || !data.reseller) {
+      if (!response.ok || !data.reseller || !data.scan_proof) {
         setError(data.error || 'Active reseller not found for this Member ID.')
         return false
       }
       const reseller = data.reseller as Reseller
       setResellerId(reseller.id)
+      setScanProof(data.scan_proof)
       setSelectedResellerName(reseller.full_name)
       setResellerSearch('')
       setCustomerName('')
@@ -522,7 +525,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                       if (isScannedMemberLocked) return
                       setResellerSearch(e.target.value)
                       setShowResellerDrop(true)
-                      if (!e.target.value) { setResellerId(''); setSelectedResellerName('') }
+                      if (!e.target.value) { setResellerId(''); setSelectedResellerName(''); setScanProof('') }
                     }}
                     onFocus={() => { if (!isScannedMemberLocked) setShowResellerDrop(true) }}
                     onBlur={() => setTimeout(() => setShowResellerDrop(false), 150)}
@@ -537,7 +540,7 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                     <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-emerald-600" aria-label="Verified reseller locked">🔒</span>
                   )}
                   {selectedResellerId && !isScannedMemberLocked && (
-                    <button onClick={() => { setResellerId(''); setSelectedResellerName(''); setResellerSearch('') }}
+                    <button onClick={() => { setResellerId(''); setSelectedResellerName(''); setResellerSearch(''); setScanProof('') }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
                   )}
                 </div>
@@ -552,10 +555,11 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                       .map((r) => (
                         <div key={r.id}
                           onMouseDown={() => {
-                            setResellerId(r.id)
-                            setSelectedResellerName(r.full_name)
-                            setResellerSearch('')
-                            setShowResellerDrop(false)
+                            if (!r.member_id) {
+                              setError('This reseller does not have an active Member ID yet.')
+                              return
+                            }
+                            void identifyScannedMember(r.member_id)
                           }}
                           className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${selectedResellerId === r.id ? 'bg-[#F0F2F8]' : ''}`}>
                           <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>

@@ -1046,3 +1046,153 @@
     zoom: 0.32;
   }
 }
+
+/* Preserve the desktop ID-1 landscape canvas and scale it as one unit. */
+.scaledCard {
+  width: 860px;
+  height: 542.63px;
+  max-width: none;
+  transform-origin: top left;
+}
+
+.modalCardStage {
+  width: 100%;
+  overflow: hidden;
+}
+
+.modalCardStage .flipScene {
+  max-width: none;
+  transform-origin: top left;
+}
+
+@media (max-width: 760px) {
+  .idModal {
+    width: calc(100% - 8px);
+    max-height: calc(100dvh - 8px);
+  }
+
+  .idModal .modalHeader {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .cards {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .scaledCardCanvas {
+  width: 860px;
+  height: 542.63px;
+  transform-origin: top left;
+  transition: transform 220ms ease;
+}
+
+.scaledCard {
+    min-height: 542.63px;
+    max-height: 542.63px;
+    aspect-ratio: 1011 / 638;
+    grid-template-columns: 35% 1fr 168px;
+    grid-template-rows: 1fr 40px;
+  }
+
+  .scaledCard::before {
+    top: -27%;
+    right: -38%;
+    bottom: -27%;
+    left: 34%;
+    border-radius: 50% 0 0 50% / 50% 0 0;
+  }
+
+  .scaledCard .officialBrand {
+    top: 38px;
+    left: 17.5%;
+  }
+
+  .scaledCard .photoPanel {
+    grid-row: 1;
+    grid-column: 1;
+    justify-self: auto;
+    align-self: end;
+    padding: 0 24px 9px;
+    transform: translateY(-28px);
+  }
+
+  .scaledCard .memberRibbon {
+    align-self: flex-start;
+    width: 235px;
+    max-width: none;
+    margin: 18px 0 0 -24px;
+    padding: 9px 18px 9px 14px;
+    clip-path: polygon(0 0, 90% 0, 100% 100%, 0 100%);
+  }
+
+  .scaledCard .frontDetails {
+    grid-row: 1;
+    grid-column: 2;
+    padding: 30px 28px 23px 72px;
+  }
+
+  .scaledCard .qrPanel {
+    grid-row: 1;
+    grid-column: 3;
+    align-self: end;
+    margin: 0 0 51px;
+    transform: none;
+  }
+
+  .scaledCard .frontFooter {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    font-size: 15px;
+  }
+
+  .scaledCard .peopleMark {
+    top: 25px;
+    right: 22px;
+  }
+
+  .scaledCard .crestMark {
+    display: block;
+  }
+
+  .enlargeActions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .enlargeButton {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .modalCardViewport {
+    overflow: hidden;
+  }
+
+  .modalCardActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .modalActionButton {
+    min-width: min(142px, 100%);
+    flex: 1;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 600px) {
+  .page {
+    padding-top: 18px;
+  }
+
+  .header {
+    margin-bottom: 14px;
+  }
+
+  .modalBackdrop {
+    align-items: start;
+    overflow-y: auto;
+  }
+}

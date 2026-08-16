@@ -3,11 +3,23 @@ import { Resend } from 'resend'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { createPasswordResetToken, escapeEmailHtml, PASSWORD_RESET_TTL_MS } from '@/app/lib/passwordReset'
+import {
+  getSensitiveResellerPinFailure,
+  isSensitiveResellerPinAccepted,
+  verifyResellerSecurityPin,
+} from '@/app/lib/resellerSecurityPin'
+import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const admin = await getCurrentUser()
-    if (!admin || admin.role !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!admin || admin.role !== 'admin' || admin.is_staff) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { security_pin } = await req.json().catch(() => ({}))
+    const pinVerification = await verifyResellerSecurityPin(admin.id, security_pin)
+    if (!isSensitiveResellerPinAccepted(pinVerification)) {
+      const failure = getSensitiveResellerPinFailure(pinVerification)
+      return NextResponse.json({ error: failure.error }, { status: failure.status })
+    }
     const { id } = await params
     const reseller = await prisma.user.findFirst({ where: { id, role: 'reseller' }, select: { id: true, full_name: true, email: true } })
     if (!reseller) return NextResponse.json({ error: 'Reseller not found.' }, { status: 404 })
@@ -53,6 +65,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           : 'Unable to send the reset email. Please try again.',
       }, { status: 502 })
     }
+    createAuditLog({
+      user_id: admin.id,
+      user_name: admin.full_name,
+      user_role: 'admin',
+      member_id: formatMemberId(admin.id, 'admin'),
+      activity_type: 'reseller_password_reset_requested',
+      category: 'reseller',
+      description: 'Admin owner confirmed a reseller password-reset email with the Security PIN.',
+      metadata: { reseller_id: reseller.id },
+      risk_level: 'high',
+      status: 'completed',
+      ...getClientInfo(req),
+    })
     return NextResponse.json({ success: true, message: `A password-reset link was sent to ${reseller.email}.` })
   } catch (error) {
     console.error('[ADMIN RESELLER PASSWORD RESET ERROR]', error)

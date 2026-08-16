@@ -1,17 +1,19 @@
 import { NextRequest } from 'next/server'
 import { cookies } from 'next/headers'
 import prisma from '@/app/lib/prisma'
+import { resolvePasskeyConfig } from '@/app/lib/passkeyConfig'
 
 const CHALLENGE_COOKIE = 'hiroma_passkey_challenge'
 const CHALLENGE_TTL_MS = 5 * 60 * 1000
 
 export function getPasskeyConfig(req: NextRequest) {
-  const origin = process.env.PASSKEY_ORIGIN || req.nextUrl.origin
-  const rpID = process.env.PASSKEY_RP_ID || new URL(origin).hostname
-  if (process.env.NODE_ENV === 'production' && (!process.env.PASSKEY_ORIGIN || !process.env.PASSKEY_RP_ID)) {
-    throw new Error('PASSKEY_ORIGIN and PASSKEY_RP_ID are required in production.')
-  }
-  return { origin, rpID, rpName: process.env.PASSKEY_RP_NAME || 'Hiroma' }
+  return resolvePasskeyConfig({
+    requestOrigin: req.nextUrl.origin,
+    configuredOrigin: process.env.PASSKEY_ORIGIN,
+    configuredRPID: process.env.PASSKEY_RP_ID,
+    configuredRPName: process.env.PASSKEY_RP_NAME,
+    production: process.env.NODE_ENV === 'production',
+  })
 }
 
 export async function issuePasskeyChallenge(userId: string | null, challenge: string, purpose: 'register' | 'authenticate', deviceName?: string) {

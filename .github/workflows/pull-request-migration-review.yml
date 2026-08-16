@@ -1,0 +1,49 @@
+name: Database migration review
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  review-migration-files:
+    name: Database migration review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Report migration changes and reject rewritten history
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changes="$(git diff --name-status "$BASE_SHA" "$HEAD_SHA" -- prisma/migrations)"
+
+          {
+            echo "## Database migration review"
+            if [ -z "$changes" ]; then
+              echo "No Prisma migration files changed in this pull request."
+            else
+              echo "This pull request contains the following migration changes:"
+              echo '```text'
+              printf '%s\n' "$changes"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          unsafe_changes="$(printf '%s\n' "$changes" | awk 'NF && $1 !~ /^A/ { print }')"
+          if [ -n "$unsafe_changes" ]; then
+            echo "Existing migration history was modified, deleted, or renamed. Add a new forward migration instead." >&2
+            printf '%s\n' "$unsafe_changes" >&2
+            exit 1
+          fi

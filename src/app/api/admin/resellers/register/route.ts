@@ -17,8 +17,13 @@ import { generateMemberId } from "@/app/lib/memberId";
 import { settleDirectReferral } from "@/app/lib/directReferral";
 import { settleBinaryCommission } from "@/app/lib/binaryCommission";
 import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
-import { isBinaryTreeSlotConflict } from "@/app/lib/binaryTreePlacement";
+import {
+  assertPlacementWithinReferrerSubtree,
+  InvalidBinaryTreePlacementError,
+  isBinaryTreeSlotConflict,
+} from "@/app/lib/binaryTreePlacement";
 import { claimIdentityAccountSlot, IdentityAccountLimitError } from "@/app/lib/identityAccountLimit";
+import { consumeAvailableStock, InsufficientStockError } from "@/app/lib/inventoryReservation";
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 export async function POST(req: NextRequest) {
@@ -383,6 +388,11 @@ export async function POST(req: NextRequest) {
 
     // Create user in transaction
     const registration = await prisma.$transaction(async (tx) => {
+      await assertPlacementWithinReferrerSubtree(
+        tx,
+        referrer.id,
+        actual_parent_node_id,
+      );
       await claimUnusedPin(tx, pin.id);
       await claimIdentityAccountSlot(tx, identityDocumentHash);
       const memberId = await generateMemberId(tx);
@@ -502,17 +512,10 @@ export async function POST(req: NextRequest) {
         sourceEventId: pin.id,
       });
 
-      for (const item of packageProducts) {
-        await tx.inventory.update({
-          where: {
-            owner_id_product_id: {
-              owner_id: user.id,
-              product_id: item.product_id,
-            },
-          },
-          data: { quantity: { decrement: item.quantity } },
-        });
-      }
+      await consumeAvailableStock(tx, user.id, packageProducts.map((item) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+      })));
 
       await tx.nameCapRegistry.upsert({
         where: { normalized_name: usernamePlan.identityKey },
@@ -975,6 +978,9 @@ export async function POST(req: NextRequest) {
     if (error instanceof PinAlreadyClaimedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
+    if (error instanceof InvalidBinaryTreePlacementError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (isBinaryTreeSlotConflict(error)) {
       return NextResponse.json(
         { error: "The selected binary-tree slot was taken by another registration. Please choose another slot." },
@@ -983,6 +989,12 @@ export async function POST(req: NextRequest) {
     }
     if (error instanceof IdentityAccountLimitError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof InsufficientStockError) {
+      return NextResponse.json(
+        { error: "Inventory changed during registration. Please review the available stock and try again." },
+        { status: 409 },
+      );
     }
     console.error("[ADMIN REGISTER RESELLER ERROR]", error instanceof Error ? error.message : error);
     return NextResponse.json(

@@ -10,35 +10,17 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { full_name, email, mobile, address } = await req.json()
-
-    if (!full_name || !mobile) {
-      return NextResponse.json(
-        { error: 'Full name and mobile are required.' },
-        { status: 400 }
-      )
-    }
-
-    // Check email uniqueness
-    if (email) {
-      const existing = await prisma.user.findFirst({
-        where: { email: email.trim().toLowerCase(), NOT: { id: user.id } },
-      })
-      if (existing) {
-        return NextResponse.json(
-          { error: 'Email already in use by another account.' },
-          { status: 400 }
-        )
-      }
+    const body = await req.json()
+    const { address } = body
+    if (typeof address !== 'string') return NextResponse.json({ error: 'Address is required.' }, { status: 400 })
+    if (['full_name', 'email', 'mobile'].some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
+      return NextResponse.json({ error: 'Registered identity and contact information is managed through an authorized administrator.' }, { status: 403 })
     }
 
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
-        full_name: full_name.trim(),
-        mobile:    mobile.trim(),
         address:   address?.trim() || null,
-        email:     email?.trim().toLowerCase() || null,
       },
       select: {
         id: true, full_name: true, username: true,

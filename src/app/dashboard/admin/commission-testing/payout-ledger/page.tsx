@@ -57,6 +57,7 @@ type PayoutRow = {
 type PayoutLedgerData = {
   summary?: Record<string, number>;
   payouts?: PayoutRow[];
+  pagination?: { page: number; page_size: number; total_count: number; total_pages: number };
   error?: string;
 };
 export default function PayoutLedgerPage() {
@@ -66,15 +67,19 @@ export default function PayoutLedgerPage() {
     [status, setStatus] = useState("all"),
     [source, setSource] = useState("all"),
     [search, setSearch] = useState(""),
+    [page, setPage] = useState(1),
     [data, setData] = useState<PayoutLedgerData | null>(null),
     [loading, setLoading] = useState(true);
-  const load = (f = from, t = to) => {
+  const load = (f = from, t = to, requestedPage = page) => {
     setLoading(true);
     fetch(
-      `/api/admin/commission-testing/payout-ledger?from=${f}&to=${t}&status=${status}&source=${source}&search=${encodeURIComponent(search)}`,
+      `/api/admin/commission-testing/payout-ledger?from=${f}&to=${t}&status=${status}&source=${source}&search=${encodeURIComponent(search)}&page=${requestedPage}&page_size=100`,
     )
       .then((r) => r.json())
-      .then(setData)
+      .then((nextData) => {
+        setData(nextData);
+        if (nextData.pagination?.page) setPage(nextData.pagination.page);
+      })
       .finally(() => setLoading(false));
   };
   useEffect(() => {
@@ -87,7 +92,8 @@ export default function PayoutLedgerPage() {
     const r = getDateRangePreset(v);
     setFrom(r.from);
     setTo(r.to);
-    setTimeout(() => load(r.from, r.to), 0);
+    setPage(1);
+    setTimeout(() => load(r.from, r.to, 1), 0);
   };
   const s = data?.summary || {};
   return (
@@ -132,7 +138,7 @@ export default function PayoutLedgerPage() {
             </>
           )}
           <button
-            onClick={() => load()}
+            onClick={() => { setPage(1); load(from, to, 1); }}
             className="rounded-lg bg-[#0D1B3E] px-4 py-2 text-sm font-semibold text-white"
           >
             Apply filter
@@ -188,7 +194,7 @@ export default function PayoutLedgerPage() {
             <option value="product_binary">Product Binary</option>
           </select>
           <button
-            onClick={() => load()}
+            onClick={() => { setPage(1); load(from, to, 1); }}
             className="rounded-lg bg-[#0D1B3E] px-4 py-2 text-sm font-semibold text-white"
           >
             Search
@@ -281,6 +287,34 @@ export default function PayoutLedgerPage() {
             </tbody>
           </table>
         </div>
+        {data?.pagination && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-slate-600">
+            <p>
+              Showing {data.pagination.total_count === 0 ? 0 : (data.pagination.page - 1) * data.pagination.page_size + 1}
+              {"–"}
+              {Math.min(data.pagination.page * data.pagination.page_size, data.pagination.total_count)} of {data.pagination.total_count}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={loading || data.pagination.page <= 1}
+                onClick={() => load(from, to, data.pagination.page - 1)}
+                className="rounded-lg border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span>Page {data.pagination.page} of {data.pagination.total_pages}</span>
+              <button
+                type="button"
+                disabled={loading || data.pagination.page >= data.pagination.total_pages}
+                onClick={() => load(from, to, data.pagination.page + 1)}
+                className="rounded-lg border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation'
 
 type Verification = {
   verified: boolean
-  member: { member_id: string; full_name: string; status: string }
+  member: { member_id: string; full_name: string | null; status: string }
 }
 
 export default function MemberVerificationPage() {
@@ -36,7 +36,7 @@ export default function MemberVerificationPage() {
             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${result.verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
               {result.verified ? 'Verified active member' : 'Member is not active'}
             </span>
-            <h2 className="mt-5 text-2xl font-bold">{result.member.full_name}</h2>
+            <h2 className="mt-5 text-2xl font-bold">{result.member.full_name || 'Name not disclosed'}</h2>
             <p className="mt-1 font-mono text-sm text-[#a67a19]">{result.member.member_id}</p>
             <p className="mt-6 border-t border-slate-100 pt-5 text-sm leading-6 text-slate-500">This page confirms Hiroma membership status only. It does not disclose login, contact, address, password, PIN, or financial information.</p>
           </>}

@@ -3,6 +3,11 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+import {
+  consumeWalkInScanProof,
+  InvalidWalkInScanProofError,
+  issueWalkInScanProof,
+} from '@/app/lib/walkInScanProof'
 import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
 
 // ============================================================
@@ -215,7 +220,12 @@ export async function GET(req: NextRequest) {
       if (!reseller) {
         return NextResponse.json({ error: 'Active reseller not found for this Member ID.' }, { status: 404 })
       }
-      return NextResponse.json({ reseller })
+      const proof = await issueWalkInScanProof(prisma, user.id, reseller.id)
+      return NextResponse.json({
+        reseller,
+        scan_proof: proof.token,
+        scan_proof_expires_at: proof.expiresAt.toISOString(),
+      })
     }
 
     const resellers = await prisma.user.findMany({
@@ -254,7 +264,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { reseller_id, customer_name, order_type, notes, cash_received, items } = await req.json()
+    const { reseller_id, scan_proof, customer_name, order_type, notes, cash_received, items } = await req.json()
     const isNonMemberSale = !reseller_id
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -347,6 +357,9 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      if (!isNonMemberSale) {
+        await consumeWalkInScanProof(tx, String(scan_proof || ''), user.id, reseller_id)
+      }
       await consumeAvailableStock(tx, user.id, orderItems)
       const newOrder = await tx.order.create({
         data: {
@@ -484,6 +497,9 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error) {
+    if (error instanceof InvalidWalkInScanProofError) {
+      return NextResponse.json({ error: error.message }, { status: 403 })
+    }
     if (error instanceof InsufficientStockError) {
       return NextResponse.json({ error: 'Insufficient available stock. Pending orders may have reserved the remaining quantity.' }, { status: 409 })
     }

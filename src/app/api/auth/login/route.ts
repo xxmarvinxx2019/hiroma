@@ -8,6 +8,10 @@ import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLo
 import { isLoginPortal, isRoleAllowedInPortal, portalAccessError } from '@/app/lib/loginPortal'
 import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
 import { firstAdminStaffRoute } from '@/app/lib/staffPermissions'
+import { consumeLoginAllowance, resetLoginAccountFailures } from '@/app/lib/loginRateLimit'
+import { normalizeLoginIdentifier } from '@/app/lib/loginRateLimitPolicy'
+
+const LOGIN_TIMING_DECOY_HASH = '$2b$12$Z2wP7Y3VVNwvktXxUkqwaunHHoM0EztrFeg3tHL.AHH.qQ5/3rovO'
 
 export async function POST(req: NextRequest) {
   const { ip_address, device } = getClientInfo(req)
@@ -19,13 +23,22 @@ export async function POST(req: NextRequest) {
     }
     const portal = requestedPortal === undefined ? 'legacy' : requestedPortal
 
-    if (!username || !password) {
+    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password || username.length > 100 || password.length > 1024) {
       return NextResponse.json({ error: 'Username and password are required.' }, { status: 400 })
+    }
+
+    const normalizedUsername = normalizeLoginIdentifier(username)
+    const allowance = await consumeLoginAllowance(req.headers, normalizedUsername)
+    if (!allowance.allowed) {
+      return NextResponse.json(
+        { error: 'Too many sign-in attempts. Please wait and try again.' },
+        { status: 429, headers: { 'Retry-After': String(allowance.retryAfterSeconds) } },
+      )
     }
 
     let user
     try {
-      user = await prisma.user.findUnique({ where: { username: username.trim().toLowerCase() } })
+      user = await prisma.user.findUnique({ where: { username: normalizedUsername } })
     } catch (dbError: unknown) {
       console.error('[LOGIN DB ERROR]', dbError)
       // Database details can reveal schema and infrastructure information.
@@ -33,6 +46,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user) {
+      await verifyPassword(password, LOGIN_TIMING_DECOY_HASH)
       // Log failed login — unknown user
       createAuditLog({
         activity_type: 'failed_login',
@@ -42,6 +56,23 @@ export async function POST(req: NextRequest) {
         risk_level:    'medium',
         status:        'failed',
         user_role:     'unknown',
+      })
+      return NextResponse.json({ error: 'Invalid username or password.' }, { status: 401 })
+    }
+
+    const passwordValid = await verifyPassword(password, user.password_hash)
+    if (!passwordValid) {
+      createAuditLog({
+        user_id:       user.id,
+        user_name:     user.full_name,
+        user_role:     user.role,
+        member_id:     formatMemberId(user.id, user.role),
+        activity_type: 'failed_login',
+        category:      'auth',
+        description:   `Failed login — incorrect password`,
+        ip_address, device,
+        risk_level:    'medium',
+        status:        'failed',
       })
       return NextResponse.json({ error: 'Invalid username or password.' }, { status: 401 })
     }
@@ -78,23 +109,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This system account cannot sign in.' }, { status: 403 })
     }
 
-    const passwordValid = await verifyPassword(password, user.password_hash)
-    if (!passwordValid) {
-      createAuditLog({
-        user_id:       user.id,
-        user_name:     user.full_name,
-        user_role:     user.role,
-        member_id:     formatMemberId(user.id, user.role),
-        activity_type: 'failed_login',
-        category:      'auth',
-        description:   `Failed login — incorrect password`,
-        ip_address, device,
-        risk_level:    'medium',
-        status:        'failed',
-      })
-      return NextResponse.json({ error: 'Invalid username or password.' }, { status: 401 })
-    }
-
     if (user.role !== 'staff' && !isRoleAllowedInPortal(user.role as UserRole, portal)) {
       createAuditLog({ user_id: user.id, user_name: user.full_name, user_role: user.role, member_id: formatMemberId(user.id, user.role), activity_type: 'blocked_login', category: 'auth', description: 'Account attempted to use the ' + portal + ' login portal', ip_address, device, risk_level: 'medium', status: 'failed' })
       return NextResponse.json({ error: portalAccessError(portal) }, { status: 403 })
@@ -107,6 +121,7 @@ export async function POST(req: NextRequest) {
         role: user.role as UserRole,
         full_name: user.full_name,
       })
+      await resetLoginAccountFailures(normalizedUsername)
       await setTwoFactorChallengeCookie(challenge)
       return NextResponse.json({ success: true, requires_pin: true })
     }
@@ -152,6 +167,7 @@ export async function POST(req: NextRequest) {
         }
       : { id: user.id, username: user.username, role: user.role as UserRole, full_name: user.full_name }
     const token = await signToken(payload)
+    await resetLoginAccountFailures(normalizedUsername)
     await setAuthCookie(token)
 
     // Log successful login
