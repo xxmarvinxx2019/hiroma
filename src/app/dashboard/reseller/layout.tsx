@@ -100,10 +100,9 @@ function Sidebar({
 
       {/* Nav */}
       <nav
-        className={`${styles.sidebarNav} min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-3 px-3`}
+        className={`${styles.sidebarNav} scrollbar-hide min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-3 px-3`}
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
       >
-        <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
         {navItems.map((group) => (
           <div key={group.section} className="mb-3">
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">

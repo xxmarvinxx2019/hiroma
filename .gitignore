@@ -31,6 +31,12 @@ yarn-error.log*
 .pnpm-debug.log*
 .codex-dev-*.err.log
 .codex-dev-*.out.log
+.diagnostic-dev-*.err.log
+.diagnostic-dev-*.out.log
+
+# local generated artifacts
+/tmp/
+/output/
 
 # env files (can opt-in for committing if needed)
 .env*

@@ -7,7 +7,7 @@ import {
   isSensitiveResellerPinAccepted,
   verifyResellerSecurityPin,
 } from '@/app/lib/resellerSecurityPin'
-import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── GET all distributors ──
 export async function GET(req: NextRequest) {
@@ -339,22 +339,23 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: failure.error }, { status: failure.status })
       }
       const hashed = await hashPassword(password)
-      const revokedPasskeys = await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx) => {
         await tx.user.update({ where: { id: distributor_id }, data: { password_hash: hashed, password_changed_at: new Date() } })
-        return tx.passkeyCredential.deleteMany({ where: { user_id: distributor_id } })
-      })
-      createAuditLog({
-        user_id: user.id,
-        user_name: user.full_name,
-        user_role: 'admin',
-        member_id: formatMemberId(user.id, 'admin'),
-        activity_type: 'distributor_password_reset',
-        category: 'distributor',
-        description: 'Admin owner confirmed a distributor password reset with the Security PIN.',
-        metadata: { distributor_id, revoked_passkey_count: revokedPasskeys.count, distributor_sessions_revoked: true },
-        risk_level: 'high',
-        status: 'completed',
-        ...getClientInfo(req),
+        const revoked = await tx.passkeyCredential.deleteMany({ where: { user_id: distributor_id } })
+        await createRequiredAuditLog(tx, {
+          user_id: user.id,
+          user_name: user.full_name,
+          user_role: 'admin',
+          member_id: formatMemberId(user.id, 'admin'),
+          activity_type: 'distributor_password_reset',
+          category: 'distributor',
+          description: 'Admin owner confirmed a distributor password reset with the Security PIN.',
+          metadata: { distributor_id, revoked_passkey_count: revoked.count, distributor_sessions_revoked: true },
+          risk_level: 'high',
+          status: 'completed',
+          ...getClientInfo(req),
+        })
+        return revoked
       })
       return NextResponse.json({ success: true, message: 'Password reset successfully.' })
     }
@@ -391,10 +392,30 @@ export async function PATCH(req: NextRequest) {
       if (address)      updates.address   = address.trim()
       if (email)        updates.email     = requestedEmail
 
-      await prisma.user.update({ where: { id: distributor_id }, data: updates })
-      if (coverage_area) {
-        await prisma.distributorProfile.update({ where: { user_id: distributor_id }, data: { coverage_area } })
-      }
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: distributor_id }, data: updates })
+        if (coverage_area) {
+          await tx.distributorProfile.update({ where: { user_id: distributor_id }, data: { coverage_area } })
+        }
+        if (changesSensitiveContact) {
+          await createRequiredAuditLog(tx, {
+            user_id: user.id,
+            user_name: user.full_name,
+            user_role: 'admin',
+            member_id: formatMemberId(user.id, 'admin'),
+            activity_type: 'distributor_sensitive_contact_updated',
+            category: 'distributor',
+            description: 'Admin owner confirmed a distributor email or mobile change with the Security PIN.',
+            metadata: { distributor_id, protected_fields: [
+              ...(requestedEmail !== currentDistributor.email ? ['email'] : []),
+              ...(requestedMobile !== currentDistributor.mobile ? ['mobile'] : []),
+            ] },
+            risk_level: 'medium',
+            status: 'completed',
+            ...getClientInfo(req),
+          })
+        }
+      })
       return NextResponse.json({ success: true, message: 'Distributor updated successfully.' })
     }
 

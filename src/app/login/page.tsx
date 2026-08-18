@@ -6,6 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import styles from './login.module.css'
 import { startAuthentication } from '@simplewebauthn/browser'
+import { getPasskeySignInError } from '@/app/lib/passkeyError'
 
 type LoginPageProps = { portal?: 'member' | 'distributor' | 'admin' | 'legacy' }
 const portalCopy = {
@@ -20,6 +21,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
   const sceneRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState({ username: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
+  const [passkeyMode, setPasskeyMode] = useState(false)
   const [requiresPin, setRequiresPin] = useState(false)
   const [securityPin, setSecurityPin] = useState('')
   const [showSecurityPin, setShowSecurityPin] = useState(false)
@@ -124,7 +126,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
       if (!finish.ok) throw new Error(result.error || 'Passkey sign-in failed.')
       router.push(result.redirect)
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Passkey sign-in was cancelled. Use your password or try again.')
+      setError(getPasskeySignInError(error))
       setLoading(false)
     }
   }
@@ -294,9 +296,9 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
         {/* Right panel - form */}
         <div className={`${styles.formPanel} md:w-1/2 p-8 flex flex-col justify-center bg-white`}>
           <h1 className="text-[#0D1B3E] text-2xl font-semibold mb-1">{portalCopy[portal].title}</h1>
-          <p className="text-gray-400 text-sm mb-6">{portalCopy[portal].subtitle}</p>
+          <p className="text-gray-400 text-sm mb-6">{passkeyMode ? 'Enter your username to continue with your device passkey' : portalCopy[portal].subtitle}</p>
 
-          <form onSubmit={handleSubmit} className={requiresPin ? 'hidden' : 'flex flex-col gap-4'}>
+          <form onSubmit={passkeyMode ? (event) => { event.preventDefault(); void handlePasskeyLogin() } : handleSubmit} className={requiresPin ? 'hidden' : 'flex flex-col gap-4'}>
 
             {requiresPin ? (
               <>
@@ -341,7 +343,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
             </>}
 
             {/* Password */}
-            <div>
+            {!passkeyMode && <div>
               <label className="block text-xs text-gray-400 mb-1.5">
                 Password <span className="text-[#C9A84C]">*</span>
               </label>
@@ -369,7 +371,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
                   {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* Error */}
             {error && !requiresPin && (
@@ -390,17 +392,21 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
-                  {requiresPin ? 'Verifying PIN...' : 'Signing in...'}
+                  {requiresPin ? 'Verifying PIN...' : passkeyMode ? 'Checking passkey...' : 'Signing in...'}
                 </span>
-              ) : requiresPin ? 'Verify & sign in' : 'Sign in'}
+              ) : requiresPin ? 'Verify & sign in' : passkeyMode ? 'Continue with Face ID / Fingerprint' : 'Sign in'}
             </button>
 
-            {!requiresPin && (portal === 'member' || portal === 'distributor' || portal === 'admin') && <>
+            {!requiresPin && !passkeyMode && (portal === 'member' || portal === 'distributor' || portal === 'admin') && <>
               <div className="flex items-center gap-3"><span className="h-px flex-1 bg-gray-200" /><span className="text-[10px] uppercase tracking-wider text-gray-400">or</span><span className="h-px flex-1 bg-gray-200" /></div>
-              <button type="button" disabled={loading} onClick={handlePasskeyLogin} className="w-full rounded-lg border border-[#0D1B3E]/20 bg-white py-3 text-sm font-semibold text-[#0D1B3E] transition-colors hover:bg-[#F0F2F8] disabled:opacity-60">
+              <button type="button" disabled={loading} onClick={() => { setPasskeyMode(true); setError('') }} className="w-full rounded-lg border border-[#0D1B3E]/20 bg-white py-3 text-sm font-semibold text-[#0D1B3E] transition-colors hover:bg-[#F0F2F8] disabled:opacity-60">
                 Use Face ID / Fingerprint
               </button>
               <Link href="/support" className="text-center text-xs text-[#C9A84C] hover:underline">Recover your account or contact support.</Link>
+            </>}
+            {!requiresPin && passkeyMode && <>
+              <p className="text-center text-xs leading-relaxed text-gray-400">Use a passkey registered or synced on this device. Your password is not required.</p>
+              <button type="button" disabled={loading} onClick={() => { setPasskeyMode(false); setError('') }} className="text-xs font-medium text-[#C9A84C] hover:underline disabled:opacity-60">Back to password sign-in</button>
             </>}
             {requiresPin && (
               <button type="button" onClick={() => { setRequiresPin(false); setSecurityPin(''); setError('') }}
@@ -411,9 +417,9 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
 
           </form>
 
-          <p className="text-center text-xs text-gray-400 mt-4">
+          {!passkeyMode && <p className="text-center text-xs text-gray-400 mt-4">
             <Link href="https://hiromadigital.com" className="text-[#C9A84C] hover:underline">&larr; Back to Hiroma homepage</Link>
-          </p>
+          </p>}
         </div>
 
       </div>

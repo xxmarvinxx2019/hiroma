@@ -87,6 +87,7 @@ export function adminStaffPermissionForPath(pathname: string, method = 'GET'): A
     [pathname.startsWith('/dashboard/admin/payment-methods') || pathname.startsWith('/api/payment-methods'), 'payment_methods', 'manage'],
     [pathname.startsWith('/dashboard/admin/pin-requests') || pathname.startsWith('/api/pin-requests'), 'pin_requests', 'process'],
     [pathname.startsWith('/dashboard/admin/commissions') || pathname.startsWith('/api/admin/commissions'), 'commissions', null],
+    [pathname.startsWith('/dashboard/admin/sales-movement') || pathname.startsWith('/api/admin/sales-movement'), 'reports', null],
     [pathname.startsWith('/dashboard/admin/reports') || pathname.startsWith('/api/admin/reports'), 'reports', null],
     [pathname.startsWith('/api/admin/stats') || pathname === '/dashboard/admin', 'dashboard', null],
   ]

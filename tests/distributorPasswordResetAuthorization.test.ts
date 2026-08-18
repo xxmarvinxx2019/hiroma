@@ -32,3 +32,13 @@ test('only the owner with a Security PIN can change distributor recovery contact
   assert.match(editBranch, /verifyResellerSecurityPin\(user\.id, body\.security_pin\)/)
   assert.match(page, /security_pin: editSecurityPin/)
 })
+
+test('sensitive edit PIN is requested contextually instead of living in the list toolbar', () => {
+  const toolbar = page.slice(page.indexOf('{/* Search & Filter */}'), page.indexOf('{/* Table Header */}'))
+  assert.doesNotMatch(toolbar, /Admin Security PIN/)
+  assert.match(page, /changesSensitiveContact && editSecurityPin\.length !== 6/)
+  assert.match(page, /Confirm sensitive changes/)
+  assert.match(page, /editPinPromptOpen/)
+  assert.match(page, /Confirm & save/)
+  assert.match(page, /setEditSecurityPin\(''\)/)
+})

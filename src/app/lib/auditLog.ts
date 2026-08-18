@@ -3,6 +3,7 @@
 
 import prisma from '@/app/lib/prisma'
 import { NextRequest } from 'next/server'
+import type { PrismaClient } from '@prisma/client'
 
 export type AuditCategory =
   | 'auth'
@@ -52,9 +53,10 @@ export function getClientInfo(req: NextRequest): { ip_address: string; device: s
   return { ip_address: ip, device }
 }
 
-export function createAuditLog(params: AuditLogParams): void {
-  // Fire and forget — never awaited, never blocks the main flow
-  prisma.$executeRaw`
+type AuditLogWriter = Pick<PrismaClient, '$executeRaw'>
+
+export async function createRequiredAuditLog(db: AuditLogWriter, params: AuditLogParams): Promise<void> {
+  await db.$executeRaw`
       INSERT INTO audit_logs (
         user_id, user_name, user_role, member_id,
         activity_type, category, description,
@@ -74,6 +76,11 @@ export function createAuditLog(params: AuditLogParams): void {
         ${params.status || 'normal'}
       )
     `
+}
+
+export function createAuditLog(params: AuditLogParams): void {
+  // Ordinary activity evidence remains best-effort and must not block user flows.
+  void createRequiredAuditLog(prisma, params)
     .catch(err => console.error('[AUDIT LOG ERROR]', err))
 }
 

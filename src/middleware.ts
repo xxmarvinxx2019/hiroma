@@ -96,6 +96,13 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(new URL('/login', req.url))
     }
 
+    // Keep operational reseller registrations out of the Admin channel. The
+    // API enforces the same policy; this redirect also removes the legacy form
+    // from normal and direct-link navigation without affecting City/Branch.
+    if (role === 'admin' && pathname.startsWith('/dashboard/admin/resellers/register')) {
+      return NextResponse.redirect(new URL('/dashboard/admin/resellers', req.url))
+    }
+
     if (payload.is_staff === true) {
       const requiredPermission = requiredStaffPermission(pathname, req.method)
       const permissions = Array.isArray(payload.permissions) ? payload.permissions : []

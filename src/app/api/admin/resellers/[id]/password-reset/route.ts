@@ -8,7 +8,8 @@ import {
   isSensitiveResellerPinAccepted,
   verifyResellerSecurityPin,
 } from '@/app/lib/resellerSecurityPin'
-import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { ApplicationUrlConfigurationError, resolveApplicationUrl } from '@/app/lib/applicationUrl'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -27,13 +28,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const apiKey = process.env.RESEND_API_KEY
     const from = process.env.EMAIL_FROM
     if (!apiKey || !from) return NextResponse.json({ error: 'Email delivery is not configured yet. Add RESEND_API_KEY and EMAIL_FROM to .env after domain verification.' }, { status: 503 })
+    let baseUrl: string
+    try {
+      baseUrl = resolveApplicationUrl({
+        configuredUrl: process.env.APP_URL,
+        requestOrigin: req.nextUrl.origin,
+        production: process.env.NODE_ENV === 'production',
+      })
+    } catch (error) {
+      if (!(error instanceof ApplicationUrlConfigurationError)) throw error
+      console.error('[PASSWORD RESET APP URL CONFIGURATION ERROR]', error.message)
+      return NextResponse.json({ error: 'Password-reset email delivery is not configured safely.' }, { status: 503 })
+    }
 
     const { token, tokenHash } = createPasswordResetToken()
     const reset = await prisma.$transaction(async (tx) => {
       await tx.passwordResetToken.deleteMany({ where: { user_id: reseller.id, used_at: null } })
-      return tx.passwordResetToken.create({ data: { user_id: reseller.id, token_hash: tokenHash, expires_at: new Date(Date.now() + PASSWORD_RESET_TTL_MS), requested_by: admin.id } })
+      const created = await tx.passwordResetToken.create({ data: { user_id: reseller.id, token_hash: tokenHash, expires_at: new Date(Date.now() + PASSWORD_RESET_TTL_MS), requested_by: admin.id } })
+      await createRequiredAuditLog(tx, {
+        user_id: admin.id,
+        user_name: admin.full_name,
+        user_role: 'admin',
+        member_id: formatMemberId(admin.id, 'admin'),
+        activity_type: 'reseller_password_reset_requested',
+        category: 'reseller',
+        description: 'Admin owner created a reseller password-reset request with the Security PIN.',
+        metadata: { reseller_id: reseller.id },
+        risk_level: 'high',
+        status: 'completed',
+        ...getClientInfo(req),
+      })
+      return created
     })
-    const baseUrl = (process.env.APP_URL || req.nextUrl.origin).replace(/\/$/, '')
     const link = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`
     const safeName = escapeEmailHtml(reseller.full_name)
     const templateId = process.env.RESEND_PASSWORD_RESET_TEMPLATE_ID
@@ -65,19 +91,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           : 'Unable to send the reset email. Please try again.',
       }, { status: 502 })
     }
-    createAuditLog({
-      user_id: admin.id,
-      user_name: admin.full_name,
-      user_role: 'admin',
-      member_id: formatMemberId(admin.id, 'admin'),
-      activity_type: 'reseller_password_reset_requested',
-      category: 'reseller',
-      description: 'Admin owner confirmed a reseller password-reset email with the Security PIN.',
-      metadata: { reseller_id: reseller.id },
-      risk_level: 'high',
-      status: 'completed',
-      ...getClientInfo(req),
-    })
     return NextResponse.json({ success: true, message: `A password-reset link was sent to ${reseller.email}.` })
   } catch (error) {
     console.error('[ADMIN RESELLER PASSWORD RESET ERROR]', error)
