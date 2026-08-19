@@ -36,6 +36,7 @@ const navItems = [
       { label: 'Payment Methods', href: '/dashboard/admin/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/admin/pin-requests',     icon: '🔑' },
       { label: 'Commissions', href: '/dashboard/admin/commissions', icon: '💰' },
+      { label: 'Sales & Movement', href: '/dashboard/admin/sales-movement', icon: '📊' },
       {
         label: 'Commission Testing',
         icon: '🧪',
@@ -122,14 +123,13 @@ function Sidebar({
 
       {/* ── Nav — scrolls if needed, hidden scrollbar ── */}
       <nav
-        className="flex-1 py-3 px-3"
+        className="scrollbar-hide flex-1 py-3 px-3"
         style={{
           overflowY: 'auto',
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
         }}
       >
-        <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
         {visibleNavItems.map((group) => (
           <div key={group.section} className="mb-3">
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">

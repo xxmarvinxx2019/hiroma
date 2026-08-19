@@ -26,11 +26,27 @@ import { claimIdentityAccountSlot, IdentityAccountLimitError } from "@/app/lib/i
 import { consumeAvailableStock, InsufficientStockError } from "@/app/lib/inventoryReservation";
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
+const isAdminDirectRegistrationEnabled = () => false;
+
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user || user.role !== "admin") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!isAdminDirectRegistrationEnabled()) {
+      // Admin accounts are for governance and reporting only. Operational
+      // reseller registrations must be owned by a City Distributor or Hiroma
+      // Branch so collections, inventory, and registration profit remain
+      // attributable to the outlet that handled the transaction.
+      return NextResponse.json(
+        {
+          error:
+            "Direct Admin reseller registration is disabled. Use an authorized City Distributor or Hiroma Branch account.",
+        },
+        { status: 403 },
+      );
     }
 
     const {

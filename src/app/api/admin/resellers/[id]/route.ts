@@ -6,7 +6,7 @@ import {
   isSensitiveResellerPinAccepted,
   verifyResellerSecurityPin,
 } from '@/app/lib/resellerSecurityPin'
-import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── PATCH — edit reseller details ──
 export async function PATCH(
@@ -88,35 +88,38 @@ export async function PATCH(
       }
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data: {
-        full_name: full_name.trim(),
-        username: cleanUsername,
-        mobile: cleanMobile,
-        address: cleanAddress,
-        email: cleanEmail,
-        ...(protectedFields.length > 0 && { password_changed_at: new Date() }),
-      },
-      select: { id: true, full_name: true, username: true, email: true, mobile: true, address: true },
-    })
-
-    if (protectedFields.length > 0) {
-      const actorId = user.actor_id || user.id
-      createAuditLog({
-        user_id: actorId,
-        user_name: user.full_name,
-        user_role: user.is_staff ? 'staff' : 'admin',
-        member_id: formatMemberId(actorId, user.is_staff ? 'staff' : 'admin'),
-        activity_type: 'reseller_sensitive_profile_updated',
-        category: 'reseller',
-        description: 'Admin owner confirmed a sensitive reseller profile update with the Security PIN.',
-        metadata: { reseller_id: reseller.id, protected_fields: protectedFields },
-        risk_level: 'medium',
-        status: 'completed',
-        ...getClientInfo(req),
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.user.update({
+        where: { id },
+        data: {
+          full_name: full_name.trim(),
+          username: cleanUsername,
+          mobile: cleanMobile,
+          address: cleanAddress,
+          email: cleanEmail,
+          ...(protectedFields.length > 0 && { password_changed_at: new Date() }),
+        },
+        select: { id: true, full_name: true, username: true, email: true, mobile: true, address: true },
       })
-    }
+
+      if (protectedFields.length > 0) {
+        const actorId = user.actor_id || user.id
+        await createRequiredAuditLog(tx, {
+          user_id: actorId,
+          user_name: user.full_name,
+          user_role: user.is_staff ? 'staff' : 'admin',
+          member_id: formatMemberId(actorId, user.is_staff ? 'staff' : 'admin'),
+          activity_type: 'reseller_sensitive_profile_updated',
+          category: 'reseller',
+          description: 'Admin owner confirmed a sensitive reseller profile update with the Security PIN.',
+          metadata: { reseller_id: reseller.id, protected_fields: protectedFields },
+          risk_level: 'medium',
+          status: 'completed',
+          ...getClientInfo(req),
+        })
+      }
+      return result
+    })
 
     return NextResponse.json({ success: true, reseller: updated })
   } catch (error) {

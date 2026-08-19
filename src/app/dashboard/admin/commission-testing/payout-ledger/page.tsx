@@ -75,10 +75,19 @@ export default function PayoutLedgerPage() {
     fetch(
       `/api/admin/commission-testing/payout-ledger?from=${f}&to=${t}&status=${status}&source=${source}&search=${encodeURIComponent(search)}&page=${requestedPage}&page_size=100`,
     )
-      .then((r) => r.json())
+      .then(async (response) => {
+        const nextData = await response.json().catch(() => null);
+        if (!response.ok || !nextData) {
+          throw new Error(nextData?.error || "Unable to load payout ledger.");
+        }
+        return nextData;
+      })
       .then((nextData) => {
         setData(nextData);
         if (nextData.pagination?.page) setPage(nextData.pagination.page);
+      })
+      .catch((error) => {
+        setData({ error: error instanceof Error ? error.message : "Unable to load payout ledger." });
       })
       .finally(() => setLoading(false));
   };
@@ -146,8 +155,11 @@ export default function PayoutLedgerPage() {
         </div>
       </header>
       {data?.error && (
-        <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
-          {data.error}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          <span>{data.error}</span>
+          <button type="button" onClick={() => load(from, to, page)} disabled={loading} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-red-100 disabled:opacity-50">
+            {loading ? "Retrying…" : "Try again"}
+          </button>
         </div>
       )}
       <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">

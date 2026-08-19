@@ -6,7 +6,7 @@ import {
   isSensitiveResellerPinAccepted,
   verifyResellerSecurityPin,
 } from '@/app/lib/resellerSecurityPin'
-import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -46,34 +46,36 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        full_name: full_name.trim(),
-        mobile: mobile.trim(),
-        email: email?.trim().toLowerCase() || null,
-      },
-      select: {
-        id: true,
-        full_name: true,
-        username: true,
-        email: true,
-        mobile: true,
-      },
-    })
-
-    createAuditLog({
-      user_id: user.id,
-      user_name: updated.full_name,
-      user_role: 'admin',
-      member_id: formatMemberId(user.id, 'admin'),
-      activity_type: 'sensitive_profile_updated',
-      category: 'admin',
-      description: 'Admin owner confirmed a sensitive profile update with the Security PIN.',
-      metadata: { protected_fields: ['full_name', 'email', 'mobile'] },
-      risk_level: 'medium',
-      status: 'completed',
-      ...getClientInfo(req),
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          full_name: full_name.trim(),
+          mobile: mobile.trim(),
+          email: email?.trim().toLowerCase() || null,
+        },
+        select: {
+          id: true,
+          full_name: true,
+          username: true,
+          email: true,
+          mobile: true,
+        },
+      })
+      await createRequiredAuditLog(tx, {
+        user_id: user.id,
+        user_name: result.full_name,
+        user_role: 'admin',
+        member_id: formatMemberId(user.id, 'admin'),
+        activity_type: 'sensitive_profile_updated',
+        category: 'admin',
+        description: 'Admin owner confirmed a sensitive profile update with the Security PIN.',
+        metadata: { protected_fields: ['full_name', 'email', 'mobile'] },
+        risk_level: 'medium',
+        status: 'completed',
+        ...getClientInfo(req),
+      })
+      return result
     })
 
     return NextResponse.json({ success: true, user: updated })

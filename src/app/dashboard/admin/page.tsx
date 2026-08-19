@@ -111,36 +111,22 @@ function StatCard({ label, value, sub, color, icon, badge, href }: {
   color?: string; icon?: string; badge?: string; href?: string
 }) {
   const accent = color || '#0D1B3E'
-  const foreground = accent.toUpperCase() === '#C9A84C' ? '#0D1B3E' : '#FFFFFF'
   const inner = (
     <div
-      className="group relative h-full overflow-hidden rounded-xl border p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+      className="group relative h-full overflow-hidden rounded-2xl border border-black/5 p-5 text-white transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_14px_28px_rgba(13,27,62,0.18)]"
       style={{
-        background: `linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.14) 100%), ${accent}`,
-        borderColor: 'rgba(255,255,255,0.28)',
-        borderTop: '3px solid rgba(255,255,255,0.6)',
-        boxShadow: `0 10px 26px ${accent}40`,
+        backgroundColor: accent,
+        boxShadow: '0 7px 16px rgba(13,27,62,0.10)',
       }}
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white opacity-20 blur-2xl transition-transform duration-300 group-hover:scale-125"
-      />
-      <div className="relative flex items-start justify-between mb-3">
+      <div className="relative flex min-h-8 items-start justify-between mb-3">
         {icon && (
-          <div
-            className="flex h-9 w-9 items-center justify-center rounded-xl border text-lg shadow-sm"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.2)',
-              borderColor: 'rgba(255,255,255,0.28)',
-            }}
-          >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/25 bg-white/14 text-base" aria-hidden="true">
             {icon}
           </div>
         )}
         {badge && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-            style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: foreground }}>
+          <span className="rounded-full border border-white/25 bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white">
             {badge}
           </span>
         )}
@@ -148,17 +134,17 @@ function StatCard({ label, value, sub, color, icon, badge, href }: {
       <div className="relative">
         <p
           className="mb-1 text-xs font-bold uppercase tracking-wide"
-          style={{ color: foreground, opacity: 0.82 }}
+          style={{ color: 'rgba(255,255,255,.82)' }}
         >
           {label}
         </p>
-        <p className="text-xl font-extrabold tracking-tight" style={{ color: foreground }}>
+        <p className="text-xl font-extrabold tracking-tight text-white">
           {value}
         </p>
         {sub && (
           <p
             className="mt-1 text-[10px] font-medium leading-4"
-            style={{ color: foreground, opacity: 0.72 }}
+            style={{ color: 'rgba(255,255,255,.74)' }}
           >
             {sub}
           </p>
@@ -233,19 +219,19 @@ export default function AdminDashboardPage() {
 
       {/* Row 1 — Today's KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Today's Revenue"      value={fmt(stats?.totalRevenueToday || 0)}    color="#1a7a4a" icon="💰" sub={`Distribution + activated PIN · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
-        <StatCard label="Today's PIN Revenue"  value={fmt(stats?.pinRevenueToday || 0)}      color="#9a6f1e" icon="🔑" sub={`Recognized on reseller activation · vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
-        <StatCard label="Today's Product Sales" value={fmt(stats?.orderRevenueToday || 0)} color="#2563eb" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
-        <StatCard label="Overall Contribution" value={fmt(stats?.netProfitToday || 0)}       color="#1a7a4a" icon="📈" sub="Distribution gross profit + digital net" />
-        <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#8b5cf6" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
+        <StatCard label="Today's Revenue"      value={fmt(stats?.totalRevenueToday || 0)}    color="#07966F" icon="💰" sub={`Distribution + activated PIN · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
+        <StatCard label="Today's PIN Revenue"  value={fmt(stats?.pinRevenueToday || 0)}      color="#B17912" icon="🔑" sub={`Recognized on reseller activation · vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
+        <StatCard label="Today's Product Sales" value={fmt(stats?.orderRevenueToday || 0)} color="#2F6FED" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
+        <StatCard label="Overall Contribution" value={fmt(stats?.netProfitToday || 0)}       color="#078DC6" icon="📈" sub="Distribution gross profit + digital net" />
+        <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#842FE0" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
       </div>
 
       {/* Row 2 — Sales breakdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="New Members Today"  value={stats?.newResellersToday || 0}                 color="#9a6f1e" icon="👥" sub={`vs Yesterday: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" badge={stats?.newResellersToday ? 'New!' : undefined} />
-        <StatCard label="Pending Payouts"    value={stats?.pendingPayouts || 0}                    color="#e05252" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : undefined} />
-        <StatCard label="Total Resellers"    value={(stats?.totalResellers || 0).toLocaleString()} color="#2563eb" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this month`} href="/dashboard/admin/resellers" />
-        <StatCard label="New This Month"     value={stats?.newResellersThisMonth || 0}             color="#9a6f1e" icon="🆕" sub={`+${stats?.newResellersToday || 0} today`} href="/dashboard/admin/resellers" />
+        <StatCard label="New Members Today"  value={stats?.newResellersToday || 0}                 color="#842FE0" icon="👥" sub={`vs Yesterday: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" badge={stats?.newResellersToday ? 'New!' : undefined} />
+        <StatCard label="Pending Payouts"    value={stats?.pendingPayouts || 0}                    color="#D82332" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : undefined} />
+        <StatCard label="Total Resellers"    value={(stats?.totalResellers || 0).toLocaleString()} color="#1759CE" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this month`} href="/dashboard/admin/resellers" />
+        <StatCard label="New This Month"     value={stats?.newResellersThisMonth || 0}             color="#E84D0E" icon="🆕" sub={`+${stats?.newResellersToday || 0} today`} href="/dashboard/admin/resellers" />
       </div>
 
 
@@ -343,35 +329,32 @@ export default function AdminDashboardPage() {
           <div className="grid grid-cols-2 gap-3">
             {(['pending','processing','delivered','cancelled'] as const).map(s => {
               const statusColor = STATUS_COLORS[s]
-              const statusText = s === 'pending' ? '#0D1B3E' : '#FFFFFF'
               return (
                 <div
                   key={s}
-                  className="group relative overflow-hidden rounded-xl border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="group relative overflow-hidden rounded-xl border border-black/5 p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                   style={{
-                    background: `linear-gradient(145deg, rgba(255,255,255,0.15), rgba(0,0,0,0.14)), ${statusColor}`,
-                    borderColor: 'rgba(255,255,255,0.3)',
-                    boxShadow: `0 8px 20px ${statusColor}38`,
+                    backgroundColor: statusColor,
                   }}
                 >
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-20 blur-xl transition-transform group-hover:scale-125"
+                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-10 blur-xl transition-transform group-hover:scale-125"
                   />
                   <div className="relative mb-2 flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/25 bg-white/20 text-sm shadow-sm">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-sm">
                       {STATUS_ICONS[s]}
                     </span>
                     <p
                       className="text-xs font-bold capitalize tracking-wide"
-                      style={{ color: statusText, opacity: 0.86 }}
+                      style={{ color: 'rgba(255,255,255,.84)' }}
                     >
                       {s}
                     </p>
                   </div>
                   <p
                     className="relative text-2xl font-extrabold tracking-tight"
-                    style={{ color: statusText }}
+                    style={{ color: '#FFFFFF' }}
                   >
                     {(orderStatusMap[s] || 0).toLocaleString()}
                   </p>
@@ -463,7 +446,7 @@ export default function AdminDashboardPage() {
 
         {/* Revenue Breakdown */}
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
-          <p className="text-sm font-bold text-[#0D1B3E] mb-4">Today's Revenue Breakdown</p>
+          <p className="text-sm font-bold text-[#0D1B3E] mb-4">Today&apos;s Revenue Breakdown</p>
           <div className="space-y-3">
             {[
               { label: 'PIN Revenue', value: stats?.pinRevenueToday || 0, color: '#9a6f1e', icon: '🔑' },
@@ -476,20 +459,18 @@ export default function AdminDashboardPage() {
               return (
                 <div
                   key={s.label}
-                  className="group relative overflow-hidden rounded-xl border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="group relative overflow-hidden rounded-xl border border-black/5 p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                   style={{
-                    background: `linear-gradient(145deg, rgba(255,255,255,0.15), rgba(0,0,0,0.14)), ${s.color}`,
-                    borderColor: 'rgba(255,255,255,0.3)',
-                    boxShadow: `0 8px 20px ${s.color}38`,
+                    backgroundColor: s.color,
                   }}
                 >
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-20 blur-xl transition-transform group-hover:scale-125"
+                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-10 blur-xl transition-transform group-hover:scale-125"
                   />
                   <div className="relative mb-3 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-white/25 bg-white/20 text-sm shadow-sm">
+                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-sm">
                         {s.icon}
                       </span>
                       <p className="truncate text-xs font-bold text-white/85">{s.label}</p>
@@ -499,7 +480,7 @@ export default function AdminDashboardPage() {
                   <div className="relative flex items-center gap-2">
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/15">
                       <div
-                        className="h-full rounded-full bg-white shadow-sm"
+                        className="h-full rounded-full bg-white"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -690,7 +671,7 @@ export default function AdminDashboardPage() {
               <p className="text-sm text-gray-400 text-center py-8">No data yet</p>
             ) : (
               <div className="space-y-3">
-                {items.slice(0, 6).map((r: any, i: number) => {
+                {items.slice(0, 6).map((r, i: number) => {
                   const maxVal = items[0]?.total || 1
                   const pct    = Math.round((r.total / maxVal) * 100)
                   const barColors = ['#0D1B3E', '#2563eb', '#C9A84C', '#1a7a4a', '#8b5cf6', '#9ca3af']

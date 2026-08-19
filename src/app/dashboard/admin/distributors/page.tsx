@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
-import Link from 'next/link'
 
 // ============================================================
 // TYPES
@@ -79,6 +78,8 @@ export default function DistributorsPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
   const [editSecurityPin, setEditSecurityPin] = useState('')
+  const [editPinPromptOpen, setEditPinPromptOpen] = useState(false)
+  const [editPinError, setEditPinError] = useState('')
   const [togglingId, setTogglingId]   = useState<string | null>(null)
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [resetResult, setResetResult] = useState<{ id: string; password: string } | null>(null)
@@ -316,11 +317,30 @@ export default function DistributorsPage() {
     })
     setEditError('')
     setEditSecurityPin('')
+    setEditPinPromptOpen(false)
+    setEditPinError('')
   }
+
+  const closeEdit = () => {
+    setEditTarget(null)
+    setEditSecurityPin('')
+    setEditPinPromptOpen(false)
+    setEditPinError('')
+    setEditError('')
+  }
+
+  const changesSensitiveContact = Boolean(editTarget) && (
+    editForm.mobile.trim() !== (editTarget.mobile || '').trim() || Boolean(editForm.email.trim())
+  )
 
   const handleEditSave = async () => {
     if (!editTarget) return
-    setEditSaving(true); setEditError('')
+    if (changesSensitiveContact && editSecurityPin.length !== 6) {
+      setEditPinPromptOpen(true)
+      setEditPinError('')
+      return
+    }
+    setEditSaving(true); setEditError(''); setEditPinError('')
     const res = await fetch('/api/admin/distributors', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -328,8 +348,15 @@ export default function DistributorsPage() {
     })
     const data = await res.json()
     setEditSaving(false)
-    if (data.error) { setEditError(data.error); return }
-    setEditTarget(null)
+    if (data.error) {
+      if (changesSensitiveContact) {
+        setEditPinPromptOpen(true)
+        setEditPinError(data.error)
+        setEditSecurityPin('')
+      } else setEditError(data.error)
+      return
+    }
+    closeEdit()
     fetchDistributors()
   }
 
@@ -461,18 +488,6 @@ export default function DistributorsPage() {
                 {f}
               </button>
             ))}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Admin Security PIN</label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                value={editSecurityPin}
-                onChange={(e) => setEditSecurityPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="Required only when changing email or mobile"
-                className="w-full border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
-              />
-            </div>
           </div>
         </div>
 
@@ -926,7 +941,7 @@ export default function DistributorsPage() {
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-[#0D1B3E]">Edit Distributor</h2>
-            <button onClick={() => setEditTarget(null)} className="text-gray-400 hover:text-[#0D1B3E]">✕</button>
+            <button onClick={closeEdit} className="text-gray-400 hover:text-[#0D1B3E]" aria-label="Close edit distributor">✕</button>
           </div>
           <div className="space-y-3">
             {[
@@ -937,7 +952,7 @@ export default function DistributorsPage() {
               { label: 'Coverage Area', key: 'coverage_area',type: 'text' },
             ].map(({ label, key, type }) => (
               <div key={key}>
-                <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                <label className="block text-xs text-gray-500 mb-1">{label}{['mobile', 'email'].includes(key) && <span className="ml-1 text-[#C9A84C]">🔒 protected</span>}</label>
                 <input
                   type={type}
                   value={editForm[key as keyof typeof editForm]}
@@ -949,7 +964,7 @@ export default function DistributorsPage() {
             {editError && <p className="text-xs text-[#a03030]">{editError}</p>}
           </div>
           <div className="flex gap-2 mt-5">
-            <button onClick={() => setEditTarget(null)}
+            <button onClick={closeEdit}
               className="flex-1 py-2 rounded-lg border border-[#0D1B3E]/15 text-sm text-gray-500 hover:bg-gray-50">
               Cancel
             </button>
@@ -957,6 +972,26 @@ export default function DistributorsPage() {
               className="flex-1 py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50">
               {editSaving ? 'Saving...' : 'Save Changes'}
             </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {editTarget && editPinPromptOpen && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+        <div role="dialog" aria-modal="true" aria-labelledby="edit-pin-title" className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#fef6e4] text-xl">🔐</div>
+          <h2 id="edit-pin-title" className="mt-3 text-center text-base font-semibold text-[#0D1B3E]">Confirm sensitive changes</h2>
+          <p className="mt-2 text-center text-xs leading-5 text-gray-500">Enter the Admin owner&apos;s 6-digit Security PIN before changing {[
+            editForm.mobile.trim() !== (editTarget.mobile || '').trim() ? 'mobile number' : '',
+            editForm.email.trim() ? 'email address' : '',
+          ].filter(Boolean).join(' and ')}.</p>
+          <label className="mt-4 mb-1 block text-xs text-gray-500">Admin Security PIN</label>
+          <input autoFocus type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={editSecurityPin} onChange={(event) => { setEditSecurityPin(event.target.value.replace(/\D/g, '').slice(0, 6)); setEditPinError('') }} onKeyDown={(event) => { if (event.key === 'Enter' && editSecurityPin.length === 6 && !editSaving) void handleEditSave() }} placeholder="Enter 6-digit Security PIN" className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-center text-sm tracking-[0.3em] outline-none focus:border-[#C9A84C]" />
+          {editPinError && <p className="mt-3 rounded-lg bg-[#fdecea] px-3 py-2 text-xs text-[#a03030]">{editPinError}</p>}
+          <div className="mt-5 flex gap-2">
+            <button type="button" onClick={() => { setEditPinPromptOpen(false); setEditSecurityPin(''); setEditPinError('') }} disabled={editSaving} className="flex-1 rounded-lg border border-[#0D1B3E]/15 py-2.5 text-sm text-gray-500 disabled:opacity-50">Back</button>
+            <button type="button" onClick={() => void handleEditSave()} disabled={editSaving || editSecurityPin.length !== 6} className="flex-1 rounded-lg bg-[#C9A84C] py-2.5 text-sm font-medium text-white disabled:opacity-50">{editSaving ? 'Saving…' : 'Confirm & save'}</button>
           </div>
         </div>
       </div>
