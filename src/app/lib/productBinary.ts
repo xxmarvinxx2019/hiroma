@@ -1,9 +1,11 @@
 import { randomUUID } from 'crypto'
 import { Prisma } from '@prisma/client'
 import prisma from '@/app/lib/prisma'
+import { ensureCurrentProductBinaryQuarter, PRODUCT_BINARY_PESO_PER_POINT } from '@/app/lib/productBinaryQuarter'
+import { calculateProductBinaryDailyCap } from '@/app/lib/productBinaryCap'
 
 const PU_PER_LEG_PER_PAIR = 2
-const PESO_PER_POINT = 0.5
+const PESO_PER_POINT = PRODUCT_BINARY_PESO_PER_POINT
 // Business rule: Product Binary is independent from package value and may pay
 // at most ₱20 per completed pair, even if a legacy rank row is configured higher.
 const MAX_PRODUCT_BINARY_PAIR_RATE = 20
@@ -29,10 +31,6 @@ async function getRankSnapshot(tx: Tx, packageId: string | null, totalPu: number
     FROM ranks r
     WHERE r.package_id::text = ${packageId}
       AND r.required_pu <= ${totalPu}
-      AND EXISTS (
-        SELECT 1 FROM rank_periods rp WHERE rp.package_id = r.package_id
-          AND rp.is_active = true AND rp.start_date <= CURRENT_TIMESTAMP AND rp.end_date >= CURRENT_TIMESTAMP
-      )
     ORDER BY r.sequence DESC LIMIT 1
   `
   return rows[0] || null
@@ -77,6 +75,8 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
 
     // Personal PU drives Rank Engine. Registration/package products are not
     // counted here; only a delivered, binary-eligible product order is counted.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + order.buyer_id}))`
+    await ensureCurrentProductBinaryQuarter(tx, order.buyer_id)
     await tx.$executeRaw`
       UPDATE reseller_profiles SET total_pu=COALESCE(total_pu,0)+${Number(order.total_pu)} WHERE user_id=${order.buyer_id}
     `
@@ -108,6 +108,7 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
 
     for (const ancestor of ancestors) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + ancestor.user_id}))`
+      await ensureCurrentProductBinaryQuarter(tx, ancestor.user_id)
       const profiles = await tx.$queryRaw<{
         status: string; package_id: string; package_name: string; base_points: string; total_pu: number;
         cap_enabled: boolean; cap_limit: number;
@@ -149,10 +150,13 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         WHERE recipient_user_id=${ancestor.user_id} AND created_at>=${day.start} AND created_at<=${day.end}
       `
       const used = Number(today[0]?.used || 0)
-      const inactivePairs = profile.status === 'active' ? 0 : completedPairs
-      const capPayable = profile.cap_enabled ? Math.min(completedPairs, Math.max(0, Number(profile.cap_limit)-used)) : completedPairs
-      const payablePairs = inactivePairs ? 0 : capPayable
-      const capFlashPairs = inactivePairs ? 0 : completedPairs-payablePairs
+      const { payablePairs, capFlashPairs, inactivePairs } = calculateProductBinaryDailyCap(
+        completedPairs,
+        used,
+        profile.cap_enabled,
+        Number(profile.cap_limit),
+        profile.status === 'active',
+      )
       const payableAmount = payablePairs*rateAmount
       const flashoutAmount = (capFlashPairs+inactivePairs)*rateAmount
       let normalCommissionId: string | null = null

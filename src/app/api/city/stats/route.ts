@@ -1,52 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
-const STATS_PERIODS = ['today', 'yesterday', 'this_week', 'this_month', 'this_year', 'all_time', 'custom'] as const
-type StatsPeriod = (typeof STATS_PERIODS)[number]
-const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
-
-function manilaBoundary(year: number, month: number, day: number) {
-  return new Date(Date.UTC(year, month, day) - MANILA_OFFSET_MS)
-}
-
-function resolveStatsPeriod(request: NextRequest) {
-  const requested = request.nextUrl.searchParams.get('period')
-  const period: StatsPeriod = STATS_PERIODS.includes(requested as StatsPeriod)
-    ? requested as StatsPeriod
-    : 'all_time'
-  const labels: Record<StatsPeriod, string> = {
-    today: 'Today', yesterday: 'Yesterday', this_week: 'This Week',
-    this_month: 'This Month', this_year: 'This Year', all_time: 'All Time', custom: 'Custom Range',
-  }
-  if (period === 'all_time') return { period, label: labels[period], start: null, end: null }
-
-  const now = new Date(Date.now() + MANILA_OFFSET_MS)
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth()
-  const day = now.getUTCDate()
-  if (period === 'custom') {
-    const startValue = request.nextUrl.searchParams.get('start')
-    const endValue = request.nextUrl.searchParams.get('end')
-    const parseDate = (value: string | null) => {
-      const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-      return match ? manilaBoundary(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
-    }
-    const start = parseDate(startValue)
-    const endDay = parseDate(endValue)
-    if (!start || !endDay || endDay < start) return { period: 'all_time' as const, label: 'All Time', start: null, end: null }
-    return { period, label: labels[period], start, end: new Date(endDay.getTime() + 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'today') return { period, label: labels[period], start: manilaBoundary(year, month, day), end: manilaBoundary(year, month, day + 1) }
-  if (period === 'yesterday') return { period, label: labels[period], start: manilaBoundary(year, month, day - 1), end: manilaBoundary(year, month, day) }
-  if (period === 'this_week') {
-    const mondayOffset = (now.getUTCDay() + 6) % 7
-    const start = manilaBoundary(year, month, day - mondayOffset)
-    return { period, label: labels[period], start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'this_month') return { period, label: labels[period], start: manilaBoundary(year, month, 1), end: manilaBoundary(year, month + 1, 1) }
-  return { period, label: labels[period], start: manilaBoundary(year, 0, 1), end: manilaBoundary(year + 1, 0, 1) }
-}
+import { resolveCityReportPeriod } from '@/app/lib/city-report-period'
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,7 +14,7 @@ export async function GET(req: NextRequest) {
       select: { dist_level: true },
     })
     const isBranch = profile?.dist_level === 'branch'
-    const selectedPeriod = resolveStatsPeriod(req)
+    const selectedPeriod = resolveCityReportPeriod(req.nextUrl.searchParams, 'all_time')
     const dateFilter = selectedPeriod.start && selectedPeriod.end
       ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
       : undefined

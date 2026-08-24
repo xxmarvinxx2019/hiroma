@@ -113,7 +113,7 @@ function StatCard({ label, value, sub, color, icon, badge }: {
   )
 }
 type ReportTab = 'overview' | 'sales' | 'products' | 'packages' | 'pins' | 'inventory'
-type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
+type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 
 export default function CityDashboardPage() {
   const [stats, setStats]     = useState<Stats | null>(null)
@@ -216,6 +216,7 @@ useEffect(() => {
             <option value="today">Daily — Today</option>
             <option value="yesterday">Yesterday</option>
             <option value="this_week">Weekly — This Week</option>
+            <option value="last_week">Weekly — Last Week</option>
             <option value="this_month">Monthly — This Month</option>
             <option value="this_year">Yearly — This Year</option>
             <option value="all_time">All Time</option>

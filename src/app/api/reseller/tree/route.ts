@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import {
+  ensureCurrentProductBinaryQuarter,
+  PRODUCT_BINARY_BASE_POINTS,
+  PRODUCT_BINARY_PESO_PER_POINT,
+} from '@/app/lib/productBinaryQuarter'
+import { calculateProductBinaryBalance } from '@/app/lib/productBinaryBalance'
+import { getRanksForPackage } from '@/app/api/admin/ranks/route'
+import { getProfilePhotoDisplayUrl } from '@/app/lib/profilePhoto'
 
 async function fetchSubtree(rootNodeId: string, maxDepth: number) {
   const nodes = await prisma.$queryRaw<{
     id: string; user_id: string; parent_id: string | null
     position: string | null; depth: number
-    username: string; full_name: string; package_name: string | null
+    username: string; full_name: string; profile_photo: string | null; package_name: string | null
   }[]>`
     WITH RECURSIVE subtree AS (
       SELECT
         n.id::text, n.user_id::text, n.parent_id::text, n.position,
-        u.username, u.full_name,
+        u.username, u.full_name, u.profile_photo,
         p.name AS package_name,
         0 AS depth
       FROM binary_tree_nodes n
@@ -22,7 +30,7 @@ async function fetchSubtree(rootNodeId: string, maxDepth: number) {
       UNION ALL
       SELECT
         n.id::text, n.user_id::text, n.parent_id::text, n.position,
-        u.username, u.full_name,
+        u.username, u.full_name, u.profile_photo,
         p.name AS package_name,
         s.depth + 1
       FROM binary_tree_nodes n
@@ -39,6 +47,7 @@ async function fetchSubtree(rootNodeId: string, maxDepth: number) {
 
 interface TreeNode {
   id: string; user_id: string; username: string; full_name: string
+  profile_photo: string | null
   package_name: string | null; position: string | null; is_self: boolean; depth: number
   left_child: TreeNode | null; right_child: TreeNode | null
   direct_referral_earned: number; binary_pairing_earned: number
@@ -47,15 +56,17 @@ interface TreeNode {
   pairing_bonus_value: number; pending_pairing_balance: number
   left_points: number; right_points: number
   rank: string; total_pu: number
+  product_purchase_pu: number; latest_product_purchase_at: string | null
 }
 
 function buildTreeFromNodes(
-  nodes: { id: string; user_id: string; parent_id: string | null; position: string | null; depth: number; username: string; full_name: string; package_name: string | null }[],
+  nodes: { id: string; user_id: string; parent_id: string | null; position: string | null; depth: number; username: string; full_name: string; profile_photo: string | null; package_name: string | null }[],
   rootId: string,
   selfUserId: string,
   commissionMap: Map<string, { direct: number; pairing: number; points: number; total: number }>,
   countMap: Map<string, { left: number; right: number }>,
-  profileMap: Map<string, { pairing_bonus_value: number; pending_pairing_balance: number; left_points: number; right_points: number; rank: string; total_pu: number }>
+  profileMap: Map<string, { pairing_bonus_value: number; pending_pairing_balance: number; left_points: number; right_points: number; rank: string; total_pu: number }>,
+  productActivityMap: Map<string, { total_pu: number; latest_at: string | null }>,
 ): TreeNode | null {
   const node      = nodes.find((n) => n.id === rootId)
   if (!node) return null
@@ -68,10 +79,10 @@ function buildTreeFromNodes(
 
   return {
     id: node.id, user_id: node.user_id, username: node.username,
-    full_name: node.full_name, package_name: node.package_name,
+    full_name: node.full_name, profile_photo: node.profile_photo, package_name: node.package_name,
     position: node.position, is_self: node.user_id === selfUserId, depth: node.depth,
-    left_child:  leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  selfUserId, commissionMap, countMap, profileMap) : null,
-    right_child: rightChild ? buildTreeFromNodes(nodes, rightChild.id, selfUserId, commissionMap, countMap, profileMap) : null,
+    left_child:  leftChild  ? buildTreeFromNodes(nodes, leftChild.id,  selfUserId, commissionMap, countMap, profileMap, productActivityMap) : null,
+    right_child: rightChild ? buildTreeFromNodes(nodes, rightChild.id, selfUserId, commissionMap, countMap, profileMap, productActivityMap) : null,
     direct_referral_earned: commissions.direct,
     binary_pairing_earned:  commissions.pairing,
     product_points_earned:  commissions.points,
@@ -84,6 +95,8 @@ function buildTreeFromNodes(
     right_points:            profile?.right_points            || 0,
     rank:                    profile?.rank                    || 'default',
     total_pu:                profile?.total_pu                || 0,
+    product_purchase_pu:     productActivityMap.get(node.user_id)?.total_pu || 0,
+    latest_product_purchase_at: productActivityMap.get(node.user_id)?.latest_at || null,
   }
 }
 
@@ -93,6 +106,7 @@ export async function GET(req: NextRequest) {
     if (!user || user.role !== 'reseller') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    await prisma.$transaction(tx => ensureCurrentProductBinaryQuarter(tx, user.id))
 
     const { searchParams } = req.nextUrl
     const maxDepth   = 2
@@ -160,6 +174,7 @@ export async function GET(req: NextRequest) {
       prisma.resellerProfile.findUnique({
         where:  { user_id: user.id },
         select: {
+          package_id: true,
           total_points: true, pending_pairing_balance: true,
           daily_referral_count: true,
           package: { select: { name: true } },
@@ -179,14 +194,27 @@ export async function GET(req: NextRequest) {
     // Resolve root node
     let rootNodeId = myNode.id
     if (rootUserId && rootUserId !== user.id) {
-      const rootNode = await prisma.binaryTreeNode.findUnique({
-        where:  { user_id: rootUserId },
-        select: { id: true },
-      })
-      if (rootNode) rootNodeId = rootNode.id
+      const authorizedRoots = await prisma.$queryRaw<{ id: string }[]>`
+        WITH RECURSIVE allowed AS (
+          SELECT id, user_id FROM binary_tree_nodes WHERE id = ${myNode.id}
+          UNION ALL
+          SELECT child.id, child.user_id
+          FROM binary_tree_nodes child
+          JOIN allowed parent ON child.parent_id = parent.id
+        )
+        SELECT id::text FROM allowed WHERE user_id = ${rootUserId} LIMIT 1
+      `
+      if (!authorizedRoots[0]) {
+        return NextResponse.json({ error: 'This member is outside your authorized downline.' }, { status: 403 })
+      }
+      rootNodeId = authorizedRoots[0].id
     }
 
-    const allNodes = await fetchSubtree(rootNodeId, maxDepth)
+    const rawNodes = await fetchSubtree(rootNodeId, maxDepth)
+    const allNodes = await Promise.all(rawNodes.map(async (node) => ({
+      ...node,
+      profile_photo: await getProfilePhotoDisplayUrl(node.profile_photo),
+    })))
     const userIds  = allNodes.map((n) => n.user_id)
     const nodeIds  = allNodes.map((n) => n.id)
 
@@ -221,7 +249,7 @@ export async function GET(req: NextRequest) {
       }])
     )
 
-    const [allCommissions, allCounts] = await Promise.all([
+    const [allCommissions, allCounts, productActivityRows, productPositionRows, productLegTotalsRows] = await Promise.all([
       prisma.commission.groupBy({
         by:    ['user_id', 'type'],
         where: { user_id: { in: userIds } },
@@ -231,6 +259,41 @@ export async function GET(req: NextRequest) {
         where:  { id: { in: nodeIds } },
         select: { id: true, left_count: true, right_count: true },
       }),
+      prisma.$queryRaw<{ buyer_user_id: string; total_pu: number; latest_at: Date | null }[]>`
+        SELECT buyer_user_id::text,
+               COALESCE(SUM(total_pu), 0)::int AS total_pu,
+               MAX(processed_at) AS latest_at
+        FROM product_binary_order_events
+        WHERE buyer_user_id::text = ANY(${userIds})
+        GROUP BY buyer_user_id
+      `.catch(() => []),
+      prisma.$queryRaw<{
+        left_carryover_pu: number; right_carryover_pu: number
+        lifetime_pairs: number
+      }[]>`
+        SELECT COALESCE(left_carryover_pu, 0)::int AS left_carryover_pu,
+               COALESCE(right_carryover_pu, 0)::int AS right_carryover_pu,
+               COALESCE(lifetime_pairs, 0)::int AS lifetime_pairs
+        FROM product_binary_positions
+        WHERE user_id = ${user.id}
+        LIMIT 1
+      `.catch(() => []),
+      prisma.$queryRaw<{ left_total_pu: number; right_total_pu: number }[]>`
+        WITH RECURSIVE product_legs AS (
+          SELECT child.id, child.user_id, child.position::text AS source_leg
+          FROM binary_tree_nodes child
+          WHERE child.parent_id = ${myNode.id}
+          UNION ALL
+          SELECT child.id, child.user_id, product_legs.source_leg
+          FROM binary_tree_nodes child
+          JOIN product_legs ON child.parent_id = product_legs.id
+        )
+        SELECT
+          COALESCE(SUM(event.total_pu) FILTER (WHERE product_legs.source_leg = 'left'), 0)::int AS left_total_pu,
+          COALESCE(SUM(event.total_pu) FILTER (WHERE product_legs.source_leg = 'right'), 0)::int AS right_total_pu
+        FROM product_legs
+        JOIN product_binary_order_events event ON event.buyer_user_id = product_legs.user_id
+      `.catch(() => []),
     ])
 
     const commissionMap = new Map<string, { direct: number; pairing: number; points: number; total: number }>()
@@ -245,6 +308,10 @@ export async function GET(req: NextRequest) {
     }
 
     const countMap = new Map(allCounts.map((n) => [n.id, { left: n.left_count, right: n.right_count }]))
+    const productActivityMap = new Map<string, { total_pu: number; latest_at: string | null }>(productActivityRows.map((row): [string, { total_pu: number; latest_at: string | null }] => [row.buyer_user_id, {
+      total_pu: Number(row.total_pu || 0),
+      latest_at: row.latest_at ? new Date(row.latest_at).toISOString() : null,
+    }]))
 
     // Fetch self rank/pu
     let selfRankData = { rank: 'default', total_pu: 0 }
@@ -256,7 +323,21 @@ export async function GET(req: NextRequest) {
       if (selfRankRows[0]) selfRankData = { rank: selfRankRows[0].rank, total_pu: Number(selfRankRows[0].total_pu) }
     } catch { /* not migrated */ }
 
-    const tree = buildTreeFromNodes(allNodes, rootNodeId, user.id, commissionMap, countMap, profileMap)
+    const tree = buildTreeFromNodes(allNodes, rootNodeId, user.id, commissionMap, countMap, profileMap, productActivityMap)
+    const productPosition = productPositionRows[0]
+    const productLegTotals = productLegTotalsRows[0]
+    const productBalance = calculateProductBinaryBalance(
+      Number(productPosition?.left_carryover_pu || 0),
+      Number(productPosition?.right_carryover_pu || 0),
+    )
+    const rankOptions = myProfile?.package_id
+      ? await getRanksForPackage(myProfile.package_id)
+      : []
+    const sortedRanks = [...rankOptions].sort((a, b) => a.sequence - b.sequence)
+    const currentRankIndex = sortedRanks.findIndex((rank) => rank.name === selfRankData.rank)
+    const currentRank = currentRankIndex >= 0 ? sortedRanks[currentRankIndex] : null
+    const nextRank = sortedRanks[currentRankIndex + 1] || (currentRank ? null : sortedRanks[0]) || null
+    const currentRatePoints = Number(currentRank?.pair_income || PRODUCT_BINARY_BASE_POINTS)
 
     return NextResponse.json({
       tree,
@@ -280,6 +361,24 @@ export async function GET(req: NextRequest) {
         package:                 myProfile?.package?.name          || null,
         rank:                    selfRankData.rank,
         total_pu:                selfRankData.total_pu,
+      },
+      my_product_binary: {
+        ...productBalance,
+        pu_per_leg: 2,
+        left_total_pu: Number(productLegTotals?.left_total_pu || 0),
+        right_total_pu: Number(productLegTotals?.right_total_pu || 0),
+        lifetime_pairs: Number(productPosition?.lifetime_pairs || 0),
+        total_earned: selfCommissions.points,
+        rank_progress: {
+          current_rank: currentRank?.name || 'Base',
+          current_pair_rate_amount: currentRatePoints * PRODUCT_BINARY_PESO_PER_POINT,
+          next_rank: nextRank ? {
+            name: nextRank.name,
+            required_pu: Number(nextRank.required_pu),
+            remaining_pu: Math.max(0, Number(nextRank.required_pu) - selfRankData.total_pu),
+            pair_rate_amount: Number(nextRank.pair_income) * PRODUCT_BINARY_PESO_PER_POINT,
+          } : null,
+        },
       },
     })
   } catch (error) {

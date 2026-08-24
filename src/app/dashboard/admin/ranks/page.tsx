@@ -85,6 +85,9 @@ export default function AdminRanksPage() {
 
   const now = new Date()
   const isActivePeriod = (p: Period) => new Date(p.start_date) <= now && new Date(p.end_date) >= now
+  const quarter = Math.floor(now.getMonth() / 3) + 1
+  const quarterStart = new Date(now.getFullYear(), (quarter - 1) * 3, 1)
+  const quarterEnd = new Date(now.getFullYear(), quarter * 3, 0)
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -98,8 +101,8 @@ export default function AdminRanksPage() {
       {/* Info banner */}
       <div className="bg-[#010521]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3 mb-5 text-xs text-gray-500 leading-relaxed">
         <p className="font-medium text-[#0D1B3E] mb-1">How it works</p>
-        Each package has its own rank milestones with custom names. Ranks are only active during the configured <strong>rank period</strong>.
-        When the period ends, all resellers reset to their package's base points per pair.
+        Every package starts at <strong>₱5 per Product Binary pair</strong>. Rank names and required PU are customizable,
+        while payout levels are fixed at ₱10, ₱15, and ₱20 per pair. Qualification PU resets automatically every calendar quarter.
         Rule: <strong>2 PU left + 2 PU right = 1 pair</strong>. Each point = <strong>₱0.50</strong>.
       </div>
 
@@ -121,8 +124,13 @@ export default function AdminRanksPage() {
       ) : activeTab && (
         <div className="space-y-4">
 
+          <div className="rounded-xl border border-[#C9A84C]/30 bg-[#fffaf0] p-4">
+            <p className="text-sm font-semibold text-[#0D1B3E]">Automatic quarterly season · Q{quarter} {now.getFullYear()}</p>
+            <p className="mt-1 text-xs text-gray-500">{fmtDate(quarterStart.toISOString())} – {fmtDate(quarterEnd.toISOString())}. Personal qualification PU and rank return to Base automatically at the start of the next quarter. Product Binary left/right carryover is separate and is not reset here.</p>
+          </div>
+
           {/* ── Rank Period ── */}
-          <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4">
+          <div className="hidden" aria-hidden="true">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-sm font-semibold text-[#0D1B3E]">Rank Period</p>
@@ -205,7 +213,7 @@ export default function AdminRanksPage() {
                 <p className="text-sm font-semibold text-[#0D1B3E]">Rank Milestones</p>
                 <p className="text-xs text-gray-400">Custom rank names — ordered by sequence. Base = {activePkg?.point_php_value} pts/pair</p>
               </div>
-              <button onClick={() => { setAddingRank(true); setNewRank(EMPTY_RANK(activeTab, nextSeq)); setError('') }}
+              <button onClick={() => { setAddingRank(true); setNewRank(EMPTY_RANK(activeTab, nextSeq)); setError('') }} disabled={nextSeq > 3}
                 className="text-xs text-[#C9A84C] hover:underline font-medium">+ Add Rank</button>
             </div>
 
@@ -232,9 +240,9 @@ export default function AdminRanksPage() {
                         <input type="number" min="0" value={editRank.required_pu}
                           onChange={e => setEditRank({ ...editRank, required_pu: Number(e.target.value) })}
                           className="border border-[#0D1B3E]/15 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
-                        <input type="number" min="0" value={editRank.pair_income}
-                          onChange={e => setEditRank({ ...editRank, pair_income: Number(e.target.value) })}
-                          className="border border-[#0D1B3E]/15 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
+                        <input type="number" value={editRank.sequence === 1 ? 20 : editRank.sequence === 2 ? 30 : 40}
+                          readOnly aria-label="Fixed Product Binary points per pair"
+                          className="border border-[#0D1B3E]/10 rounded bg-gray-50 px-2 py-1 text-xs text-gray-500" />
                         <div className="flex gap-1.5">
                           <button onClick={() => handleSaveRank(editRank)} disabled={saving}
                             className="text-xs text-[#1a7a4a] font-medium hover:underline disabled:opacity-50">{saving ? '...' : 'Save'}</button>
@@ -283,10 +291,9 @@ export default function AdminRanksPage() {
                       onChange={e => setNewRank({ ...newRank, required_pu: Number(e.target.value) })}
                       placeholder="PU needed"
                       className="border border-[#C9A84C]/40 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
-                    <input type="number" min="0" value={newRank.pair_income || ''}
-                      onChange={e => setNewRank({ ...newRank, pair_income: Number(e.target.value) })}
-                      placeholder="pts/pair"
-                      className="border border-[#C9A84C]/40 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
+                    <input type="number" value={newRank.sequence === 1 ? 20 : newRank.sequence === 2 ? 30 : 40}
+                      readOnly aria-label="Fixed Product Binary points per pair"
+                      className="border border-[#C9A84C]/20 rounded bg-white/70 px-2 py-1 text-xs text-gray-500" />
                     <div className="flex gap-1.5">
                       <button onClick={() => handleSaveRank(newRank)} disabled={saving || !newRank.name}
                         className="text-xs bg-[#C9A84C] text-white px-2 py-1 rounded disabled:opacity-50">{saving ? '...' : 'Add'}</button>

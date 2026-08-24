@@ -720,49 +720,8 @@ export async function PATCH(req: NextRequest) {
           return sum + (i.quantity * (puMap.get(i.product_id) || 0))
         }, 0)
         if (currentOrderPU > 0) {
-          // 1. Update buyer's own total_pu and rank
-          const buyerProfile = await prisma.resellerProfile.findUnique({
-            where:  { user_id: order.buyer_id },
-            select: { package_id: true },
-          })
-          if (false && buyerProfile) {
-            // Fetch buyer's current rank/total_pu via raw SQL
-            let buyerExtra = { rank: 'default', total_pu: 0 }
-            try {
-              const brows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
-                SELECT COALESCE(rank, 'default') as rank, COALESCE(total_pu, 0) as total_pu
-                FROM reseller_profiles WHERE user_id::text = ${order.buyer_id}
-              `
-              if (brows[0]) buyerExtra = { rank: brows[0].rank, total_pu: Number(brows[0].total_pu) }
-            } catch { /* not migrated yet */ }
-            const bp = { ...buyerProfile, ...buyerExtra }
-            const newTotalPU  = (bp.total_pu || 0) + currentOrderPU
-            const buyerPackageId = await prisma.resellerProfile.findUnique({
-              where: { user_id: order.buyer_id },
-              select: { package_id: true },
-            }).then(p => p?.package_id || '')
-            const newRank = buyerPackageId ? await getCurrentRankForReseller(buyerPackageId, newTotalPU) : null
-            const rankChanged = newRank && newRank.name !== (bp.rank || 'default')
-
-            // Use raw SQL since rank/total_pu not in Prisma client yet
-            try {
-              if (rankChanged) {
-                await prisma.$executeRaw`
-                  UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU}, rank = ${newRank!.name}
-                  WHERE user_id::text = ${order.buyer_id}
-                `
-              } else {
-                await prisma.$executeRaw`
-                  UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU}
-                  WHERE user_id::text = ${order.buyer_id}
-                `
-              }
-            } catch { /* columns not migrated yet */ }
-
-            // Rank up! Higher points per pair from now on — no cash reward, fixed ₱0.50/point conversion
-          }
-
-          // 2. Fire ancestor pairing
+          // This idempotent processor exclusively owns Personal PU, rank, and
+          // Product Binary pairing for delivered reseller orders.
           await processDeliveredProductBinaryOrder(order.id)
         }
       } catch (e) {

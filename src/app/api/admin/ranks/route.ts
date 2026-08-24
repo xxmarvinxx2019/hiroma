@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { requiredRankPoints } from '@/app/lib/productBinaryQuarter'
 
 // ── Helper: get active rank period for a package ──
 export async function getActivePeriod(packageId: string) {
@@ -37,12 +38,9 @@ export async function getRanksForPackage(packageId: string) {
   }
 }
 
-// ── Helper: get current rank for a reseller based on total_pu ──
-// Returns null if no active period or no ranks configured (use package default)
+// Product Binary seasons are automatic calendar quarters. Rank rows only define
+// customizable names and PU thresholds; they are not activated by manual periods.
 export async function getCurrentRankForReseller(packageId: string, totalPU: number) {
-  const period = await getActivePeriod(packageId)
-  if (!period) return null  // No active period — use package default
-
   const ranks = await getRanksForPackage(packageId)
   if (!ranks || ranks.length === 0) return null  // No ranks — use package default
 
@@ -128,21 +126,29 @@ export async function POST(req: NextRequest) {
     }
 
     // Save rank
-    const { id, package_id, name, sequence, required_pu, pair_income } = body
-    if (!package_id || !name || sequence === undefined || required_pu === undefined || pair_income === undefined) {
+    const { id, package_id, name, sequence, required_pu } = body
+    if (!package_id || !name || sequence === undefined || required_pu === undefined) {
       return NextResponse.json({ error: 'All rank fields are required.' }, { status: 400 })
+    }
+    const normalizedSequence = Number(sequence)
+    const pairIncome = requiredRankPoints(normalizedSequence)
+    if (!pairIncome) {
+      return NextResponse.json({ error: 'Product Binary supports exactly three rank levels.' }, { status: 400 })
+    }
+    if (!Number.isInteger(Number(required_pu)) || Number(required_pu) <= 0) {
+      return NextResponse.json({ error: 'Required PU must be a positive whole number.' }, { status: 400 })
     }
 
     if (id) {
       await prisma.$executeRaw`
         UPDATE ranks SET name = ${name}, sequence = ${Number(sequence)},
-          required_pu = ${Number(required_pu)}, pair_income = ${Number(pair_income)}
+          required_pu = ${Number(required_pu)}, pair_income = ${pairIncome}
         WHERE id::text = ${id}
       `
     } else {
       await prisma.$executeRaw`
         INSERT INTO ranks (id, package_id, name, sequence, required_pu, pair_income)
-        VALUES (uuid_generate_v4(), ${package_id}::uuid, ${name}, ${Number(sequence)}, ${Number(required_pu)}, ${Number(pair_income)})
+        VALUES (uuid_generate_v4(), ${package_id}::uuid, ${name}, ${normalizedSequence}, ${Number(required_pu)}, ${pairIncome})
       `
     }
 

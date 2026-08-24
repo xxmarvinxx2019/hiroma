@@ -1,51 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
-const REPORT_PERIODS = ['today', 'yesterday', 'this_week', 'this_month', 'this_year', 'all_time', 'custom'] as const
-type ReportPeriod = (typeof REPORT_PERIODS)[number]
-
-const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
-
-function manilaBoundary(year: number, month: number, day: number) {
-  return new Date(Date.UTC(year, month, day) - MANILA_OFFSET_MS)
-}
-
-function resolveReportPeriod(request: NextRequest) {
-  const requested = request.nextUrl.searchParams.get('period')
-  const period: ReportPeriod = REPORT_PERIODS.includes(requested as ReportPeriod)
-    ? requested as ReportPeriod
-    : 'today'
-  const labels: Record<ReportPeriod, string> = {
-    today: 'Today', yesterday: 'Yesterday', this_week: 'This Week',
-    this_month: 'This Month', this_year: 'This Year', all_time: 'All Time', custom: 'Custom Range',
-  }
-  if (period === 'all_time') return { period, label: labels[period], start: null, end: null }
-
-  const manilaNow = new Date(Date.now() + MANILA_OFFSET_MS)
-  const year = manilaNow.getUTCFullYear()
-  const month = manilaNow.getUTCMonth()
-  const day = manilaNow.getUTCDate()
-  if (period === 'custom') {
-    const parseDate = (value: string | null) => {
-      const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-      return match ? manilaBoundary(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
-    }
-    const start = parseDate(request.nextUrl.searchParams.get('start'))
-    const endDay = parseDate(request.nextUrl.searchParams.get('end'))
-    if (!start || !endDay || endDay < start) return { period: 'all_time' as const, label: 'All Time', start: null, end: null }
-    return { period, label: labels[period], start, end: new Date(endDay.getTime() + 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'today') return { period, label: labels[period], start: manilaBoundary(year, month, day), end: manilaBoundary(year, month, day + 1) }
-  if (period === 'yesterday') return { period, label: labels[period], start: manilaBoundary(year, month, day - 1), end: manilaBoundary(year, month, day) }
-  if (period === 'this_week') {
-    const mondayOffset = (manilaNow.getUTCDay() + 6) % 7
-    const start = manilaBoundary(year, month, day - mondayOffset)
-    return { period, label: labels[period], start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'this_month') return { period, label: labels[period], start: manilaBoundary(year, month, 1), end: manilaBoundary(year, month + 1, 1) }
-  return { period, label: labels[period], start: manilaBoundary(year, 0, 1), end: manilaBoundary(year + 1, 0, 1) }
-}
+import { resolveCityReportPeriod } from '@/app/lib/city-report-period'
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -53,7 +9,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const selectedPeriod = resolveReportPeriod(req)
+    const selectedPeriod = resolveCityReportPeriod(req.nextUrl.searchParams, 'today')
     const dateFilter = selectedPeriod.start && selectedPeriod.end
       ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
       : undefined
@@ -71,7 +27,7 @@ export async function GET(req: NextRequest) {
       ? Number(product.branch_price) || Number(product.cost_price)
       : Number(product.city_price) || Number(product.cost_price)
 
-    const [orders, paidOrders, registrationSnapshots, registrationCollections, registrations, packageNames] = await Promise.all([
+    const [orders, paidOrders, registrationSnapshots, registrationCollections, registrations, packageNames, paymentStatusOrders, adjustmentEvents, branchDeposits] = await Promise.all([
       prisma.order.findMany({
         where: {
           seller_id: user.id,
@@ -120,7 +76,7 @@ export async function GET(req: NextRequest) {
             ],
           } : {}),
         },
-        select: { total_amount: true },
+        select: { total_amount: true, payment_method: true },
       }),
       prisma.registrationFinancial.findMany({
         where: {
@@ -190,6 +146,35 @@ export async function GET(req: NextRequest) {
         },
       }),
       prisma.package.findMany({ select: { id: true, name: true } }),
+      prisma.order.findMany({
+        where: {
+          seller_id: user.id,
+          ...(dateFilter ? { created_at: dateFilter } : {}),
+        },
+        select: { total_amount: true, payment_status: true, status: true },
+      }),
+      prisma.inventoryAuditEvent.findMany({
+        where: {
+          owner_id: user.id,
+          event_type: 'physical_count_adjustment',
+          ...(dateFilter ? { created_at: dateFilter } : {}),
+        },
+        select: {
+          id: true, quantity_delta: true, total_value: true, reason: true,
+          actor_name_snapshot: true, created_at: true, reference_id: true,
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+      isBranch && !user.is_staff
+        ? prisma.branchCashDeposit.findMany({
+            where: { branch_id: user.id, ...(dateFilter ? { deposited_at: dateFilter } : {}) },
+            select: {
+              id: true, reference_number: true, expected_cash_snapshot: true,
+              deposit_amount: true, variance_amount: true, status: true, deposited_at: true,
+            },
+            orderBy: { deposited_at: 'desc' },
+          })
+        : Promise.resolve([]),
     ])
 
     const emptySales = () => ({ orders: 0, units: 0, revenue: 0, cost: 0, profit: 0 })
@@ -198,6 +183,7 @@ export async function GET(req: NextRequest) {
     const productMap = new Map<string, {
       id: string
       name: string
+      sale_type: 'member' | 'non_member'
       units: number
       revenue: number
       cost: number
@@ -211,6 +197,7 @@ export async function GET(req: NextRequest) {
 
     for (const order of orders) {
       const bucket = order.is_non_member_sale ? nonMemberSales : memberSales
+      const saleType = order.is_non_member_sale ? 'non_member' as const : 'member' as const
       bucket.orders += 1
       const orderRevenue = Number(order.total_amount || 0)
       if (order.payment_status !== 'paid') outstandingRevenue += orderRevenue
@@ -226,9 +213,11 @@ export async function GET(req: NextRequest) {
         bucket.cost += cost
         bucket.profit += revenue - cost
 
-        const current = productMap.get(item.product.id) || {
+        const productSaleKey = `${item.product.id}:${saleType}`
+        const current = productMap.get(productSaleKey) || {
           id: item.product.id,
           name: item.product.name,
+          sale_type: saleType,
           units: 0,
           revenue: 0,
           cost: 0,
@@ -238,7 +227,7 @@ export async function GET(req: NextRequest) {
         current.revenue += revenue
         current.cost += cost
         current.profit += revenue - cost
-        productMap.set(item.product.id, current)
+        productMap.set(productSaleKey, current)
       }
     }
 
@@ -360,6 +349,100 @@ export async function GET(req: NextRequest) {
       ? collectedRegistrationCash
       : registrationSummary.customer_payment
 
+    const normalizePaymentMethod = (value: string | null) => {
+      const recordedMethod = String(value || 'unclassified').trim().toLowerCase() || 'unclassified'
+
+      // Cash on Pickup is cash received at the counter. Keep the original value
+      // on the order, but combine it with walk-in cash in this financial report.
+      if (['cash', 'cash_on_pickup'].includes(recordedMethod)) {
+        return { method: 'cash', label: 'Cash' }
+      }
+      if (recordedMethod === 'gcash') return { method: 'gcash', label: 'GCash' }
+      if (recordedMethod === 'bank_transfer') return { method: 'bank_transfer', label: 'Bank Transfer' }
+      if (recordedMethod === 'unclassified') {
+        return { method: 'unclassified', label: 'Payment method not recorded' }
+      }
+
+      return {
+        method: recordedMethod,
+        label: recordedMethod.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase()),
+      }
+    }
+    const paymentMethodMap = new Map<string, { method: string; label: string; amount: number; transactions: number }>()
+    for (const order of paidOrders) {
+      const normalizedMethod = normalizePaymentMethod(order.payment_method)
+      const method = normalizedMethod.method
+      const current = paymentMethodMap.get(method) || {
+        method,
+        label: normalizedMethod.label,
+        amount: 0,
+        transactions: 0,
+      }
+      current.amount += Number(order.total_amount || 0)
+      current.transactions += 1
+      paymentMethodMap.set(method, current)
+    }
+    if (legacyRegistrationCash > 0) {
+      paymentMethodMap.set('registration_unclassified', {
+        method: 'registration_unclassified',
+        label: 'Registration payments (method not recorded)',
+        amount: legacyRegistrationCash,
+        transactions: registrationSummary.registrations,
+      })
+    }
+
+    const activePaymentOrders = paymentStatusOrders.filter((order) => order.status !== 'cancelled')
+    const paidPaymentOrders = activePaymentOrders.filter((order) => order.payment_status === 'paid')
+    const awaitingPaymentOrders = activePaymentOrders.filter((order) => order.payment_status !== 'paid')
+    const cancelledPaymentOrders = paymentStatusOrders.filter((order) => order.status === 'cancelled')
+    const paymentStatusSummary = {
+      paid: {
+        orders: paidPaymentOrders.length,
+        amount: paidPaymentOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+      },
+      awaiting: {
+        orders: awaitingPaymentOrders.length,
+        amount: awaitingPaymentOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+      },
+      cancelled: {
+        orders: cancelledPaymentOrders.length,
+        amount: cancelledPaymentOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+      },
+    }
+
+    const addedAdjustmentEvents = adjustmentEvents.filter((event) => event.quantity_delta > 0)
+    const removedAdjustmentEvents = adjustmentEvents.filter((event) => event.quantity_delta < 0)
+    const adjustmentSummary = {
+      physical_count_events: adjustmentEvents.length,
+      units_added: addedAdjustmentEvents.reduce((sum, event) => sum + event.quantity_delta, 0),
+      units_removed: removedAdjustmentEvents.reduce((sum, event) => sum + Math.abs(event.quantity_delta), 0),
+      net_units: adjustmentEvents.reduce((sum, event) => sum + event.quantity_delta, 0),
+      value_added: addedAdjustmentEvents.reduce((sum, event) => sum + Math.abs(Number(event.total_value || 0)), 0),
+      value_removed: removedAdjustmentEvents.reduce((sum, event) => sum + Math.abs(Number(event.total_value || 0)), 0),
+      net_value_change: adjustmentEvents.reduce((sum, event) => sum + Number(event.total_value || 0), 0),
+      events: adjustmentEvents.map((event) => ({ ...event, total_value: Number(event.total_value || 0) })),
+      refunds: { supported: false, amount: null, note: 'Refunds and returns do not yet have a separate financial ledger, so no unverified amount is included in this report.' },
+    }
+
+    const depositStatuses = ['submitted', 'confirmed', 'verified', 'rejected', 'needs_explanation'] as const
+    const depositStatusCounts = Object.fromEntries(depositStatuses.map((status) => [
+      status,
+      branchDeposits.filter((deposit) => deposit.status === status).length,
+    ]))
+    const depositSummary = isBranch && !user.is_staff ? {
+      records: branchDeposits.length,
+      expected_cash: branchDeposits.reduce((sum, deposit) => sum + Number(deposit.expected_cash_snapshot), 0),
+      deposited: branchDeposits.reduce((sum, deposit) => sum + Number(deposit.deposit_amount), 0),
+      variance: branchDeposits.reduce((sum, deposit) => sum + Number(deposit.variance_amount), 0),
+      statuses: depositStatusCounts,
+      latest: branchDeposits.slice(0, 5).map((deposit) => ({
+        ...deposit,
+        expected_cash_snapshot: Number(deposit.expected_cash_snapshot),
+        deposit_amount: Number(deposit.deposit_amount),
+        variance_amount: Number(deposit.variance_amount),
+      })),
+    } : null
+
     return NextResponse.json({
       account: {
         type: isBranch ? 'branch' : 'city',
@@ -382,6 +465,16 @@ export async function GET(req: NextRequest) {
         total_orders: orders.length,
         total_units: memberSales.units + nonMemberSales.units,
       },
+      collections: {
+        total: collectedRevenue + legacyRegistrationCash,
+        methods: [...paymentMethodMap.values()].sort((a, b) => b.amount - a.amount),
+        note: legacyRegistrationCash > 0
+          ? 'Registration payment methods are not stored in the current registration ledger and are shown separately as not recorded.'
+          : 'Payment methods are based on paid product orders in the selected period.',
+      },
+      payment_status_summary: paymentStatusSummary,
+      adjustments: adjustmentSummary,
+      deposit_summary: depositSummary,
       member_sales: memberSales,
       non_member_sales: nonMemberSales,
       registrations: registrationSummary,

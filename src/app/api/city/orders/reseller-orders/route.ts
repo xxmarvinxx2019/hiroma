@@ -436,31 +436,8 @@ export async function POST(req: NextRequest) {
       const puMap = new Map(puProducts.map((product) => [product.id, Number(product.pu_value)]))
       const currentOrderPU = orderItems.reduce((sum, item) => sum + (item.quantity * (puMap.get(item.product_id) || 0)), 0)
 
-      // Product Binary owns the idempotent personal-PU/rank update and pairing.
-      let buyerExtra = { rank: 'default', total_pu: 0 }
-      try {
-        const brows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
-          SELECT COALESCE(rank,'default') as rank, COALESCE(total_pu,0) as total_pu
-          FROM reseller_profiles WHERE user_id::text = ${reseller_id}
-        `
-        if (brows[0]) buyerExtra = { rank: brows[0].rank, total_pu: Number(brows[0].total_pu) }
-      } catch { /* not migrated */ }
-
-      if (false && currentOrderPU > 0) {
-        const newTotalPU = buyerExtra.total_pu + currentOrderPU
-        const { getCurrentRankForReseller } = await import('@/app/api/admin/ranks/route')
-        const buyerPkgId = await prisma.resellerProfile.findUnique({ where: { user_id: reseller_id }, select: { package_id: true } }).then(p => p?.package_id || '')
-        const newRank    = buyerPkgId ? await getCurrentRankForReseller(buyerPkgId, newTotalPU) : null
-        const rankChanged = newRank && newRank.name !== buyerExtra.rank
-        try {
-          if (rankChanged) {
-            await prisma.$executeRaw`UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU}, rank = ${newRank!.name} WHERE user_id::text = ${reseller_id}`
-          } else {
-            await prisma.$executeRaw`UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU} WHERE user_id::text = ${reseller_id}`
-          }
-        } catch { /* not migrated */ }
-
-      }
+      // This idempotent processor exclusively owns Personal PU, rank, and
+      // Product Binary pairing for member walk-in orders.
       if (currentOrderPU > 0) await processDeliveredProductBinaryOrder(order.id)
     } catch (pointsError) {
       console.error('[WALK-IN POINTS ERROR]', pointsError)

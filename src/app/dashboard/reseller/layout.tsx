@@ -24,7 +24,7 @@ const navItems = [
     items: [
       { label: 'Binary Tree',   href: '/dashboard/reseller/tree', icon: '🌳' },
       { label: 'Affiliates',    href: '/dashboard/reseller/genealogy', icon: '👥' },
-      { label: 'Rank Advancement', href: '/dashboard/reseller/points', icon: '♙', premiumOnly: true },
+      { label: 'Rank Advancement', href: '/dashboard/reseller/rank-advancement', icon: '♙' },
     ],
   },
   {
@@ -50,6 +50,7 @@ const navItems = [
   {
     section: 'Resources',
     items: [
+      { label: 'Daily Inspiration', href: '/dashboard/reseller/daily-inspiration', icon: String.fromCodePoint(0x1F31E) },
       { label: 'Ask Hiro', href: '/dashboard/reseller/hiro', icon: String.fromCodePoint(0x2728) },
       { label: 'Support Center', href: '/dashboard/reseller/support-center', icon: String.fromCodePoint(0x1F6DF) },
       { label: 'Marketing Center', href: '/dashboard/reseller/marketing-center', icon: String.fromCodePoint(0x1F4E3) },
