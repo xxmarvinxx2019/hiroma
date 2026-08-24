@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import PosInstallControl from '@/app/components/pos/PosInstallControl'
 
 type Bootstrap = {
   terminal: { id: string; name: string }
@@ -40,13 +41,20 @@ export default function PointOfSalePage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    navigator.serviceWorker.register('/sw-pos.js', { scope: '/dashboard/city/pos', updateViaCache: 'none' }).catch((reason) => {
+      console.warn('[POS SERVICE WORKER]', reason)
+    })
+  }, [])
+
   return <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
     <div className="mx-auto max-w-7xl">
       <header className="rounded-2xl bg-[#071638] p-5 text-white shadow-sm sm:p-7">
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d4af45]">Hiroma Point of Sale</p>
         <div className="mt-2 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div><h1 className="text-2xl font-bold">{data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || 'Loading terminal…'}</h1><p className="mt-1 text-sm text-white/65">Dedicated cashier workspace · installable web POS · controlled offline queue</p></div>
-          <span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? '● Online' : '○ Offline'}</span>
+          <div className="flex flex-col items-start gap-2 sm:items-end"><span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? '● Online' : '○ Offline'}</span><PosInstallControl /></div>
         </div>
       </header>
 
