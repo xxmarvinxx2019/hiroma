@@ -247,12 +247,16 @@ function AddProductionModal({
 // ASSIGN STOCK MODAL
 // ============================================================
 
+type StockWorkflow = 'branch_transfer' | 'distributor_sale'
+
 function AssignStockModal({
+  workflow,
   distributors,
   products,
   onClose,
   onSuccess,
 }: {
+  workflow:     StockWorkflow
   distributors: Distributor[]
   products:     ProductStock[]
   onClose:      () => void
@@ -271,10 +275,13 @@ function AssignStockModal({
   const [recipients, setRecipients]           = useState<Distributor[]>([])
   const [recipientLoading, setRecipientLoading] = useState(false)
   const [recipientMeta, setRecipientMeta]     = useState({ total: 0, totalPages: 1 })
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [confirmationReference, setConfirmationReference] = useState('')
 
   const selectedDist = distributors.find((d) => d.id === ownerId) || recipients.find((r) => r.id === ownerId)
   const selectedLevel = selectedDist?.distributor_profile?.dist_level === 'branch' ? 'branch' : selectedDist?.role
   const isBranchTransfer = selectedLevel === 'branch'
+  const isTransferWorkflow = workflow === 'branch_transfer'
   const priceKey     = selectedLevel ? PRICE_KEY[selectedLevel] : null
   const unitPrice = (product: ProductStock) => {
     if (!priceKey) return 0
@@ -289,6 +296,7 @@ function AssignStockModal({
     const params = new URLSearchParams({
       recipient_search: recipientSearch,
       recipient_role:   recipientRole,
+      recipient_scope:  isTransferWorkflow ? 'branch' : 'sale',
       recipient_page:   String(recipientPage),
     })
     fetch(`/api/admin/inventory?${params}`)
@@ -298,7 +306,7 @@ function AssignStockModal({
         setRecipientMeta(data.recipientMeta || { total: 0, totalPages: 1 })
       })
       .finally(() => setRecipientLoading(false))
-  }, [recipientSearch, recipientRole, recipientPage, ownerId])
+  }, [recipientSearch, recipientRole, recipientPage, ownerId, isTransferWorkflow])
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -321,9 +329,20 @@ function AssignStockModal({
     ? cart.reduce((s, c) => s + unitPrice(c.product) * c.quantity, 0)
     : 0
 
-  const handleSubmit = async () => {
-    if (!ownerId)          { setError('Please select a distributor.'); return }
+  const reviewTransaction = () => {
+    if (!ownerId)          { setError(isTransferWorkflow ? 'Please select a Hiroma Branch.' : 'Please select a distributor or reseller.'); return }
     if (cart.length === 0) { setError('Add at least one product.'); return }
+    if (isTransferWorkflow !== isBranchTransfer) {
+      setError(isTransferWorkflow
+        ? 'Internal transfers can only be sent to a Hiroma Branch.'
+        : 'Hiroma Branches must use the internal transfer workflow.')
+      return
+    }
+    setError('')
+    setShowConfirmation(true)
+  }
+
+  const handleSubmit = async () => {
     setSubmitting(true); setError('')
 
     const res = await fetch('/api/admin/inventory', {
@@ -332,6 +351,7 @@ function AssignStockModal({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         owner_id: ownerId,
+        workflow,
         notes,
         items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
       }),
@@ -340,33 +360,38 @@ function AssignStockModal({
     setSubmitting(false)
     if (res.ok) {
       setSuccess(data.message || 'Stock assigned successfully.')
-      setTimeout(() => { onSuccess(); onClose() }, 1500)
+      setConfirmationReference(data.reference_number || '')
+      onSuccess()
     } else {
       setError(data.error || 'Something went wrong.')
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
           <div>
-            <h2 className="text-sm font-semibold text-[#0D1B3E]">Assign / Sell Stock</h2>
+            <h2 className="text-sm font-semibold text-[#0D1B3E]">
+              {isTransferWorkflow ? 'Transfer Stock to Branch' : 'Sell / Assign Stock to Distributor'}
+            </h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {isBranchTransfer
-                ? 'Hiroma Branch transfer — moves inventory only and does not record a sale'
-                : 'Select distributor or reseller — priced at their level and recorded as a delivered order'}
+              {isTransferWorkflow
+                ? 'Internal company transfer only — no sale, revenue, receivable, commission, or payout'
+                : 'Commercial stock sale — priced at the recipient level and recorded as a delivered order'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
         </div>
 
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
           {/* Left — products */}
-          <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
+          <div className="flex-1 flex flex-col border-b lg:border-b-0 lg:border-r border-[#0D1B3E]/8 min-w-0 min-h-[22rem] lg:min-h-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Select Recipient *</label>
+                <label className="block text-xs text-gray-400 mb-1">
+                  {isTransferWorkflow ? 'Destination Branch *' : 'Distributor / Reseller *'}
+                </label>
                 {selectedDist ? (
                   <div className="flex items-center justify-between bg-[#F0F2F8] border border-[#C9A84C] rounded-lg px-3 py-2">
                     <div>
@@ -381,23 +406,23 @@ function AssignStockModal({
                       <input
                         value={recipientSearch}
                         onChange={(e) => { setRecipientSearch(e.target.value); setRecipientPage(1) }}
-                        placeholder="Search by name or username..."
+                        placeholder={isTransferWorkflow ? 'Search branch by name or username...' : 'Search distributor or reseller...'}
                         className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
                       />
                       {recipientLoading && (
                         <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
                       )}
                     </div>
-                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                    {!isTransferWorkflow && <div className="flex gap-1 mt-1.5 flex-wrap">
                       {(['all', 'regional', 'provincial', 'city', 'reseller'] as const).map((r) => (
                         <button key={r} onClick={() => { setRecipientRole(r); setRecipientPage(1) }}
                           className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors capitalize ${recipientRole === r ? 'bg-[#010521] text-white border-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500 hover:border-[#0D1B3E]/30'}`}>
                           {r}
                         </button>
                       ))}
-                    </div>
+                    </div>}
                     {recipients.length > 0 && (
-                      <div className="mt-1.5 border border-[#0D1B3E]/10 rounded-lg overflow-hidden max-h-44 overflow-y-auto">
+                      <div className="mt-1.5 border border-[#0D1B3E]/10 rounded-lg overflow-hidden">
                         {recipients.map((r) => (
                           <button key={r.id} onClick={() => { setOwnerId(r.id); setCart([]) }}
                             className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#F0F2F8] text-left border-b border-[#0D1B3E]/5 last:border-0 transition-colors">
@@ -439,7 +464,9 @@ function AssignStockModal({
             </div>
             <div className="flex-1 overflow-y-auto">
               {!ownerId ? (
-                <p className="text-center text-xs text-gray-400 py-8">Select a distributor first</p>
+                <p className="text-center text-xs text-gray-400 py-8">
+                  {isTransferWorkflow ? 'Select a destination Branch first' : 'Select a distributor or reseller first'}
+                </p>
               ) : filtered.length === 0 ? (
                 <p className="text-center text-xs text-gray-400 py-8">No products found</p>
               ) : (
@@ -473,11 +500,13 @@ function AssignStockModal({
           </div>
 
           {/* Right — cart */}
-          <div className="w-56 flex flex-col flex-shrink-0">
+          <div className="w-full lg:w-80 xl:w-96 flex flex-col flex-shrink-0 min-h-[18rem] lg:min-h-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0">
-              <p className="text-xs font-semibold text-[#0D1B3E]">Order Summary</p>
+              <p className="text-xs font-semibold text-[#0D1B3E]">
+                {isTransferWorkflow ? 'Transfer Summary' : 'Sale Summary'}
+              </p>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-28">
               {cart.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center pt-4">No items yet</p>
               ) : (
@@ -504,7 +533,7 @@ function AssignStockModal({
             </div>
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
               <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]">
-                <span>{isBranchTransfer ? 'Reference Value' : 'Total'}</span>
+                <span>{isTransferWorkflow ? 'Reference Value' : 'Sale Total'}</span>
                 <span>₱{total.toLocaleString()}</span>
               </div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
@@ -512,16 +541,99 @@ function AssignStockModal({
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C9A84C] resize-none placeholder:text-gray-400" />
               {error   && <p className="text-xs text-[#a03030]">{error}</p>}
               {success && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-2 py-1.5 rounded-lg">{success}</p>}
-              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || !ownerId}
+              <button onClick={reviewTransaction} disabled={submitting || cart.length === 0 || !ownerId}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
-                {submitting
-                  ? (isBranchTransfer ? 'Transferring...' : 'Assigning...')
-                  : (isBranchTransfer ? 'Transfer Stock (No Sale)' : 'Assign Stock & Record Sale')}
+                {isTransferWorkflow ? 'Review Stock Transfer' : 'Review Stock Sale'}
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {showConfirmation && selectedDist && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#010521]/70 p-3 sm:p-4">
+          <div className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-[#0D1B3E]/8 px-5 py-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C9A84C]">Review & confirm</p>
+                <h3 className="mt-1 text-base font-semibold text-[#0D1B3E]">
+                  {isTransferWorkflow ? 'Confirm Internal Stock Transfer' : 'Confirm Stock Sale'}
+                </h3>
+              </div>
+              <button type="button" onClick={() => {
+                if (success) onClose()
+                else setShowConfirmation(false)
+              }} disabled={submitting}
+                className="text-xl leading-none text-gray-400 hover:text-[#0D1B3E] disabled:opacity-40">×</button>
+            </div>
+
+            <div className="overflow-y-auto p-5">
+              {success ? (
+                <div className="mb-4 rounded-xl border border-[#1a7a4a]/25 bg-[#e8f7ef] px-4 py-3">
+                  <p className="text-xs font-semibold text-[#1a7a4a]">✓ Transaction completed successfully</p>
+                  <p className="mt-1 text-xs leading-relaxed text-[#38684f]">{success}</p>
+                  {confirmationReference && (
+                    <p className="mt-2 text-[11px] font-semibold text-[#0D1B3E]">
+                      Transfer reference: {confirmationReference}
+                    </p>
+                  )}
+                  <p className="mt-2 text-[10px] text-gray-500">This confirmation will remain open until you click Done.</p>
+                </div>
+              ) : (
+                <div className={`mb-4 rounded-xl border px-4 py-3 text-xs ${isTransferWorkflow ? 'border-[#C9A84C]/35 bg-[#fef9ee] text-[#80611f]' : 'border-[#2563eb]/20 bg-[#f0f7ff] text-[#1d4e9e]'}`}>
+                  {isTransferWorkflow
+                    ? 'Internal company movement only. This will reduce Admin inventory and increase Branch inventory without recording revenue, receivable, commission, or payout.'
+                    : 'Commercial transaction. This will reduce Admin inventory, increase recipient inventory, and create a delivered sale using the recipient-level price.'}
+                </div>
+              )}
+
+              <div className="grid gap-3 rounded-xl bg-[#F0F2F8] p-4 sm:grid-cols-2">
+                <div><p className="text-[10px] uppercase text-gray-400">{isTransferWorkflow ? 'Destination Branch' : 'Buyer / Recipient'}</p><p className="mt-1 text-sm font-semibold text-[#0D1B3E]">{selectedDist.full_name}</p><p className="text-[10px] text-gray-400">@{selectedDist.username}</p></div>
+                <div className="sm:text-right"><p className="text-[10px] uppercase text-gray-400">Classification</p><p className="mt-1 text-sm font-semibold text-[#0D1B3E]">{isTransferWorkflow ? 'Internal Transfer · No Sale' : 'Delivered Commercial Sale'}</p></div>
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-xl border border-[#0D1B3E]/10">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-[#F0F2F8] px-4 py-2 text-[10px] font-semibold uppercase text-gray-500"><span>Product</span><span>Qty</span><span>Value</span></div>
+                {cart.map((item) => {
+                  const price = unitPrice(item.product)
+                  return (
+                    <div key={item.product.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-t border-[#0D1B3E]/5 px-4 py-3 text-xs">
+                      <div className="min-w-0"><p className="truncate font-medium text-[#0D1B3E]">{item.product.name}</p><p className="text-[10px] text-gray-400">₱{price.toLocaleString()} each</p></div>
+                      <span className="font-medium text-[#0D1B3E]">{item.quantity.toLocaleString()}</span>
+                      <span className="min-w-20 text-right font-semibold text-[#0D1B3E]">₱{(price * item.quantity).toLocaleString()}</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="mt-4 flex items-end justify-between gap-4">
+                <div><p className="text-[10px] uppercase text-gray-400">Total units</p><p className="mt-1 text-sm font-semibold text-[#0D1B3E]">{cart.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()}</p></div>
+                <div className="text-right"><p className="text-[10px] uppercase text-gray-400">{isTransferWorkflow ? 'Reference value' : 'Sale total'}</p><p className="mt-1 text-xl font-bold text-[#0D1B3E]">₱{total.toLocaleString()}</p></div>
+              </div>
+              {notes.trim() && <div className="mt-4 rounded-xl border border-[#0D1B3E]/8 p-3"><p className="text-[10px] uppercase text-gray-400">Notes</p><p className="mt-1 text-xs text-gray-600">{notes.trim()}</p></div>}
+              {error && <p className="mt-3 text-xs text-[#a03030]">{error}</p>}
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-[#0D1B3E]/8 px-5 py-4 sm:flex-row sm:justify-end">
+              {success ? (
+                <button type="button" onClick={onClose}
+                  className="rounded-lg bg-[#010521] px-6 py-2.5 text-xs font-semibold text-white hover:bg-[#162850]">
+                  Done
+                </button>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setShowConfirmation(false)} disabled={submitting}
+                    className="rounded-lg border border-[#0D1B3E]/15 px-4 py-2.5 text-xs font-medium text-[#0D1B3E] hover:bg-[#F0F2F8] disabled:opacity-40">Go Back</button>
+                  <button type="button" onClick={handleSubmit} disabled={submitting}
+                    className="rounded-lg bg-[#010521] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#162850] disabled:opacity-50">
+                    {submitting ? 'Processing...' : (isTransferWorkflow ? 'Yes, Transfer Stock' : 'Yes, Record Sale')}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -546,7 +658,7 @@ export default function AdminInventoryPage() {
   const [search, setSearch]             = useState('')
   const [typeFilter, setTypeFilter]     = useState('all')
   const [page, setPage]                 = useState(1)
-  const [showAssign, setShowAssign]       = useState(false)
+  const [stockWorkflow, setStockWorkflow] = useState<StockWorkflow | null>(null)
   const [showProduction, setShowProduction] = useState(false)
   const [editingId, setEditingId]       = useState<string | null>(null)
   const [editThreshold, setEditThreshold] = useState('')
@@ -624,9 +736,13 @@ export default function AdminInventoryPage() {
             className="bg-[#010521] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
             + Add Production
           </button>
-          <button onClick={() => setShowAssign(true)}
-            className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium">
-            + Assign Stock
+          <button onClick={() => setStockWorkflow('branch_transfer')}
+            className="bg-[#010521] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
+            ↔ Transfer to Branch
+          </button>
+          <button onClick={() => setStockWorkflow('distributor_sale')}
+            className="bg-[#010521] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#162850] transition-colors font-medium">
+            + Sell / Assign to Distributor
           </button>
         </div>
       </div>
@@ -884,11 +1000,12 @@ export default function AdminInventoryPage() {
       )}
 
       {/* Assign Modal */}
-      {showAssign && (
+      {stockWorkflow && (
         <AssignStockModal
+          workflow={stockWorkflow}
           distributors={distributors}
           products={productStock}
-          onClose={() => setShowAssign(false)}
+          onClose={() => setStockWorkflow(null)}
           onSuccess={() => fetchData()}
         />
       )}

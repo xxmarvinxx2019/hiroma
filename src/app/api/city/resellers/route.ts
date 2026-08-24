@@ -16,14 +16,21 @@ import {
 import { generateMemberId } from "@/app/lib/memberId";
 import { settleDirectReferral } from "@/app/lib/directReferral";
 import { settleBinaryCommission } from "@/app/lib/binaryCommission";
-import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
+import {
+  claimUnusedPin,
+  PinAlreadyClaimedError,
+} from "@/app/lib/pinRedemption";
 import {
   assertPlacementWithinReferrerSubtree,
   InvalidBinaryTreePlacementError,
   isBinaryTreeSlotConflict,
 } from "@/app/lib/binaryTreePlacement";
-import { claimIdentityAccountSlot, IdentityAccountLimitError } from "@/app/lib/identityAccountLimit";
+import {
+  claimIdentityAccountSlot,
+  IdentityAccountLimitError,
+} from "@/app/lib/identityAccountLimit";
 import { Prisma } from "@prisma/client";
+import { recordInventoryOutEvents } from "@/app/lib/inventoryEvent";
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 // ============================================================
@@ -44,25 +51,42 @@ export async function GET(req: NextRequest) {
       Math.max(1, parseInt(searchParams.get("pageSize") || "15")),
     );
     const search = searchParams.get("search") || "";
+    const status = searchParams.get("status") || "all";
+    const packageId = searchParams.get("package") || "all";
+    const sort = searchParams.get("sort") || "newest";
 
-    const where: Prisma.UserWhereInput = { role: "reseller", created_by: user.id };
+    const where: Prisma.UserWhereInput = {
+      role: "reseller",
+      created_by: user.id,
+    };
     if (search) {
       where.OR = [
         { full_name: { contains: search, mode: "insensitive" } },
         { username: { contains: search, mode: "insensitive" } },
       ];
     }
+    if (status !== "all") where.status = status === "active" ? "active" : { not: "active" };
+    if (packageId !== "all") where.reseller_profile = { is: { package_id: packageId } };
 
-    const total = await prisma.user.count({ where });
-    const resellers = await prisma.user.findMany({
-      where,
-      orderBy: { created_at: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-      select: {
+    const ownerWhere: Prisma.UserWhereInput = { role: "reseller", created_by: user.id };
+    const orderBy: Prisma.UserOrderByWithRelationInput =
+      sort === "oldest" ? { created_at: "asc" } :
+      sort === "name_asc" ? { full_name: "asc" } :
+      sort === "name_desc" ? { full_name: "desc" } : { created_at: "desc" };
+
+    const [total, resellers, active, inactive, packageOptions] = await prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
         id: true,
+        member_id: true,
         full_name: true,
         username: true,
+        email: true,
         mobile: true,
         address: true,
         status: true,
@@ -70,16 +94,51 @@ export async function GET(req: NextRequest) {
         reseller_profile: {
           select: {
             total_points: true,
-            package: { select: { name: true } },
+            package: { select: { id: true, name: true, pairing_bonus_value: true } },
           },
         },
         wallet: { select: { balance: true } },
-      },
-    });
+        },
+      }),
+      prisma.user.count({ where: { ...ownerWhere, status: "active" } }),
+      prisma.user.count({ where: { ...ownerWhere, status: { not: "active" } } }),
+      prisma.package.findMany({
+        where: { is_active: true },
+        select: { id: true, name: true, pairing_bonus_value: true },
+        orderBy: { pairing_bonus_value: "asc" },
+      }),
+    ]);
+
+    const upgrades = resellers.length
+      ? await prisma.upgradeFinancial.findMany({
+          where: { city_dist_id: user.id, reseller_id: { in: resellers.map((item) => item.id) } },
+          orderBy: { created_at: "desc" },
+          select: {
+            id: true,
+            reseller_id: true,
+            from_package_name_snapshot: true,
+            to_package_name_snapshot: true,
+            customer_payment: true,
+            created_at: true,
+          },
+        })
+      : [];
+
+    const enrichedResellers = resellers.map((reseller) => ({
+      ...reseller,
+      has_higher_package: packageOptions.some(
+        (pkg) => Number(pkg.pairing_bonus_value) > Number(reseller.reseller_profile?.package?.pairing_bonus_value || 0),
+      ),
+      upgrade_history: upgrades
+        .filter((upgrade) => upgrade.reseller_id === reseller.id)
+        .map((upgrade) => ({ ...upgrade, customer_payment: Number(upgrade.customer_payment) })),
+    }));
 
     return NextResponse.json({
-      resellers,
-      meta: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
+      resellers: enrichedResellers,
+      summary: { total: active + inactive, active, inactive },
+      packageOptions: packageOptions.map((pkg) => ({ ...pkg, pairing_bonus_value: Number(pkg.pairing_bonus_value) })),
+      meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     });
   } catch (error) {
     console.error("[CITY GET RESELLERS ERROR]", error);
@@ -467,7 +526,6 @@ async function firePointsPairingBonus(
     // Move up — update leg for next ancestor
     currentLeg = (ancestor.position as "left" | "right") || currentLeg;
   }
-
 }
 
 // ============================================================
@@ -488,6 +546,15 @@ export async function POST(req: NextRequest) {
       password,
       address,
       zip_code,
+      street_address,
+      region_code,
+      region_name,
+      province_code,
+      province_name,
+      city_muni_code,
+      city_muni_name,
+      barangay_code,
+      barangay_name,
       first_name,
       middle_name,
       last_name,
@@ -544,6 +611,23 @@ export async function POST(req: NextRequest) {
         {
           error:
             "Email, complete street address, and a valid 4-digit ZIP code are required.",
+        },
+        { status: 400 },
+      );
+    }
+    if (
+      !street_address?.trim() ||
+      !region_code ||
+      !region_name ||
+      !city_muni_code ||
+      !city_muni_name ||
+      !barangay_code ||
+      !barangay_name
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Please select a complete Region, City/Municipality, and Barangay, then enter the street address.",
         },
         { status: 400 },
       );
@@ -643,6 +727,7 @@ export async function POST(req: NextRequest) {
           where: { id: pin_id },
           select: {
             id: true,
+            pin_code: true,
             status: true,
             pin_type: true,
             package_id: true,
@@ -762,30 +847,29 @@ export async function POST(req: NextRequest) {
         dailyCount >= Number(capConfig?.cap || 10);
     }
 
-    const [packageProducts, registrationOwnerProfile] =
-      await Promise.all([
-        prisma.packageProduct.findMany({
-          where: { package_id: pin.package_id },
-          select: {
-            product_id: true,
-            quantity: true,
-            product: {
-              select: {
-                name: true,
-                price: true,
-                cost_price: true,
-                city_price: true,
-                branch_price: true,
-                reseller_price: true,
-              },
+    const [packageProducts, registrationOwnerProfile] = await Promise.all([
+      prisma.packageProduct.findMany({
+        where: { package_id: pin.package_id },
+        select: {
+          product_id: true,
+          quantity: true,
+          product: {
+            select: {
+              name: true,
+              price: true,
+              cost_price: true,
+              city_price: true,
+              branch_price: true,
+              reseller_price: true,
             },
           },
-        }),
-        prisma.distributorProfile.findUnique({
-          where: { user_id: user.id },
-          select: { dist_level: true },
-        }),
-      ]);
+        },
+      }),
+      prisma.distributorProfile.findUnique({
+        where: { user_id: user.id },
+        select: { dist_level: true },
+      }),
+    ]);
 
     const packageProductIds = packageProducts.map((pp) => pp.product_id);
     const inventoryItems = await prisma.inventory.findMany({
@@ -828,6 +912,7 @@ export async function POST(req: NextRequest) {
       },
       { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 },
     );
+    const packageUnitsSnapshot = packageProducts.reduce((sum, item) => sum + item.quantity, 0);
     const registrationPinAllocation = Math.max(
       0,
       registrationEconomics.customerPayment -
@@ -877,6 +962,15 @@ export async function POST(req: NextRequest) {
           status: "active",
           address: address?.trim() || null,
           zip_code: String(zip_code),
+          street_address: street_address.trim(),
+          region_code: String(region_code),
+          region_name: String(region_name),
+          province_code: province_code ? String(province_code) : null,
+          province_name: province_name ? String(province_name) : null,
+          city_muni_code: String(city_muni_code),
+          city_muni_name: String(city_muni_name),
+          barangay_code: String(barangay_code),
+          barangay_name: String(barangay_name),
           created_by: user.id,
         },
       });
@@ -958,6 +1052,7 @@ export async function POST(req: NextRequest) {
           pin_allocation: ledgerAmount(registrationPinAllocation),
           registration_profit: ledgerAmount(registrationProfit),
           package_name_snapshot: packageSnapshot.name,
+          package_units_snapshot: packageUnitsSnapshot,
           direct_referral_allocation: ledgerAmount(
             packageSnapshot.direct_referral_bonus,
           ),
@@ -996,6 +1091,24 @@ export async function POST(req: NextRequest) {
           data: { quantity: { decrement: item.quantity } },
         });
       }
+
+      await recordInventoryOutEvents(tx, {
+        ownerId: user.id,
+        actorId: user.id,
+        actorName: user.full_name || user.username || "City Distributor",
+        eventType: "registration_package_release",
+        referenceType: "registration_pin",
+        referenceId: pin.id,
+        reason: `${packageSnapshot.name} products released for new reseller ${created.full_name}`,
+        items: packageProducts.map((item) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_cost: isBranchRegistration
+            ? Number(item.product.branch_price) || Number(item.product.cost_price)
+            : Number(item.product.city_price) || Number(item.product.cost_price),
+        })),
+        metadata: { pin_code: pin.pin_code, reseller_id: created.id, package_id: pin.package_id },
+      });
 
       await tx.nameCapRegistry.upsert({
         where: { normalized_name: usernamePlan.identityKey },
@@ -1114,7 +1227,10 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       console.error("[REGISTER] Binary pairing error FULL:", e);
-      console.error("[REGISTER] Binary pairing stack:", e instanceof Error ? e.stack : undefined);
+      console.error(
+        "[REGISTER] Binary pairing stack:",
+        e instanceof Error ? e.stack : undefined,
+      );
     }
 
     const packageWithProducts = await prisma.package.findUnique({
@@ -1232,14 +1348,20 @@ export async function POST(req: NextRequest) {
     }
     if (isBinaryTreeSlotConflict(error)) {
       return NextResponse.json(
-        { error: "The selected binary-tree slot was taken by another registration. Please choose another slot." },
+        {
+          error:
+            "The selected binary-tree slot was taken by another registration. Please choose another slot.",
+        },
         { status: 409 },
       );
     }
     if (error instanceof IdentityAccountLimitError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
-    console.error("[REGISTER RESELLER ERROR]", error instanceof Error ? error.message : error);
+    console.error(
+      "[REGISTER RESELLER ERROR]",
+      error instanceof Error ? error.message : error,
+    );
     return NextResponse.json(
       { error: "Registration failed. Please try again." },
       { status: 500 },

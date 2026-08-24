@@ -33,23 +33,80 @@ import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 interface Reseller {
   id: string
+  member_id: string
   full_name: string
   username: string
+  email: string | null
   mobile: string
   address: string | null
   status: string
   created_at: string
   reseller_profile: {
     total_points: number
-    package: { name: string } | null
+    package: { id: string; name: string; pairing_bonus_value: number } | null
   } | null
   wallet: { balance: number } | null
+  has_higher_package: boolean
+  upgrade_history: Array<{
+    id: string
+    from_package_name_snapshot: string
+    to_package_name_snapshot: string
+    customer_payment: number
+    created_at: string
+  }>
+}
+
+interface ResellerSummary { total: number; active: number; inactive: number }
+interface PackageFilter { id: string; name: string; pairing_bonus_value: number }
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value))
+}
+
+function ResellerDetailsModal({ reseller, onClose }: { reseller: Reseller; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4" role="dialog" aria-modal="true" aria-label={`Details for ${reseller.full_name}`}>
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="sticky top-0 flex items-start justify-between bg-[#010521] px-6 py-4">
+          <div><h2 className="text-base font-bold text-white">Reseller Details</h2><p className="mt-0.5 text-xs text-white/60">{reseller.full_name} · @{reseller.username}</p></div>
+          <button onClick={onClose} className="text-xl text-white/60 hover:text-white" aria-label="Close details">✕</button>
+        </div>
+        <div className="space-y-5 p-6 text-sm">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {[
+              ['Member ID', reseller.member_id],
+              ['Current Package', reseller.reseller_profile?.package?.name || '—'],
+              ['Date Registered', formatDate(reseller.created_at)],
+              ['Account Status', reseller.status === 'active' ? 'Active' : 'Inactive'],
+              ['Mobile', reseller.mobile || '—'],
+              ['Email', reseller.email || '—'],
+              ['Address', reseller.address || '—'],
+              ['Wallet Balance', `₱${Number(reseller.wallet?.balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`],
+            ].map(([label, value]) => <div key={label} className="rounded-xl bg-[#F4F6FA] px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p><p className="mt-1 break-words font-semibold text-[#0D1B3E]">{value}</p></div>)}
+          </div>
+          <div>
+            <h3 className="font-bold text-[#0D1B3E]">Package Upgrade History</h3>
+            {reseller.upgrade_history.length === 0 ? <p className="mt-2 rounded-xl bg-[#F4F6FA] px-4 py-4 text-gray-500">No package upgrades yet.</p> : (
+              <div className="mt-2 space-y-2">{reseller.upgrade_history.map((upgrade) => <div key={upgrade.id} className="flex flex-col justify-between gap-2 rounded-xl border border-[#0D1B3E]/10 px-4 py-3 sm:flex-row sm:items-center"><div><p className="font-semibold text-[#0D1B3E]">{upgrade.from_package_name_snapshot} → {upgrade.to_package_name_snapshot}</p><p className="text-xs text-gray-500">{formatDate(upgrade.created_at)}</p></div><p className="font-bold text-[#9a6f1e]">₱{upgrade.customer_payment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></div>)}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 interface VerifiedPin {
   id: string
   pin_code: string
   package: { id: string; name: string; price: number } | null
+}
+
+interface UpgradePackage {
+  id: string
+  name: string
+  price: number
+  pairing_bonus_value: number
 }
 
 interface VerifiedReferral {
@@ -222,13 +279,32 @@ function UpgradeModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [success, setSuccess]       = useState('')
+  const [packages, setPackages] = useState<UpgradePackage[]>([])
+  const [targetPackageId, setTargetPackageId] = useState('')
+  const [packagesLoading, setPackagesLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`/api/city/packages?upgrade_for=${encodeURIComponent(reseller.id)}`, { cache: 'no-store' })
+      .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || 'Unable to load packages.')
+        const currentPackageId = reseller.reseller_profile?.package?.id
+        const currentPoints = Number(reseller.reseller_profile?.package?.pairing_bonus_value || 0)
+        setPackages((data.packages || []).filter((pkg: UpgradePackage) => (
+          pkg.id !== currentPackageId && Number(pkg.pairing_bonus_value) > currentPoints
+        )))
+      })
+      .catch(() => setPinError('Unable to load available upgrade packages.'))
+      .finally(() => setPackagesLoading(false))
+  }, [reseller.id, reseller.reseller_profile?.package?.id, reseller.reseller_profile?.package?.pairing_bonus_value])
 
   const verifyUpgradePin = async () => {
-    if (!pinInput.trim()) { setPinError('Please enter a PIN code.'); return }
+    if (!targetPackageId) { setPinError('Please select the target upgrade package first.'); return }
+    if (!pinInput.trim()) { setPinError('Please enter an Upgrade PIN code.'); return }
     setPinLoading(true); setPinError('')
-    const res = await fetch('/api/city/pins/verify', {
+    const res = await fetch('/api/city/pins/verify-upgrade', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin_code: pinInput.trim().toUpperCase() }),
+      body: JSON.stringify({ pin_code: pinInput.trim().toUpperCase(), reseller_id: reseller.id, target_package_id: targetPackageId }),
     })
     const data = await res.json()
     setPinLoading(false)
@@ -241,7 +317,7 @@ function UpgradeModal({
     setSubmitting(true); setError('')
     const res = await fetch('/api/city/resellers/upgrade', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reseller_id: reseller.id, new_pin_id: pinData.id }),
+      body: JSON.stringify({ reseller_id: reseller.id, new_pin_id: pinData.id, target_package_id: targetPackageId }),
     })
     const data = await res.json()
     setSubmitting(false)
@@ -265,12 +341,22 @@ function UpgradeModal({
             <p className="text-sm font-semibold text-[#0D1B3E]">{reseller.reseller_profile?.package?.name || '—'}</p>
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">New Package PIN <span className="text-[#C9A84C]">*</span></label>
+            <label className="block text-xs font-semibold text-[#0D1B3E] mb-1.5">Target upgrade package <span className="text-[#C9A84C]">*</span></label>
+            <select value={targetPackageId} disabled={packagesLoading}
+              onChange={(event) => { setTargetPackageId(event.target.value); setPinInput(''); setPinData(null); setPinError(''); setError('') }}
+              className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm font-semibold text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-60">
+              <option value="">{packagesLoading ? 'Loading upgrade packages...' : 'Select a higher package'}</option>
+              {packages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}
+            </select>
+            {!packagesLoading && packages.length === 0 && <p className="mt-1 text-xs text-[#9a6f1e]">No higher active package is currently available.</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#0D1B3E] mb-1.5">Upgrade Package PIN <span className="text-[#C9A84C]">*</span></label>
             <div className="flex gap-2">
               <input value={pinInput} onChange={(e) => { setPinInput(e.target.value.toUpperCase()); setPinError(''); setPinData(null) }}
-                onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()} placeholder="Enter new PIN code"
+                disabled={!targetPackageId} onKeyDown={(e) => e.key === 'Enter' && verifyUpgradePin()} placeholder={targetPackageId ? 'Enter Upgrade PIN code' : 'Select target package first'}
                 className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C] uppercase tracking-wider" />
-              <button onClick={verifyUpgradePin} disabled={pinLoading || !pinInput.trim()}
+              <button onClick={verifyUpgradePin} disabled={pinLoading || !targetPackageId || !pinInput.trim()}
                 className="bg-[#010521] text-white text-xs rounded-lg px-4 hover:bg-[#162850] disabled:opacity-50">
                 {pinLoading ? '...' : 'Verify'}
               </button>
@@ -313,6 +399,12 @@ export default function CityResellersPage() {
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [packageFilter, setPackageFilter] = useState('all')
+  const [sort, setSort] = useState('newest')
+  const [summary, setSummary] = useState<ResellerSummary>({ total: 0, active: 0, inactive: 0 })
+  const [packageOptions, setPackageOptions] = useState<PackageFilter[]>([])
+  const [viewingReseller, setViewingReseller] = useState<Reseller | null>(null)
 
   // Modal state
   const [showForm, setShowForm] = useState(false)
@@ -432,7 +524,7 @@ export default function CityResellersPage() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  useEffect(() => { setPage(1) }, [search])
+  useEffect(() => { setPage(1) }, [search, statusFilter, packageFilter, sort])
 
   // Fetch resellers
   const fetchResellers = useCallback(() => {
@@ -441,15 +533,20 @@ export default function CityResellersPage() {
       page: String(page),
       pageSize: String(PAGE_SIZE),
       ...(search && { search }),
+      status: statusFilter,
+      package: packageFilter,
+      sort,
     })
     fetch(`/api/city/resellers?${params}`)
       .then((r) => r.json())
       .then((data) => {
         setResellers(data.resellers || [])
         setMeta(data.meta || { total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
+        setSummary(data.summary || { total: 0, active: 0, inactive: 0 })
+        setPackageOptions(data.packageOptions || [])
       })
       .finally(() => setLoading(false))
-  }, [page, search])
+  }, [page, search, statusFilter, packageFilter, sort])
 
   useEffect(() => { fetchResellers() }, [fetchResellers])
 
@@ -658,7 +755,7 @@ export default function CityResellersPage() {
     <div className="max-w-7xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">My resellers</h1>
           <p className="text-sm text-gray-400 mt-0.5">Register and manage resellers in your city</p>
@@ -670,27 +767,28 @@ export default function CityResellersPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: 'Total Resellers', value: meta.total.toLocaleString(),                  icon: '👥', color: '#0D1B3E' },
-          { label: 'This Page',       value: `${resellers.length} shown`,                  icon: '📄', color: '#C9A84C' },
-          { label: 'Active',          value: resellers.filter(r => r.status === 'active').length, icon: '✅', color: '#1a7a4a' },
-          { label: 'Inactive',        value: resellers.filter(r => r.status !== 'active').length, icon: '⚠️', color: '#e05252' },
+          { label: 'Total Resellers', value: summary.total.toLocaleString(), icon: '👥', color: '#0D1B3E' },
+          { label: 'Filtered Results', value: meta.total.toLocaleString(), icon: '📄', color: '#9a6f1e' },
+          { label: 'Active', value: summary.active.toLocaleString(), icon: '✅', color: '#187443' },
+          { label: 'Inactive', value: summary.inactive.toLocaleString(), icon: '⚠️', color: '#b9383e' },
         ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all" style={{ borderTop: `2px solid ${s.color}` }}>
+          <div key={s.label} className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+            style={{ borderColor: s.color, backgroundColor: s.color, color: '#fff' }}>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
-              <span className="text-lg">{s.icon}</span>
+              <p className="text-xs font-bold text-white/95 uppercase tracking-wide" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.label}</p>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl text-lg" style={{ backgroundColor: '#FFFFFF24' }}>{s.icon}</span>
             </div>
-            <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
+            <p className="text-xl font-extrabold text-white" style={{ textShadow: '0 2px 3px rgba(0,0,0,.45)' }}>{s.value}</p>
           </div>
         ))}
       </div>
 
       {/* Search + List */}
-      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-x-auto">
         {/* Search bar */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
+        <div className="flex flex-col gap-3 px-4 py-3 border-b border-[#0D1B3E]/8 lg:flex-row lg:items-center">
           <div className="flex items-center gap-2 flex-1 bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-xl px-3 py-2 focus-within:border-[#C9A84C] transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
@@ -699,11 +797,14 @@ export default function CityResellersPage() {
               placeholder="Search by name or username..."
               className="flex-1 bg-transparent text-sm text-[#0D1B3E] outline-none placeholder:text-gray-300" />
           </div>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status" className="w-full rounded-xl border border-[#0D1B3E]/10 bg-[#f8f9fc] px-3 py-2 text-xs font-semibold text-[#0D1B3E] lg:w-auto"><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
+          <select value={packageFilter} onChange={(e) => setPackageFilter(e.target.value)} aria-label="Filter by package" className="w-full rounded-xl border border-[#0D1B3E]/10 bg-[#f8f9fc] px-3 py-2 text-xs font-semibold text-[#0D1B3E] lg:w-auto"><option value="all">All packages</option>{packageOptions.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}</select>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort resellers" className="w-full rounded-xl border border-[#0D1B3E]/10 bg-[#f8f9fc] px-3 py-2 text-xs font-semibold text-[#0D1B3E] lg:w-auto"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name_asc">Name A–Z</option><option value="name_desc">Name Z–A</option></select>
         </div>
 
         {/* Column headers */}
-        <div className="grid grid-cols-6 px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8">
-          {['Reseller', 'Mobile', 'Package', 'Address', 'Status', 'Action'].map((h) => (
+        <div className="hidden min-w-[1120px] px-5 py-2.5 bg-[#f8f9fc] border-b border-[#0D1B3E]/8 md:grid md:grid-cols-[minmax(170px,1.2fr)_minmax(115px,.8fr)_90px_110px_minmax(220px,1.4fr)_90px_230px] md:gap-3">
+          {['Reseller', 'Mobile', 'Package', 'Registered', 'Address', 'Status', 'Actions'].map((h) => (
             <p key={h} className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{h}</p>
           ))}
         </div>
@@ -721,7 +822,7 @@ export default function CityResellersPage() {
           </div>
         ) : (
           resellers.map((r) => (
-            <div key={r.id} className="grid grid-cols-6 px-5 py-3.5 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center">
+            <div key={r.id} className="grid min-w-0 grid-cols-1 gap-3 px-5 py-4 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] transition-colors items-center md:min-w-[1120px] md:grid-cols-[minmax(170px,1.2fr)_minmax(115px,.8fr)_90px_110px_minmax(220px,1.4fr)_90px_230px] md:gap-3">
               {/* Reseller */}
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-[#010521] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
@@ -733,41 +834,48 @@ export default function CityResellersPage() {
                 </div>
               </div>
               {/* Mobile */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400 md:hidden">Mobile</span>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5 19.79 19.79 0 0 1 1.58 5a2 2 0 0 1 1.95-2.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10.09a16 16 0 0 0 6 6l.92-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
                 </svg>
                 <p className="text-xs text-gray-500">{r.mobile || '—'}</p>
               </div>
               {/* Package */}
-              <div>
+              <div className="flex items-center md:block">
+                <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400 md:hidden">Package</span>
                 <span className="text-[10px] bg-[#fef6e4] text-[#9a6f1e] px-2 py-1 rounded-full font-medium">
                   {r.reseller_profile?.package?.name || '—'}
                 </span>
               </div>
+              <div className="flex items-center"><span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400 md:hidden">Registered</span><p className="text-xs font-medium text-gray-500">{formatDate(r.created_at)}</p></div>
               {/* Address */}
               <div className="flex items-center gap-1.5">
+                <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400 md:hidden">Address</span>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-gray-300 flex-shrink-0">
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
                 </svg>
-                <p className="text-xs text-gray-500 truncate">{r.address || '—'}</p>
+                <p className="min-w-0 truncate text-xs text-gray-500" title={r.address || undefined}>{r.address || '—'}</p>
               </div>
 
               {/* Status */}
-              <div>
+              <div className="flex items-center md:block">
+                <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400 md:hidden">Status</span>
                 <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full font-semibold ${r.status === 'active' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${r.status === 'active' ? 'bg-[#1a7a4a]' : 'bg-[#a03030]'}`} />
                   {r.status === 'active' ? 'Active' : 'Inactive'}
                 </span>
               </div>
-              {/* Action — icon button instead of text */}
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => setUpgradingReseller(r)} title="Upgrade Package"
-                  className="w-8 h-8 rounded-lg bg-[#f8f9fc] border border-[#0D1B3E]/8 hover:bg-[#C9A84C] hover:border-[#C9A84C] hover:text-white text-[#0D1B3E] transition-all flex items-center justify-center group">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {/* Clear action label prevents accidental package upgrades. */}
+              <div className="flex w-full flex-col gap-2 sm:flex-row md:w-[230px] md:items-center md:justify-end">
+                <button onClick={() => setViewingReseller(r)} className="inline-flex min-h-9 items-center justify-center whitespace-nowrap rounded-lg border border-[#0D1B3E]/15 bg-white px-2.5 py-2 text-[11px] font-bold text-[#0D1B3E] hover:bg-[#F0F2F8]">View Details</button>
+                {r.has_higher_package ? <button onClick={() => setUpgradingReseller(r)} title={`Upgrade ${r.full_name}'s package`} aria-label={`Upgrade package for ${r.full_name}`}
+                  className="inline-flex min-h-9 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-[#C9A84C] bg-[#C9A84C] px-2.5 py-2 text-[11px] font-bold text-[#0D1B3E] shadow-sm transition-all hover:bg-[#E8C96A] hover:border-[#E8C96A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A84C] focus-visible:ring-offset-2">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/>
                   </svg>
-                </button>
+                  <span>Upgrade Package</span>
+                </button> : <span className="rounded-full bg-[#e8f7ef] px-3 py-2 text-xs font-bold text-[#1a7a4a]">Highest Package</span>}
               </div>
             </div>
           ))
@@ -862,6 +970,7 @@ export default function CityResellersPage() {
       {upgradingReseller && (
         <UpgradeModal reseller={upgradingReseller} onClose={() => setUpgradingReseller(null)} onSuccess={fetchResellers} />
       )}
+      {viewingReseller && <ResellerDetailsModal reseller={viewingReseller} onClose={() => setViewingReseller(null)} />}
 
       {/* ════════════ REGISTRATION MODAL ════════════ */}
       {showForm && (

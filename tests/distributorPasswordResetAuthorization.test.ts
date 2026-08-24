@@ -12,7 +12,7 @@ test('delegated distributor-management staff cannot reset distributor credential
 })
 
 test('owner reset requires PIN and atomically revokes sessions and passkeys', () => {
-  assert.match(route, /verifyResellerSecurityPin\(user\.id, security_pin\)/)
+  assert.match(route, /verifyResellerSecurityPin\(\s*user\.id,\s*security_pin,?\s*\)/)
   assert.match(route, /prisma\.\$transaction\(async \(tx\) =>/)
   assert.match(route, /password_changed_at: new Date\(\)/)
   assert.match(route, /tx\.passkeyCredential\.deleteMany/)
@@ -29,7 +29,7 @@ test('only the owner with a Security PIN can change distributor recovery contact
   const editBranch = route.slice(route.indexOf("if (action === 'edit')"), route.indexOf('// ── Assign parent'))
   assert.match(editBranch, /changesSensitiveContact/)
   assert.match(editBranch, /if \(user\.is_staff\)/)
-  assert.match(editBranch, /verifyResellerSecurityPin\(user\.id, body\.security_pin\)/)
+  assert.match(editBranch, /verifyResellerSecurityPin\(\s*user\.id,\s*body\.security_pin,?\s*\)/)
   assert.match(page, /security_pin: editSecurityPin/)
 })
 

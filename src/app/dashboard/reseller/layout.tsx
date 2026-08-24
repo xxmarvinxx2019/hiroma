@@ -38,8 +38,7 @@ const navItems = [
   {
     section: 'Orders',
     items: [
-      { label: 'Order History',  href: '/dashboard/reseller/orders', icon: '🛒' },
-      { label: 'My Orders', href: '/dashboard/reseller/orders', icon: '▤', premiumOnly: true },
+      { label: 'Shop / Place Order', href: '/dashboard/reseller/orders#place-order', icon: '🛒' },
     ],
   },
   {

@@ -1,16 +1,30 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { getDashboardPeriod } from '@/app/lib/dashboardPeriod'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    let period
+    try {
+      period = getDashboardPeriod(req.nextUrl.searchParams)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid dashboard period.' },
+        { status: 400 },
+      )
+    }
+
     const resellers = await prisma.user.findMany({
-      where: { role: 'reseller' },
+      where: {
+        role: 'reseller',
+        created_at: { gte: period.start, lt: period.end },
+      },
       orderBy: { created_at: 'desc' },
       take: 8,
       select: {

@@ -10,25 +10,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const cityDistId = req.nextUrl.searchParams.get('city_dist_id')
-    if (!cityDistId) {
-      return NextResponse.json({ error: 'city_dist_id is required.' }, { status: 400 })
+    const sellerId = req.nextUrl.searchParams.get('seller_id') || req.nextUrl.searchParams.get('city_dist_id')
+    if (!sellerId) {
+      return NextResponse.json({ error: 'seller_id is required.' }, { status: 400 })
     }
 
     // Validate city distributor
-    const cityDist = await prisma.user.findFirst({
-      where:  { id: cityDistId, role: 'city', status: 'active' },
-      select: { id: true, full_name: true },
+    const seller = await prisma.user.findFirst({
+      where:  { id: sellerId, role: { in: ['city', 'admin'] }, status: 'active' },
+      select: { id: true, full_name: true, role: true },
     })
 
-    if (!cityDist) {
-      return NextResponse.json({ error: 'City distributor not found or inactive.' }, { status: 404 })
+    if (!seller) {
+      return NextResponse.json({ error: 'The selected Hiroma fulfillment location is unavailable.' }, { status: 404 })
     }
 
     // Get products in stock
     const inventory = await prisma.inventory.findMany({
       where: {
-        owner_id: cityDistId,
+        owner_id: sellerId,
         quantity: { gt: 0 },
         product:  { is_active: true },
       },
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       available_quantity: i.quantity,
     }))
 
-    return NextResponse.json({ products, city_dist: cityDist })
+    return NextResponse.json({ products, seller })
   } catch (error) {
     console.error('[RESELLER PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

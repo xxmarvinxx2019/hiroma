@@ -1,0 +1,1 @@
+ALTER TABLE "registration_financials" ADD COLUMN IF NOT EXISTS "package_units_snapshot" INTEGER;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getRanksForPackage, getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 import prisma from '@/app/lib/prisma'
+import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { cityOrderListScope } from '@/app/lib/orderSecurity'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
@@ -272,7 +273,7 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.$transaction(async (tx) => {
       await reserveOrderStock(tx, supplier.id, items)
-      return tx.order.create({ data: {
+      const created = await tx.order.create({ data: {
         buyer_id:          user.id,
         seller_id:         supplier.id,
         order_type,
@@ -289,6 +290,25 @@ export async function POST(req: NextRequest) {
         id: true, status: true, total_amount: true, created_at: true,
         seller: { select: { full_name: true, username: true } },
       } })
+      const supplierActionUrl = supplier.level === 'Admin'
+        ? '/dashboard/admin/orders'
+        : supplier.level === 'Regional Distributor'
+          ? '/dashboard/regional/orders'
+          : '/dashboard/provincial/orders'
+      const recipients = supplier.level === 'Admin'
+        ? await tx.user.findMany({ where: { role: 'admin' }, select: { id: true } })
+        : [{ id: supplier.id }]
+      await tx.notification.createMany({ data: recipients.map((recipient) => ({
+        user_id: recipient.id,
+        type: 'order_pending',
+        title: 'New pending order',
+        message: `${user.full_name || user.username} placed a City Distributor order worth ₱${total_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+        amount: total_amount,
+        entity_type: 'order',
+        entity_id: created.id,
+        action_url: supplierActionUrl,
+      })) })
+      return created
     })
     createAuditLog({
   user_id:       user.actor_id || user.id,
@@ -638,6 +658,19 @@ export async function PATCH(req: NextRequest) {
 
       if (status === 'delivered') {
         await finalizeReservedStock(tx, order.seller_id, order.items)
+        await recordInventoryOutEvents(tx, {
+          ownerId: order.seller_id,
+          actorId: user.id,
+          actorName: user.full_name || user.username || 'City Distributor',
+          eventType: order.is_non_member_sale ? 'non_member_srp_sale' : 'reseller_repeat_order',
+          referenceType: 'order',
+          referenceId: order.id,
+          reason: order.is_non_member_sale
+            ? `Non-member / SRP order delivered to ${order.customer_name || 'Walk-in Customer'}`
+            : `Reseller product order delivered`,
+          items: order.items.map((item) => ({ product_id: item.product_id, quantity: item.quantity, unit_cost: Number(item.unit_acquisition_cost || 0) })),
+          metadata: { order_number: order.order_number, sale_channel: order.is_non_member_sale ? 'non_member_srp' : 'reseller_repeat_order' },
+        })
         for (const item of order.items) {
           await tx.inventory.upsert({
             where: {

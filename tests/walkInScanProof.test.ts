@@ -67,7 +67,7 @@ test('schema and migration enforce hashed, expiring, single-use proofs', () => {
 test('city UI obtains a short-lived proof for QR, Member ID, and reseller search selection', () => {
   const page = readFileSync('src/app/dashboard/city/orders/page.tsx', 'utf8')
   assert.match(page, /const \[scanProof, setScanProof\] = useState\(''\)/)
-  assert.match(page, /scan_proof: selectedResellerId \? scanProof : null/)
+  assert.match(page, /scan_proof: customerType === 'member' \? scanProof : null/)
   assert.match(page, /setScanProof\(data\.scan_proof\)/)
   assert.match(page, /void identifyScannedMember\(r\.member_id\)/)
 })

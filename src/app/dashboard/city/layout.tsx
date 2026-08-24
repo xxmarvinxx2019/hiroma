@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAutoLogout } from '@/app/hooks/useAutoLogout'
+import FirstLoginPasswordModal from '@/app/components/security/FirstLoginPasswordModal'
 
 // ============================================================
 // NAV ITEMS
@@ -34,7 +35,7 @@ const navItems = [
   {
     section: 'Account',
     items: [
-      { label: 'Digital ID', href: '/dashboard/city/digital-id', icon: 'ID' },
+      { label: 'Digital ID', href: '/dashboard/city/digital-id', icon: '' },
     ],
   },
 ]
@@ -62,6 +63,7 @@ function Sidebar({
   pathname,
   onClose,
   onLogout,
+  pendingTransfers,
 }: {
   user: {
     id: string
@@ -71,10 +73,13 @@ function Sidebar({
     distributor_profile?: { coverage_area: string; dist_level: string }
     is_staff?: boolean
     permissions?: string[]
+    password_change_required?: boolean
+    password_review_reason?: 'temporary_first_login' | 'temporary_day_3' | 'temporary_day_7' | 'temporary_day_30' | 'quarterly'
   } | null
   pathname: string
   onClose: () => void
   onLogout: () => void
+  pendingTransfers: number
 }) {
   const isActive = (href: string) => {
     if (href === '/dashboard/city') return pathname === href
@@ -114,8 +119,17 @@ function Sidebar({
                     : 'text-white/50 hover:text-white hover:bg-white/5'
                 }`}
               >
-                <span className="text-base">{item.icon}</span>
+                {item.icon && <span className="text-base">{item.icon}</span>}
                 <span className="flex-1">{item.label}</span>
+                {item.href === '/dashboard/city/inventory' && pendingTransfers > 0 && (
+                  <span
+                    className="inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
+                    title={`${pendingTransfers} incoming transfer${pendingTransfers === 1 ? '' : 's'} awaiting physical receiving`}
+                    aria-label={`${pendingTransfers} incoming transfers awaiting physical receiving`}
+                  >
+                    {pendingTransfers > 99 ? '99+' : pendingTransfers}
+                  </span>
+                )}
               </Link>
             ))}
           </div>
@@ -161,6 +175,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
   const [sidebarOpen, setSidebarOpen]               = useState(false)
   const [profileMenuOpen, setProfileMenuOpen]       = useState(false)
   const [user, setUser]                               = useState<Parameters<typeof Sidebar>[0]['user']>(null)
+  const [pendingTransfers, setPendingTransfers]       = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -178,6 +193,32 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
     return () => window.removeEventListener('hiroma-profile-photo-change', updatePhoto)
   }, [])
 
+  useEffect(() => {
+    if (!user?.id || user.distributor_profile?.dist_level !== 'branch') {
+      return
+    }
+
+    let active = true
+    const loadPendingTransfers = () => {
+      fetch('/api/inventory/transfers?summary=pending')
+        .then((response) => response.json())
+        .then((data) => {
+          if (active && typeof data.pending === 'number') setPendingTransfers(data.pending)
+        })
+        .catch(() => undefined)
+    }
+    const handleTransferChange = () => loadPendingTransfers()
+
+    loadPendingTransfers()
+    const timer = window.setInterval(loadPendingTransfers, 30_000)
+    window.addEventListener('hiroma-incoming-transfer-change', handleTransferChange)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('hiroma-incoming-transfer-change', handleTransferChange)
+    }
+  }, [user?.id, user?.distributor_profile?.dist_level])
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
@@ -192,6 +233,15 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#F0F2F8' }}>
+      {user?.is_staff && (
+        <FirstLoginPasswordModal
+          open={Boolean(user.password_change_required)}
+          reviewReason={user.password_review_reason}
+          endpoint="/api/city/profile/password"
+          allowRetain={false}
+          onResolved={() => router.push('/login/distributor')}
+        />
+      )}
       {/* Inactivity warning */}
       {showWarning && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
@@ -207,7 +257,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} />
+        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} pendingTransfers={pendingTransfers} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -215,7 +265,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
         <>
           <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} />
+            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} pendingTransfers={pendingTransfers} />
           </div>
         </>
       )}

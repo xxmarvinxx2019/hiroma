@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
         id:           true,
         pin_code:     true,
         status:       true,
+        pin_type:     true,
         city_dist_id: true,
         package: {
           select: {
@@ -45,6 +46,10 @@ export async function POST(req: NextRequest) {
 
     if (pin.status !== 'unused') {
       return NextResponse.json({ error: `This PIN has already been ${pin.status}.` }, { status: 400 })
+    }
+
+    if (pin.pin_type !== 'registration') {
+      return NextResponse.json({ error: 'This is an Upgrade PIN. Use it only from the reseller’s Upgrade Package action.' }, { status: 400 })
     }
 
     if (pin.city_dist_id !== user.id) {

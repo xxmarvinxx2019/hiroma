@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import DepositReconciliationPanel from './DepositReconciliationPanel'
 
 type ReportPeriod = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 type SalesSummary = { orders: number; units: number; revenue: number; cost: number; profit: number }
@@ -130,6 +131,8 @@ const query = new URLSearchParams({ period: period === 'custom' && (!customStart
     }
   }, [period, customStart, customEnd])
 
+// Remote report synchronization follows the selected accounting period.
+// eslint-disable-next-line react-hooks/set-state-in-effect
 useEffect(() => { loadReport() }, [loadReport])
 
   const selectPeriod = (nextPeriod: ReportPeriod) => {
@@ -347,6 +350,7 @@ useEffect(() => { loadReport() }, [loadReport])
             {report.notes.sales_basis}. {report.notes.collection_basis}. {report.notes.registration_basis}.
             <span className="block mt-1">Registration source: {report.notes.registration_data_source}.</span>
           </div>
+          {report.account.type === 'branch' && <DepositReconciliationPanel />}
         </>
       )}
     </div>

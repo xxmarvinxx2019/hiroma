@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { getDashboardPeriod } from '@/app/lib/dashboardPeriod'
 
 async function getDigitalPinRevenue(gte?: Date, lt?: Date) {
   try {
@@ -44,11 +45,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    let period
+    try {
+      period = getDashboardPeriod(req.nextUrl.searchParams)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid dashboard period.' },
+        { status: 400 },
+      )
+    }
+
     const now        = new Date()
     const today      = new Date(); today.setHours(0, 0, 0, 0)
     const yesterday  = new Date(today); yesterday.setDate(yesterday.getDate() - 1)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const yearStart  = new Date(now.getFullYear(), 0, 1)
+    const { start: periodStart, end: periodEnd, previousStart, previousEnd } = period
 
     // ── Admin user ──
     const adminUser = await prisma.user.findFirst({
@@ -76,6 +88,7 @@ export async function GET(req: NextRequest) {
       digitalCommissionTodayRaw,
       digitalCommissionYesterdayRaw,
       digitalCommissionAllTimeRaw,
+      retainedOverflowRaw,
       productTodayRaw,
       productYesterdayRaw,
       productAllTimeRaw,
@@ -91,14 +104,22 @@ export async function GET(req: NextRequest) {
       prisma.user.count({ where: { role: 'reseller' } }),
       prisma.distributorProfile.count({ where: { is_active: true } }),
       prisma.payout.aggregate({ where: { status: 'pending' }, _sum: { amount: true }, _count: { id: true } }),
-      prisma.user.count({ where: { role: 'reseller', created_at: { gte: today } } }),
-      prisma.user.count({ where: { role: 'reseller', created_at: { gte: yesterday, lt: today } } }),
+      prisma.user.count({ where: { role: 'reseller', created_at: { gte: periodStart, lt: periodEnd } } }),
+      prisma.user.count({ where: { role: 'reseller', created_at: { gte: previousStart, lt: previousEnd } } }),
       prisma.user.count({ where: { role: 'reseller', created_at: { gte: monthStart } } }),
       prisma.product.count({ where: { is_active: true } }),
       prisma.pin.count({ where: { status: 'unused' } }),
-      adminId ? prisma.order.groupBy({ by: ['status'], where: { seller_id: adminId }, _count: { status: true } }) : Promise.resolve([]),
+      adminId ? prisma.order.groupBy({
+        by: ['status'],
+        where: { seller_id: adminId, created_at: { gte: periodStart, lt: periodEnd } },
+        _count: { status: true },
+      }) : Promise.resolve([]),
       prisma.order.findMany({
-        where: { status: { not: 'cancelled' } }, orderBy: { created_at: 'desc' }, take: 3,
+        where: {
+          status: { not: 'cancelled' },
+          created_at: { gte: periodStart, lt: periodEnd },
+        },
+        orderBy: { created_at: 'desc' }, take: 3,
         select: {
           id: true,
           order_number: true,
@@ -116,8 +137,8 @@ export async function GET(req: NextRequest) {
         },
       }),
       // Digital PIN revenue is recognized when a reseller registration consumes a PIN.
-      getDigitalPinRevenue(today).then((total) => [{ total }]),
-      getDigitalPinRevenue(yesterday, today).then((total) => [{ total }]),
+      getDigitalPinRevenue(periodStart, periodEnd).then((total) => [{ total }]),
+      getDigitalPinRevenue(previousStart, previousEnd).then((total) => [{ total }]),
       getDigitalPinRevenue().then((total) => [{ total }]),
       // Only paid MLM commissions are digital expenses. Overflow retained by Hiroma
       // is not treated as an expense of the company.
@@ -125,14 +146,15 @@ export async function GET(req: NextRequest) {
         SELECT COALESCE(SUM(amount), 0)::float AS total
         FROM commissions
         WHERE type IN ('direct_referral', 'binary_pairing', 'multilevel')
-          AND is_pair_overflow = false AND created_at >= ${today}
+          AND is_pair_overflow = false
+          AND created_at >= ${periodStart} AND created_at < ${periodEnd}
       `,
       prisma.$queryRaw<{ total: number }[]>`
         SELECT COALESCE(SUM(amount), 0)::float AS total
         FROM commissions
         WHERE type IN ('direct_referral', 'binary_pairing', 'multilevel')
           AND is_pair_overflow = false
-          AND created_at >= ${yesterday} AND created_at < ${today}
+          AND created_at >= ${previousStart} AND created_at < ${previousEnd}
       `,
       prisma.$queryRaw<{ total: number }[]>`
         SELECT COALESCE(SUM(amount), 0)::float AS total
@@ -140,6 +162,14 @@ export async function GET(req: NextRequest) {
         WHERE type IN ('direct_referral', 'binary_pairing', 'multilevel')
           AND is_pair_overflow = false
       `,
+      // Immutable all-time company-retained overflow. Keep this separate from
+      // current wallet balance because future withdrawals can change the wallet
+      // without changing the historical amount retained by Hiroma.
+      prisma.commission.aggregate({
+        where: { is_pair_overflow: true },
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
       // Product revenue today
       adminId ? prisma.$queryRaw<{ revenue: number; cost: number; units: number }[]>`
         SELECT
@@ -149,14 +179,15 @@ export async function GET(req: NextRequest) {
         FROM order_items oi
         JOIN orders o ON o.id = oi.order_id
         JOIN products p ON p.id = oi.product_id
-        WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered' AND o.updated_at >= ${today}
+        WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered'
+          AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
       ` : Promise.resolve([{ revenue: 0, cost: 0, units: 0 }]),
       // Product revenue yesterday
       adminId ? prisma.$queryRaw<{ revenue: number }[]>`
         SELECT COALESCE(SUM(oi.subtotal), 0)::float AS revenue
         FROM order_items oi JOIN orders o ON o.id = oi.order_id
         WHERE o.seller_id::text = ${adminId} AND o.status = 'delivered'
-          AND o.updated_at >= ${yesterday} AND o.updated_at < ${today}
+          AND o.updated_at >= ${previousStart} AND o.updated_at < ${previousEnd}
       ` : Promise.resolve([{ revenue: 0 }]),
       // Product revenue all time
       adminId ? prisma.$queryRaw<{ revenue: number; cost: number; units: number }[]>`
@@ -203,7 +234,11 @@ export async function GET(req: NextRequest) {
       // Top products
       prisma.$queryRaw<{ name: string; total_sold: number; revenue: number }[]>`
         SELECT p.name, SUM(oi.quantity)::int AS total_sold, COALESCE(SUM(oi.subtotal), 0)::float AS revenue
-        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        FROM order_items oi
+        JOIN products p ON p.id = oi.product_id
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.status = 'delivered'
+          AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
         GROUP BY p.id, p.name ORDER BY total_sold DESC LIMIT 5
       `,
       // Top city distributors: delivered product sales plus registration profit.
@@ -225,6 +260,7 @@ export async function GET(req: NextRequest) {
             COUNT(*)::int AS prod_count
           FROM orders o
           WHERE o.seller_id = dp.user_id AND o.status = 'delivered'
+            AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
         ) sales ON true
         LEFT JOIN LATERAL (
           SELECT
@@ -234,6 +270,7 @@ export async function GET(req: NextRequest) {
             SELECT rf.registration_profit
             FROM registration_financials rf
             WHERE rf.city_dist_id = dp.user_id
+              AND rf.created_at >= ${periodStart} AND rf.created_at < ${periodEnd}
             UNION ALL
             SELECT SUM(
               (
@@ -246,6 +283,7 @@ export async function GET(req: NextRequest) {
             JOIN products prod ON prod.id = pp.product_id
             WHERE p.city_dist_id = dp.user_id
               AND p.status = 'used'
+              AND p.used_at >= ${periodStart} AND p.used_at < ${periodEnd}
               AND NOT EXISTS (SELECT 1 FROM registration_financials rf WHERE rf.pin_id = p.id)
             GROUP BY p.id
           ) registration_values
@@ -263,7 +301,9 @@ export async function GET(req: NextRequest) {
           COUNT(DISTINCT dp.user_id)::int as count,
           COALESCE(SUM(o.total_amount), 0)::float as total
         FROM distributor_profiles dp
-        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
+        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text
+          AND o.status = 'delivered'
+          AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
         WHERE dp.region_name IS NOT NULL AND dp.dist_level = 'regional'
         GROUP BY dp.region_name ORDER BY total DESC LIMIT 10
       `,
@@ -273,7 +313,9 @@ export async function GET(req: NextRequest) {
           COUNT(DISTINCT dp.user_id)::int as count,
           COALESCE(SUM(o.total_amount), 0)::float as total
         FROM distributor_profiles dp
-        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text AND o.status = 'delivered'
+        LEFT JOIN orders o ON o.seller_id::text = dp.user_id::text
+          AND o.status = 'delivered'
+          AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
         WHERE dp.province_name IS NOT NULL AND dp.dist_level = 'provincial'
         GROUP BY dp.province_name ORDER BY total DESC LIMIT 10
       `,
@@ -288,6 +330,7 @@ export async function GET(req: NextRequest) {
           SELECT COALESCE(SUM(o.total_amount), 0) AS product_revenue
           FROM orders o
           WHERE o.seller_id = dp.user_id AND o.status = 'delivered'
+            AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
         ) sales ON true
         LEFT JOIN LATERAL (
           SELECT COALESCE(SUM(registration_profit), 0) AS registration_revenue
@@ -295,6 +338,7 @@ export async function GET(req: NextRequest) {
             SELECT rf.registration_profit
             FROM registration_financials rf
             WHERE rf.city_dist_id = dp.user_id
+              AND rf.created_at >= ${periodStart} AND rf.created_at < ${periodEnd}
             UNION ALL
             SELECT SUM(
               (
@@ -307,6 +351,7 @@ export async function GET(req: NextRequest) {
             JOIN products prod ON prod.id = pp.product_id
             WHERE p.city_dist_id = dp.user_id
               AND p.status = 'used'
+              AND p.used_at >= ${periodStart} AND p.used_at < ${periodEnd}
               AND NOT EXISTS (SELECT 1 FROM registration_financials rf WHERE rf.pin_id = p.id)
             GROUP BY p.id
           ) registration_values
@@ -326,6 +371,8 @@ export async function GET(req: NextRequest) {
         FROM users u
         JOIN commissions c ON c.user_id = u.id
         WHERE u.role = 'reseller' AND u.status = 'active'
+          AND c.is_pair_overflow = false
+          AND c.created_at >= ${periodStart} AND c.created_at < ${periodEnd}
         GROUP BY u.id, u.full_name
         ORDER BY total DESC
         LIMIT 10
@@ -339,6 +386,8 @@ export async function GET(req: NextRequest) {
     const digitalCommissionExpenseToday = Number(digitalCommissionTodayRaw[0]?.total || 0)
     const digitalCommissionExpenseYesterday = Number(digitalCommissionYesterdayRaw[0]?.total || 0)
     const digitalCommissionExpense = Number(digitalCommissionAllTimeRaw[0]?.total || 0)
+    const retainedOverflow = Number(retainedOverflowRaw._sum.amount || 0)
+    const retainedOverflowEvents = retainedOverflowRaw._count.id
     const orderRevenueToday   = Number(productTodayRaw[0]?.revenue || 0)
     const orderCostToday      = Number(productTodayRaw[0]?.cost    || 0)
     const totalUnitsSoldToday = Number(productTodayRaw[0]?.units   || 0)
@@ -369,7 +418,10 @@ export async function GET(req: NextRequest) {
     const lastMonthName  = new Date(now.getFullYear(), now.getMonth() - 1).toLocaleDateString('en-PH', { month: 'short' })
     const thisMonthRev   = monthMap.get(thisMonthName) || 0
     const lastMonthRev   = monthMap.get(lastMonthName) || 0
-    const growthPct      = lastMonthRev > 0 ? Math.round(((thisMonthRev - lastMonthRev) / lastMonthRev) * 100) : 0
+    const monthlyGrowthPct = lastMonthRev > 0 ? Math.round(((thisMonthRev - lastMonthRev) / lastMonthRev) * 100) : 0
+    const growthPct = totalRevenueYesterday > 0
+      ? Math.round(((totalRevenueToday - totalRevenueYesterday) / totalRevenueYesterday) * 100)
+      : null
 
     // Top city dists
     const topCityDistsOverall = (topCityRaw as any[]).map(r => ({
@@ -382,6 +434,13 @@ export async function GET(req: NextRequest) {
     }))
 
     return NextResponse.json({
+      period: {
+        key: period.key,
+        label: period.label,
+        comparisonLabel: period.comparisonLabel,
+        from: period.start.toISOString(),
+        to: period.end.toISOString(),
+      },
       stats: {
         totalRevenueToday, totalRevenueYesterday, netProfitToday,
         pinRevenueToday, pinRevenueYesterday,
@@ -394,6 +453,7 @@ export async function GET(req: NextRequest) {
         pendingPayoutsAmount: Number(pendingPayoutsAgg._sum.amount || 0),
         totalProducts, activePins,
         pinRevenue, digitalCommissionExpense, digitalNet,
+        retainedOverflow, retainedOverflowEvents,
         orderRevenue, orderCost, orderProfit,
         distributionGrossProfit: orderProfit,
         totalRevenue, overallNetProfit,
@@ -405,7 +465,7 @@ export async function GET(req: NextRequest) {
         monthlyRevenue,
         lastMonthRevenue:   lastMonthRev,
         thisMonthRevenue:   thisMonthRev,
-        growthPct,
+        growthPct, monthlyGrowthPct,
         totalStock, criticalStock,
         topCityDistsOverall,
         regionalSales, provinceSales, citySales, resellerSales,

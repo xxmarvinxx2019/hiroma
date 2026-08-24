@@ -7,6 +7,8 @@ interface FirstLoginPasswordModalProps {
   open: boolean
   reviewReason?: PasswordReviewReason
   onResolved: () => void
+  endpoint?: string
+  allowRetain?: boolean
 }
 
 const reviewCopy: Record<PasswordReviewReason, { title: string; description: string }> = {
@@ -60,7 +62,7 @@ function EditIcon({ className = '' }: { className?: string }) {
   )
 }
 
-export default function FirstLoginPasswordModal({ open, reviewReason = 'temporary_first_login', onResolved }: FirstLoginPasswordModalProps) {
+export default function FirstLoginPasswordModal({ open, reviewReason = 'temporary_first_login', onResolved, endpoint = '/api/reseller/profile/password', allowRetain = true }: FirstLoginPasswordModalProps) {
   const [mode, setMode] = useState<'decision' | 'change'>('decision')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -71,12 +73,13 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
 
   if (!open) return null
   const copy = reviewCopy[reviewReason]
+  const changingPassword = !allowRetain || mode === 'change'
 
   const retainPassword = async () => {
     setError('')
     setSubmitting('retain')
     try {
-      const response = await fetch('/api/reseller/profile/password', {
+      const response = await fetch(endpoint, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retain' }),
       })
       const data = await response.json()
@@ -98,7 +101,7 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
     if (newPassword === currentPassword) return setError('Choose a new password that is different from your current password.')
     setSubmitting('change')
     try {
-      const response = await fetch('/api/reseller/profile/password', {
+      const response = await fetch(endpoint, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'change', current_password: currentPassword, new_password: newPassword }),
       })
@@ -128,9 +131,9 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
                 <p className="text-xs font-black uppercase tracking-[0.28em] sm:text-sm">Account security</p>
               </div>
               <h2 id="password-review-title" className="mt-5 text-3xl font-black tracking-tight text-white sm:text-5xl">
-                {mode === 'change' ? <>Choose a <span className="text-[#f6c44d]">new password</span></> : copy.title}
+                {changingPassword ? <>Choose a <span className="text-[#f6c44d]">new password</span></> : copy.title}
               </h2>
-              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300 sm:text-xl sm:leading-8">{mode === 'change' ? 'Verify your current password, then create a private password for your account.' : copy.description}</p>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300 sm:text-xl sm:leading-8">{changingPassword ? 'Verify your current password, then create a private password for your account.' : copy.description}</p>
             </div>
             <div className="hidden shrink-0 items-center justify-center rounded-full border border-[#f6c44d]/40 bg-[#10152a]/90 p-4 text-[#f6c44d] shadow-[0_0_35px_rgba(225,169,45,.26)] sm:flex" aria-hidden="true">
               <ShieldLockIcon className="h-20 w-[72px]" />
@@ -146,7 +149,7 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
             <p className="text-sm leading-6 text-slate-100 sm:text-base sm:leading-7"><strong className="block text-lg text-[#ffca47]">Security reminder</strong>Never share your password, security PIN, or login credentials with anyone.</p>
           </div>
 
-          {mode === 'decision' ? (
+          {mode === 'decision' && allowRetain ? (
             <div className="flex gap-4 rounded-2xl border border-[#2f76df] bg-[linear-gradient(115deg,rgba(17,70,139,.36),rgba(4,20,48,.78))] p-4 shadow-[inset_0_0_35px_rgba(21,100,223,.12)] sm:p-5">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#347de5]/70 bg-[#071a3d] text-[#66a0ff]">
                 <CalendarIcon className="h-7 w-7" />
@@ -178,14 +181,14 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
 
         <div className="relative border-t border-white/10 px-6 pb-7 pt-5 sm:px-10 sm:pb-8">
           <div className="flex flex-col gap-3 sm:flex-row">
-            {mode === 'decision' ? (
+            {mode === 'decision' && allowRetain ? (
               <>
                 <button type="button" onClick={() => void retainPassword()} disabled={submitting !== null} className="flex flex-1 items-center justify-center gap-3 rounded-2xl border border-[#dfa92e] bg-[#06152c]/90 px-4 py-4 text-base font-black text-white transition hover:bg-[#0a2345] disabled:opacity-60"><ShieldLockIcon className="h-6 w-6 text-[#f4bf42]" />{submitting === 'retain' ? 'Retaining...' : 'Retain Password'}</button>
                 <button type="button" onClick={() => { setError(''); setMode('change') }} disabled={submitting !== null} className="flex flex-1 items-center justify-center gap-3 rounded-2xl border border-[#ffde75] bg-[linear-gradient(120deg,#f8d45e,#ca8e18)] px-4 py-4 text-base font-black text-[#07132f] shadow-[0_8px_25px_rgba(211,159,36,.28)] transition hover:brightness-110 disabled:opacity-60"><EditIcon className="h-6 w-6" />Change Password</button>
               </>
             ) : (
               <>
-                <button type="button" onClick={() => { setError(''); setMode('decision') }} disabled={submitting !== null} className="flex-1 rounded-2xl border border-white/20 bg-[#0b1933] px-4 py-4 text-base font-black text-white transition hover:bg-[#142849] disabled:opacity-60">Back</button>
+                {allowRetain && <button type="button" onClick={() => { setError(''); setMode('decision') }} disabled={submitting !== null} className="flex-1 rounded-2xl border border-white/20 bg-[#0b1933] px-4 py-4 text-base font-black text-white transition hover:bg-[#142849] disabled:opacity-60">Back</button>}
                 <button type="submit" disabled={submitting !== null} className="flex flex-1 items-center justify-center gap-3 rounded-2xl border border-[#ffde75] bg-[linear-gradient(120deg,#f8d45e,#ca8e18)] px-4 py-4 text-base font-black text-[#07132f] shadow-[0_8px_25px_rgba(211,159,36,.28)] transition hover:brightness-110 disabled:opacity-60"><EditIcon className="h-6 w-6" />{submitting === 'change' ? 'Changing...' : 'Save New Password'}</button>
               </>
             )}

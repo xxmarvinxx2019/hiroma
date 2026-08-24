@@ -551,6 +551,20 @@ export default function ResellerDashboardPage() {
         </div>
       </div>
 
+      {/* Clear first-time order entry point */}
+      <div className="rounded-2xl border border-[#C9A84C]/40 bg-gradient-to-r from-[#fffaf0] to-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 rounded-xl bg-[#C9A84C]/15 flex items-center justify-center text-2xl flex-shrink-0">🛒</div>
+          <div>
+            <p className="text-base font-bold text-[#0D1B3E]">Need to order Hiroma products?</p>
+            <p className="text-sm leading-5 text-gray-600 mt-1">Choose pickup from a nearby Hiroma partner or request nationwide delivery from Hiroma Main.</p>
+          </div>
+        </div>
+        <Link href="/dashboard/reseller/orders#place-order" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#b8963e] transition-colors whitespace-nowrap">
+          Place an Order →
+        </Link>
+      </div>
+
       {/* ── Top Stat Cards ── */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${styles.statGrid}`}>
         {[
@@ -712,7 +726,7 @@ export default function ResellerDashboardPage() {
             <div className="grid grid-cols-3 gap-2">
               {[
                 { label: 'Wallet',    href: '/dashboard/reseller/wallet',    icon: '💸', color: '#C9A84C' },
-                { label: 'Orders',    href: '/dashboard/reseller/orders',    icon: '🛒', color: '#2563eb' },
+                { label: 'Place Order', href: '/dashboard/reseller/orders#place-order', icon: '🛒', color: '#2563eb' },
                 { label: 'Tree',      href: '/dashboard/reseller/tree',      icon: '🌳', color: '#1a7a4a' },
                 { label: 'Points',    href: '/dashboard/reseller/points',    icon: '⭐', color: '#9a6f1e' },
                 { label: 'Commissions', href: '/dashboard/reseller/commissions', icon: '📊', color: '#8b5cf6' },
@@ -817,7 +831,7 @@ const DASHBOARD_SEARCH_ITEMS = [
   { id: 'nav-wallet', title: 'Wallet & Earnings', description: 'Balances and commission history', href: '/dashboard/reseller/wallet', keywords: 'wallet balance income earnings commission direct referral binary product binary', category: 'Page' },
   { id: 'nav-payouts', title: 'Payouts', description: 'Track withdrawal and payout status', href: '/dashboard/reseller/payouts', keywords: 'withdraw withdrawal released pending approved rejected cash', category: 'Page' },
   { id: 'nav-payment', title: 'Payment Method', description: 'Manage your approved payout account', href: '/dashboard/reseller/payment-methods', keywords: 'gcash bank account payment payout method', category: 'Page' },
-  { id: 'nav-orders', title: 'My Orders', description: 'Place and monitor product orders', href: '/dashboard/reseller/orders', keywords: 'orders history products pending processing delivered cancelled supplier', category: 'Page' },
+  { id: 'nav-orders', title: 'Shop / Place Order', description: 'Order products or review your order history', href: '/dashboard/reseller/orders#place-order', keywords: 'shop place order buy products history pickup delivery pending processing delivered', category: 'Page' },
   { id: 'nav-notifications', title: 'Notifications', description: 'See commissions and account updates', href: '/dashboard/reseller/notifications', keywords: 'alerts updates bell unread activity', category: 'Page' },
 ] as const
 

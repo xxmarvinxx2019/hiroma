@@ -9,11 +9,14 @@ import {
   issueWalkInScanProof,
 } from '@/app/lib/walkInScanProof'
 import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
+import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 
 // ============================================================
 // PRODUCT BINARY POINTS — same logic as city orders route
 // ============================================================
 
+// Retained for legacy pairing reconciliation while Product Binary owns new-order processing.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function checkSponsorPairingPoints(buyerUserId: string, currentOrderPU: number) {
   const { getCurrentRankForReseller } = await import('@/app/api/admin/ranks/route')
 
@@ -264,7 +267,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { reseller_id, scan_proof, customer_name, order_type, notes, cash_received, items } = await req.json()
+    const { reseller_id, scan_proof, customer_name, notes, cash_received, items } = await req.json()
     const isNonMemberSale = !reseller_id
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -277,9 +280,6 @@ export async function POST(req: NextRequest) {
     if (uniqueProductIds.size !== items.length) {
       return NextResponse.json({ error: 'Duplicate products are not allowed in one order.' }, { status: 400 })
     }
-    if (!['online', 'offline'].includes(order_type))
-      return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
-
     // Validate reseller belongs to this city distributor
     const reseller = reseller_id ? await prisma.user.findFirst({
       where: { id: reseller_id, role: 'reseller', status: 'active' },
@@ -336,24 +336,25 @@ export async function POST(req: NextRequest) {
     // Mark as delivered immediately since city dist is handing it over in person
     console.log('[WALK-IN] Creating order for reseller:', reseller_id, 'from city dist:', user.id)
     // ── Validate seller has sufficient inventory for all items ──
-    const stockErrors: string[] = []
+    const stockErrors: Array<{ product_id: string; product_name: string; requested: number; available: number; shortage: number }> = []
     for (const item of items) {
       const inventoryItem = await prisma.inventory.findFirst({
         where: { owner_id: user.id, product_id: item.product_id },
-        select: { quantity: true },
+        select: { quantity: true, reserved_quantity: true },
       })
-      const available = inventoryItem?.quantity || 0
+      const available = Math.max(0, (inventoryItem?.quantity || 0) - (inventoryItem?.reserved_quantity || 0))
       if (available < item.quantity) {
         const product = productMap.get(item.product_id)
-        stockErrors.push(
-          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
-        )
+        stockErrors.push({ product_id: item.product_id, product_name: product?.name || 'Selected product', requested: item.quantity, available, shortage: item.quantity - available })
       }
     }
     if (stockErrors.length > 0) {
       return NextResponse.json({
-        error: `Stock validation failed:\n${stockErrors.join('\n')}`,
-      }, { status: 400 })
+        error: stockErrors.length === 1
+          ? `Only ${stockErrors[0].available} unit${stockErrors[0].available === 1 ? '' : 's'} of ${stockErrors[0].product_name} are available. Reduce the cart quantity by ${stockErrors[0].shortage}.`
+          : 'Some cart quantities exceed the available stock. Review the highlighted products and reduce their quantities.',
+        code: 'INSUFFICIENT_STOCK', stock_errors: stockErrors,
+      }, { status: 409 })
     }
 
     const order = await prisma.$transaction(async (tx) => {
@@ -365,7 +366,7 @@ export async function POST(req: NextRequest) {
         data: {
           buyer_id:          reseller_id || user.id,
           seller_id:         user.id,
-          order_type,
+          order_type: 'offline',
           status:            'delivered', // immediate — city dist is present
           total_amount,
           delivered_at:      new Date(),
@@ -380,9 +381,23 @@ export async function POST(req: NextRequest) {
           items:             { create: orderItems },
         },
         select: {
-          id: true, status: true, total_amount: true, created_at: true,
+          id: true, order_number: true, status: true, total_amount: true, created_at: true,
           buyer: { select: { full_name: true, username: true } },
         },
+      })
+
+      await recordInventoryOutEvents(tx, {
+        ownerId: user.id,
+        actorId: user.id,
+        actorName: user.full_name || user.username || 'City Distributor',
+        eventType: isNonMemberSale ? 'non_member_srp_sale' : 'reseller_repeat_order',
+        referenceType: 'order',
+        referenceId: newOrder.id,
+        reason: isNonMemberSale
+          ? `Non-member / SRP walk-in sale to ${String(customer_name || '').trim() || 'Walk-in Customer'}`
+          : `Reseller repeat order delivered to ${reseller?.full_name || reseller?.username || reseller_id}`,
+        items: orderItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity, unit_cost: item.unit_acquisition_cost })),
+        metadata: { order_number: newOrder.order_number, sale_channel: isNonMemberSale ? 'non_member_srp' : 'reseller_repeat_order' },
       })
 
       // Credit reseller inventory immediately
@@ -415,11 +430,11 @@ export async function POST(req: NextRequest) {
       // Calculate PU from this order
       const puProducts = await prisma.$queryRaw<{ id: string; pu_value: number }[]>`
         SELECT id::text, COALESCE(pu_value, 0) as pu_value FROM products
-        WHERE id::text = ANY(${orderItems.map((i: any) => i.product_id)})
+        WHERE id::text = ANY(${orderItems.map((item) => item.product_id)})
           AND COALESCE(binary_eligible, true) = true AND COALESCE(pu_value, 0) > 0
       `.catch(() => [] as { id: string; pu_value: number }[])
-      const puMap = new Map(puProducts.map((p: any) => [p.id, Number(p.pu_value)]))
-      const currentOrderPU = orderItems.reduce((sum: number, i: any) => sum + (i.quantity * (puMap.get(i.product_id) || 0)), 0)
+      const puMap = new Map(puProducts.map((product) => [product.id, Number(product.pu_value)]))
+      const currentOrderPU = orderItems.reduce((sum, item) => sum + (item.quantity * (puMap.get(item.product_id) || 0)), 0)
 
       // Product Binary owns the idempotent personal-PU/rank update and pairing.
       let buyerExtra = { rank: 'default', total_pu: 0 }

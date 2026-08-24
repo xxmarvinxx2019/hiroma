@@ -29,6 +29,8 @@ interface Stats {
   pinRevenue: number
   digitalCommissionExpense: number
   digitalNet: number
+  retainedOverflow: number
+  retainedOverflowEvents: number
   orderRevenue: number
   orderCost: number
   orderProfit: number
@@ -40,7 +42,8 @@ interface Stats {
   monthlyRevenue: { month: string; revenue: number }[]
   lastMonthRevenue: number
   thisMonthRevenue: number
-  growthPct: number
+  growthPct: number | null
+  monthlyGrowthPct: number
   totalStock: number
   criticalStock: number
   topProducts:         { name: string; total_sold: number; revenue: number }[]
@@ -111,22 +114,31 @@ function StatCard({ label, value, sub, color, icon, badge, href }: {
   color?: string; icon?: string; badge?: string; href?: string
 }) {
   const accent = color || '#0D1B3E'
+  const visibleAccent = accent.toLowerCase() === '#0d1b3e' ? '#C9A84C' : accent
   const inner = (
     <div
-      className="group relative h-full overflow-hidden rounded-2xl border border-black/5 p-5 text-white transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_14px_28px_rgba(13,27,62,0.18)]"
+      className="group relative h-full overflow-hidden rounded-2xl border border-white/10 border-t-[3px] p-5 text-white transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_14px_28px_rgba(13,27,62,0.18)]"
       style={{
-        backgroundColor: accent,
+        backgroundColor: '#0D1B3E',
+        borderTopColor: visibleAccent,
         boxShadow: '0 7px 16px rgba(13,27,62,0.10)',
       }}
     >
       <div className="relative flex min-h-8 items-start justify-between mb-3">
         {icon && (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/25 bg-white/14 text-base" aria-hidden="true">
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-lg border text-base"
+            style={{ backgroundColor: `${visibleAccent}26`, borderColor: `${visibleAccent}73` }}
+            aria-hidden="true"
+          >
             {icon}
           </div>
         )}
         {badge && (
-          <span className="rounded-full border border-white/25 bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white">
+          <span
+            className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+            style={{ backgroundColor: `${visibleAccent}26`, borderColor: `${visibleAccent}73`, color: '#FFFFFF' }}
+          >
             {badge}
           </span>
         )}
@@ -155,6 +167,25 @@ function StatCard({ label, value, sub, color, icon, badge, href }: {
   return href ? <Link href={href} className="block h-full">{inner}</Link> : inner
 }
 
+interface PeriodMeta {
+  key: string
+  label: string
+  comparisonLabel: string
+  from: string
+  to: string
+}
+
+const parsePinSaleNote = (notes: string | null) => {
+  const match = notes?.match(/PIN sale:\s*(\d+)\s*[×x]\s*(.+?)\s+package\s+@\s*₱?([\d,.]+)\s+each/i)
+  if (!match) return null
+
+  return {
+    quantity: Number(match[1]),
+    packageName: match[2].trim(),
+    unitPrice: Number(match[3].replace(/,/g, '')),
+  }
+}
+
 export default function AdminDashboardPage() {
   const [stats, setStats]                     = useState<Stats | null>(null)
   const [recentResellers, setRecentResellers] = useState<RecentReseller[]>([])
@@ -162,25 +193,62 @@ export default function AdminDashboardPage() {
   const [pinSales, setPinSales]               = useState<PinSale[]>([])
   const [distSales, setDistSales]             = useState<DistributorSales[]>([])
   const [packageSales, setPackageSales]       = useState<PackageSales[]>([])
+  const [period, setPeriod]                   = useState<PeriodMeta | null>(null)
+  const [periodKey, setPeriodKey]             = useState('today')
+  const [customFrom, setCustomFrom]           = useState('')
+  const [customTo, setCustomTo]               = useState('')
+  const [appliedQuery, setAppliedQuery]       = useState('period=today')
+  const [loadError, setLoadError]             = useState('')
   const [loading, setLoading]                 = useState(true)
 
   useEffect(() => {
+    const controller = new AbortController()
+    const query = appliedQuery ? `?${appliedQuery}` : ''
+    const readJson = async (url: string) => {
+      const response = await fetch(url, { signal: controller.signal })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Unable to load dashboard data.')
+      return body
+    }
+
+    setLoading(true)
+    setLoadError('')
     Promise.all([
-      fetch('/api/admin/stats').then(r => r.json()),
-      fetch('/api/admin/resellers/recent').then(r => r.json()),
-      fetch('/api/admin/payouts/recent').then(r => r.json()),
-      fetch('/api/admin/pins/sales?limit=3').then(r => r.json()),
+      readJson(`/api/admin/stats${query}`),
+      readJson(`/api/admin/resellers/recent${query}`),
+      readJson('/api/admin/payouts/recent'),
+      readJson(`/api/admin/pins/sales${query}`),
     ]).then(([s, r, p, ps]) => {
       setStats(s.stats)
+      setPeriod(s.period)
       setRecentResellers(r.resellers || [])
       setRecentPayouts(p.payouts || [])
       setPinSales(ps.recentSales || [])
       setDistSales(ps.byDistributor || [])
       setPackageSales(ps.byPackage || [])
+    }).catch(error => {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        setLoadError(error.message)
+      }
     }).finally(() => setLoading(false))
-  }, [])
 
-  if (loading) return (
+    return () => controller.abort()
+  }, [appliedQuery])
+
+  const applyPeriod = () => {
+    const params = new URLSearchParams({ period: periodKey })
+    if (periodKey === 'custom') {
+      if (!customFrom || !customTo) {
+        setLoadError('Select both start and end dates for a custom range.')
+        return
+      }
+      params.set('from', customFrom)
+      params.set('to', customTo)
+    }
+    setAppliedQuery(params.toString())
+  }
+
+  if (loading && !stats) return (
     <div className="flex items-center justify-center h-64">
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
@@ -193,45 +261,90 @@ export default function AdminDashboardPage() {
   stats?.ordersByStatus?.forEach(o => { orderStatusMap[o.status] = o._count.status })
 
   const today = new Date().toLocaleDateString('en-PH', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   })
+  const hasGrowthBaseline = stats?.growthPct !== null && stats?.growthPct !== undefined
+  const isPositiveGrowth = hasGrowthBaseline && (stats?.growthPct || 0) >= 0
 
   return (
     <div className="w-full space-y-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold text-[#0D1B3E]">Executive Dashboard</h1>
           <p className="text-xs text-gray-400 mt-0.5">{today}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+              <label className="flex h-9 items-center gap-2 rounded-xl border border-[#0D1B3E]/10 bg-white px-2.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Period</span>
+                <select
+                  value={periodKey}
+                  onChange={event => {
+                    setPeriodKey(event.target.value)
+                    setLoadError('')
+                  }}
+                  className="h-7 min-w-28 border-0 bg-transparent px-1 text-xs font-semibold text-[#0D1B3E] outline-none"
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="last7">Last 7 days</option>
+                  <option value="thisMonth">This month</option>
+                  <option value="lastMonth">Last month</option>
+                  <option value="thisYear">This year</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </label>
+              {periodKey === 'custom' && (
+                <>
+                  <label className="flex h-9 items-center gap-2 rounded-xl border border-[#0D1B3E]/10 bg-white px-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">From</span>
+                    <input type="date" value={customFrom} onChange={event => { setCustomFrom(event.target.value); setLoadError('') }} className="h-7 border-0 bg-transparent text-xs text-[#0D1B3E] outline-none" />
+                  </label>
+                  <label className="flex h-9 items-center gap-2 rounded-xl border border-[#0D1B3E]/10 bg-white px-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">To</span>
+                    <input type="date" value={customTo} onChange={event => { setCustomTo(event.target.value); setLoadError('') }} className="h-7 border-0 bg-transparent text-xs text-[#0D1B3E] outline-none" />
+                  </label>
+                </>
+              )}
+              <button type="button" onClick={applyPeriod} className="h-9 rounded-xl bg-[#0D1B3E] px-4 text-xs font-bold text-white transition-colors hover:bg-[#1A2F5E]">
+                Apply
+              </button>
+          </div>
           <Link href="/dashboard/admin/pins"
-            className="bg-[#010521] text-white text-xs font-medium rounded-xl px-4 py-2 hover:bg-[#1A2F5E] transition-colors">
+            className="flex h-9 items-center bg-[#010521] text-white text-xs font-medium rounded-xl px-4 hover:bg-[#1A2F5E] transition-colors">
             🔑 Generate PIN
           </Link>
           <Link href="/dashboard/admin/distributors"
-            className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#E8C96A] transition-colors">
+            className="flex h-9 items-center bg-[#C9A84C] text-[#0D1B3E] text-xs font-bold rounded-xl px-4 hover:bg-[#E8C96A] transition-colors">
             + Add Distributor
           </Link>
         </div>
       </div>
 
-      {/* Row 1 — Today's KPIs */}
+      {loadError && (
+        <div role="alert" className="rounded-xl border border-[#D82332]/25 bg-[#D82332]/5 px-4 py-3 text-sm text-[#B4232F]">
+          {loadError}
+        </div>
+      )}
+
+      {/* Row 1 — Selected-period KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Today's Revenue"      value={fmt(stats?.totalRevenueToday || 0)}    color="#07966F" icon="💰" sub={`Distribution + activated PIN · vs Yesterday: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
-        <StatCard label="Today's PIN Revenue"  value={fmt(stats?.pinRevenueToday || 0)}      color="#B17912" icon="🔑" sub={`Recognized on reseller activation · vs Yesterday: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
-        <StatCard label="Today's Product Sales" value={fmt(stats?.orderRevenueToday || 0)} color="#2F6FED" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} units sold`} href="/dashboard/admin/orders" />
-        <StatCard label="Overall Contribution" value={fmt(stats?.netProfitToday || 0)}       color="#078DC6" icon="📈" sub="Distribution gross profit + digital net" />
-        <StatCard label="Active Products"    value={stats?.totalProducts || 0}              color="#842FE0" icon="📦" sub={`${stats?.totalUnitsSoldToday || 0} units today`} href="/dashboard/admin/products" />
+        <StatCard label={`Revenue — ${period?.label || 'Today'}`} value={fmt(stats?.totalRevenueToday || 0)} color="#07966F" icon="💰" sub={`Distribution + activated PIN · ${period?.comparisonLabel || 'vs yesterday'}: ${fmt(stats?.totalRevenueYesterday || 0)}`} />
+        <StatCard label={`PIN Revenue — ${period?.label || 'Today'}`} value={fmt(stats?.pinRevenueToday || 0)} color="#B17912" icon="🔑" sub={`Recognized on activation · ${period?.comparisonLabel || 'vs yesterday'}: ${fmt(stats?.pinRevenueYesterday || 0)}`} href="/dashboard/admin/pins" />
+        <StatCard label={`Product Sales — ${period?.label || 'Today'}`} value={fmt(stats?.orderRevenueToday || 0)} color="#2F6FED" icon="🧴" sub={`${stats?.totalUnitsSoldToday || 0} delivered units`} href="/dashboard/admin/orders" />
+        <StatCard label={`Contribution — ${period?.label || 'Today'}`} value={fmt(stats?.netProfitToday || 0)} color="#078DC6" icon="📈" sub="Distribution gross profit + digital net" />
+        <StatCard label="Active Products" value={stats?.totalProducts || 0} color="#842FE0" icon="📦" sub="Current active catalog" href="/dashboard/admin/products" badge="As of now" />
       </div>
 
       {/* Row 2 — Sales breakdown */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="New Members Today"  value={stats?.newResellersToday || 0}                 color="#842FE0" icon="👥" sub={`vs Yesterday: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" badge={stats?.newResellersToday ? 'New!' : undefined} />
-        <StatCard label="Pending Payouts"    value={stats?.pendingPayouts || 0}                    color="#D82332" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : undefined} />
-        <StatCard label="Total Resellers"    value={(stats?.totalResellers || 0).toLocaleString()} color="#1759CE" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this month`} href="/dashboard/admin/resellers" />
-        <StatCard label="New This Month"     value={stats?.newResellersThisMonth || 0}             color="#E84D0E" icon="🆕" sub={`+${stats?.newResellersToday || 0} today`} href="/dashboard/admin/resellers" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <StatCard label={`Registrations — ${period?.label || 'Today'}`} value={stats?.newResellersToday || 0} color="#842FE0" icon="👥" sub={`${period?.comparisonLabel || 'vs yesterday'}: ${stats?.newResellersYesterday || 0}`} href="/dashboard/admin/resellers" badge="Selected period" />
+        <StatCard label="Pending Payouts" value={stats?.pendingPayouts || 0} color="#D82332" icon="💸" sub={fmt(stats?.pendingPayoutsAmount || 0)} href="/dashboard/admin/payouts" badge={stats?.pendingPayouts ? 'Action needed' : 'As of now'} />
+        <StatCard label="Total Resellers" value={(stats?.totalResellers || 0).toLocaleString()} color="#1759CE" icon="👤" sub={`+${stats?.newResellersThisMonth || 0} this calendar month`} href="/dashboard/admin/resellers" badge="As of now" />
+        <StatCard label="Active Distributors" value={stats?.totalDistributors || 0} color="#E84D0E" icon="🗺️" sub="Current active distributor profiles" href="/dashboard/admin/distributors" badge="As of now" />
+        <StatCard label="Retained Overflow" value={fmt(stats?.retainedOverflow || 0)} color="#0D1B3E" icon="↩️" sub={`${stats?.retainedOverflowEvents || 0} all-time audited events · View report`} href="/dashboard/admin/commission-testing/flushout-report" badge="Company retained" />
       </div>
 
 
@@ -239,30 +352,47 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
         {/* Warehouse Stock */}
-        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-[#eff6ff] flex items-center justify-center text-3xl flex-shrink-0">📦</div>
-          <div className="flex-1">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Warehouse Stock</p>
-            <p className="text-2xl font-bold text-[#0D1B3E]">{(stats?.totalStock || 0).toLocaleString()} <span className="text-sm font-normal text-gray-400">units</span></p>
-            <p className="text-xs text-gray-400 mt-1">{stats?.totalProducts || 0} Products</p>
-            {(stats?.criticalStock || 0) > 0 && (
-              <p className="text-xs text-[#e05252] font-semibold mt-1">⚠️ Critical Stock: {stats?.criticalStock} product{(stats?.criticalStock || 0) !== 1 ? 's' : ''}</p>
-            )}
+        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-bold text-[#0D1B3E]">Warehouse Stock</p>
+            <span className="text-[10px] text-[#8A6A16] bg-[#C9A84C]/10 px-2 py-1 rounded-full">
+              As of now · {stats?.totalProducts || 0} products
+            </span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-[#0D1B3E]/5 border border-[#0D1B3E]/8 flex items-center justify-center text-2xl flex-shrink-0">📦</div>
+            <div className="flex-1">
+              <p className="text-3xl font-bold tracking-tight text-[#0D1B3E]">
+                {(stats?.totalStock || 0).toLocaleString()} <span className="text-sm font-normal text-gray-400">units</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-1">Total units currently recorded in inventory</p>
+            </div>
+          </div>
+          <div className="border-t border-[#0D1B3E]/5 mt-4 pt-3 flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Stock attention</p>
+            <p className={`text-xs font-semibold ${(stats?.criticalStock || 0) > 0 ? 'text-[#D82332]' : 'text-[#1A7A4A]'}`}>
+              {(stats?.criticalStock || 0) > 0
+                ? `${stats?.criticalStock} critical product${(stats?.criticalStock || 0) !== 1 ? 's' : ''}`
+                : 'All products healthy'}
+            </p>
           </div>
         </div>
 
         {/* Growth vs Last Month */}
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
-          <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Growth vs Last Month</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-bold text-[#0D1B3E]">Growth vs Previous Period</p>
+            <span className="text-[10px] text-gray-400 bg-[#f8f9fc] px-2 py-1 rounded-full">{period?.label || 'Today'}</span>
+          </div>
           <div className="flex items-center gap-3 mb-3">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${(stats?.growthPct || 0) >= 0 ? 'bg-[#e8f7ef]' : 'bg-[#fdecea]'}`}>
-              {(stats?.growthPct || 0) >= 0 ? '📈' : '📉'}
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${!hasGrowthBaseline ? 'bg-[#f1f5f9]' : isPositiveGrowth ? 'bg-[#e8f7ef]' : 'bg-[#fdecea]'}`}>
+              {!hasGrowthBaseline ? '➖' : isPositiveGrowth ? '📈' : '📉'}
             </div>
             <div>
-              <p className={`text-3xl font-bold ${(stats?.growthPct || 0) >= 0 ? 'text-[#1a7a4a]' : 'text-[#e05252]'}`}>
-                {(stats?.growthPct || 0) >= 0 ? '+' : ''}{stats?.growthPct || 0}%
+              <p className={`font-bold ${!hasGrowthBaseline ? 'text-xl text-[#475569]' : `text-3xl ${isPositiveGrowth ? 'text-[#1a7a4a]' : 'text-[#e05252]'}`}`}>
+                {hasGrowthBaseline ? `${isPositiveGrowth ? '+' : ''}${stats?.growthPct}%` : 'No previous revenue'}
               </p>
-              <p className="text-xs text-gray-400">Overall Growth</p>
+              <p className="text-xs text-gray-400">{hasGrowthBaseline ? (period?.comparisonLabel || 'vs yesterday') : `Growth cannot be calculated · ${period?.comparisonLabel || 'vs yesterday'}: ${fmt(stats?.totalRevenueYesterday || 0)}`}</p>
             </div>
           </div>
           {/* Mini sparkline */}
@@ -270,9 +400,15 @@ export default function AdminDashboardPage() {
             {(stats?.monthlyRevenue || []).slice(-8).map((m, i, arr) => {
               const max = Math.max(...arr.map(a => a.revenue), 1)
               const h   = Math.max(4, Math.round((m.revenue / max) * 36))
+              const isPositive = isPositiveGrowth
               return (
                 <div key={i} className="flex-1 rounded-sm"
-                  style={{ height: h, background: i === arr.length - 1 ? '#1a7a4a' : '#bbf7d0' }} />
+                  style={{
+                    height: h,
+                    background: i === arr.length - 1
+                      ? (!hasGrowthBaseline ? '#64748B' : isPositive ? '#1A7A4A' : '#D82332')
+                      : (!hasGrowthBaseline ? '#E2E8F0' : isPositive ? '#BBF7D0' : '#FECACA'),
+                  }} />
               )
             })}
           </div>
@@ -280,8 +416,8 @@ export default function AdminDashboardPage() {
 
         {/* Monthly Revenue Chart */}
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-[#0D1B3E]">Monthly Revenue Overview</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-bold text-[#0D1B3E]">Monthly Revenue Overview</p>
             <span className="text-[10px] text-gray-400 bg-[#f8f9fc] px-2 py-1 rounded-full">This Year</span>
           </div>
           {/* Bar chart */}
@@ -309,8 +445,8 @@ export default function AdminDashboardPage() {
             </div>
             <div className="text-right">
               <p className="text-[10px] text-gray-400">vs Last Month</p>
-              <p className={`text-sm font-bold ${(stats?.growthPct || 0) >= 0 ? 'text-[#1a7a4a]' : 'text-[#e05252]'}`}>
-                {(stats?.growthPct || 0) >= 0 ? '+' : ''}{stats?.growthPct || 0}% {(stats?.growthPct || 0) >= 0 ? '↑' : '↓'}
+              <p className={`text-sm font-bold ${(stats?.monthlyGrowthPct || 0) >= 0 ? 'text-[#1a7a4a]' : 'text-[#e05252]'}`}>
+                {(stats?.monthlyGrowthPct || 0) >= 0 ? '+' : ''}{stats?.monthlyGrowthPct || 0}% {(stats?.monthlyGrowthPct || 0) >= 0 ? '↑' : '↓'}
               </p>
             </div>
           </div>
@@ -323,7 +459,7 @@ export default function AdminDashboardPage() {
         {/* Orders by status */}
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-bold text-[#0D1B3E]">Orders Overview</p>
+            <p className="text-sm font-bold text-[#0D1B3E]">Orders — {period?.label || 'Today'}</p>
             <Link href="/dashboard/admin/orders" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -332,29 +468,34 @@ export default function AdminDashboardPage() {
               return (
                 <div
                   key={s}
-                  className="group relative overflow-hidden rounded-xl border border-black/5 p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="group relative overflow-hidden rounded-xl border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                   style={{
-                    backgroundColor: statusColor,
+                    backgroundColor: `${statusColor}0F`,
+                    borderColor: `${statusColor}2E`,
                   }}
                 >
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-10 blur-xl transition-transform group-hover:scale-125"
+                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full opacity-10 blur-xl transition-transform group-hover:scale-125"
+                    style={{ backgroundColor: statusColor }}
                   />
                   <div className="relative mb-2 flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-sm">
+                    <span
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border text-sm"
+                      style={{ backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}4D` }}
+                    >
                       {STATUS_ICONS[s]}
                     </span>
                     <p
                       className="text-xs font-bold capitalize tracking-wide"
-                      style={{ color: 'rgba(255,255,255,.84)' }}
+                      style={{ color: statusColor }}
                     >
                       {s}
                     </p>
                   </div>
                   <p
                     className="relative text-2xl font-extrabold tracking-tight"
-                    style={{ color: '#FFFFFF' }}
+                    style={{ color: '#0D1B3E' }}
                   >
                     {(orderStatusMap[s] || 0).toLocaleString()}
                   </p>
@@ -459,18 +600,22 @@ export default function AdminDashboardPage() {
               return (
                 <div
                   key={s.label}
-                  className="group relative overflow-hidden rounded-xl border border-black/5 p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="group relative overflow-hidden rounded-xl border border-white/10 border-l-[3px] bg-[#0D1B3E] p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                   style={{
-                    backgroundColor: s.color,
+                    borderLeftColor: s.color,
                   }}
                 >
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full bg-white opacity-10 blur-xl transition-transform group-hover:scale-125"
+                    className="pointer-events-none absolute -right-5 -top-7 h-20 w-20 rounded-full opacity-15 blur-xl transition-transform group-hover:scale-125"
+                    style={{ backgroundColor: s.color }}
                   />
                   <div className="relative mb-3 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-sm">
+                      <span
+                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border text-sm"
+                        style={{ backgroundColor: `${s.color}26`, borderColor: `${s.color}73` }}
+                      >
                         {s.icon}
                       </span>
                       <p className="truncate text-xs font-bold text-white/85">{s.label}</p>
@@ -478,10 +623,10 @@ export default function AdminDashboardPage() {
                     <p className="flex-shrink-0 text-sm font-extrabold text-white">{fmt(s.value)}</p>
                   </div>
                   <div className="relative flex items-center gap-2">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/15">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
                       <div
-                        className="h-full rounded-full bg-white"
-                        style={{ width: `${pct}%` }}
+                        className="h-full rounded-full"
+                        style={{ width: `${pct}%`, backgroundColor: s.color }}
                       />
                     </div>
                     <span className="w-7 text-right text-[10px] font-bold text-white/85">{pct}%</span>
@@ -575,36 +720,64 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Row 5 — PIN Sales breakdown */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
+      <div className="space-y-4">
+        <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[#0D1B3E]/8">
             <div>
               <p className="text-sm font-bold text-[#0D1B3E]">Recent PIN Sales</p>
-              <p className="text-xs text-gray-400 mt-0.5">Every PIN assignment to a city distributor is a sale</p>
+              <p className="text-xs text-gray-400 mt-0.5">Most recent recorded PIN sale orders</p>
             </div>
             <Link href="/dashboard/admin/pins" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
           </div>
-          <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
-            {['City Distributor', 'Notes', 'Amount', 'Date'].map(h => (
+          <div className="hidden md:grid md:grid-cols-[1.1fr_1.5fr_0.8fr_0.7fr] px-5 py-2 bg-[#f8f9fc]">
+            {['Account / Recipient', 'PIN Details', 'Amount', 'Date'].map(h => (
               <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
             ))}
           </div>
           {pinSales.length === 0 ? (
             <div className="px-5 py-8 text-center text-gray-400 text-sm">No PIN sales yet</div>
-          ) : pinSales.slice(0, 3).map(sale => (
-            <div key={sale.id} className="grid grid-cols-4 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
-              <div>
-                <p className="text-xs font-semibold text-[#0D1B3E]">{sale.buyer.full_name}</p>
-                <p className="text-[10px] text-gray-400">@{sale.buyer.username}</p>
+          ) : (
+            <>
+              {pinSales.slice(0, 3).map(sale => {
+                const details = parsePinSaleNote(sale.notes)
+                return (
+                  <div key={sale.id} className="grid grid-cols-1 gap-3 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center md:grid-cols-[1.1fr_1.5fr_0.8fr_0.7fr] md:gap-0">
+                    <div>
+                      <p className="text-xs font-semibold text-[#0D1B3E]">{sale.buyer.full_name}</p>
+                      <p className="text-[10px] text-gray-400">@{sale.buyer.username}</p>
+                    </div>
+                    <div className="min-w-0">
+                      {details ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-[#C9A84C]/10 px-2 py-1 text-[10px] font-semibold text-[#8A6A16]">{details.packageName}</span>
+                          <span className="text-xs text-gray-500">{details.quantity} PIN{details.quantity !== 1 ? 's' : ''} × {fmt(details.unitPrice)}</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 truncate">{sale.notes || '—'}</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="md:hidden text-[10px] uppercase tracking-wide text-gray-400">Amount</p>
+                      <p className="text-xs font-bold text-[#0D1B3E]">{fmt(Number(sale.total_amount))}</p>
+                    </div>
+                    <div>
+                      <p className="md:hidden text-[10px] uppercase tracking-wide text-gray-400">Date</p>
+                      <p className="text-xs text-gray-400">{new Date(sale.created_at).toLocaleDateString('en-PH')}</p>
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0D1B3E]/[0.025] px-5 py-3">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Showing {Math.min(pinSales.length, 3)} recent sales</p>
+                <p className="text-xs text-gray-500">
+                  Displayed total <span className="font-bold text-[#0D1B3E]">{fmt(pinSales.slice(0, 3).reduce((sum, sale) => sum + Number(sale.total_amount), 0))}</span>
+                </p>
               </div>
-              <p className="text-xs text-gray-400 truncate">{sale.notes || '—'}</p>
-              <p className="text-xs font-bold text-[#C9A84C]">{fmt(Number(sale.total_amount))}</p>
-              <p className="text-xs text-gray-400">{new Date(sale.created_at).toLocaleDateString('en-PH')}</p>
-            </div>
-          ))}
+            </>
+          )}
         </div>
 
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-start justify-between gap-3">
               <div>
@@ -615,7 +788,10 @@ export default function AdminDashboardPage() {
             </div>
             {(stats?.topCityDistsOverall || []).length === 0 ? (
               <div className="px-5 py-6 text-center text-gray-400 text-sm">No data yet</div>
-            ) : (stats?.topCityDistsOverall || []).map((d, i) => (
+            ) : (stats?.topCityDistsOverall || []).map((d, i, distributors) => {
+              const maxRevenue = Math.max(...distributors.map(item => item.revenue), 1)
+              const width = Math.max(4, Math.round((d.revenue / maxRevenue) * 100))
+              return (
               <div key={d.id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5">
                 <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
                   style={{ background: i === 0 ? '#C9A84C' : '#f1f5f9', color: i === 0 ? '#0D1B3E' : '#9ca3af' }}>
@@ -624,10 +800,14 @@ export default function AdminDashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-[#0D1B3E] truncate">{d.full_name}</p>
                   <p className="text-[10px] text-gray-400">{d.pin_orders} PIN · {d.prod_orders} product orders</p>
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#0D1B3E]/5">
+                    <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${width}%` }} />
+                  </div>
                 </div>
                 <p className="text-xs font-bold text-[#C9A84C]">{fmt(d.revenue)}</p>
               </div>
-            ))}
+              )
+            })}
           </div>
 
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
@@ -637,7 +817,10 @@ export default function AdminDashboardPage() {
             </div>
             {packageSales.length === 0 ? (
               <div className="px-5 py-6 text-center text-gray-400 text-sm">No data yet</div>
-            ) : packageSales.map((p, i) => (
+            ) : packageSales.map((p, i, packages) => {
+              const maxPins = Math.max(...packages.map(item => item._count.id), 1)
+              const width = Math.max(4, Math.round((p._count.id / maxPins) * 100))
+              return (
               <div key={p.package_id} className="flex items-center gap-3 px-5 py-3 border-b border-[#0D1B3E]/5">
                 <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
                   style={{ background: i === 0 ? '#C9A84C' : '#f1f5f9', color: i === 0 ? '#0D1B3E' : '#9ca3af' }}>
@@ -646,10 +829,17 @@ export default function AdminDashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-[#0D1B3E]">{p.package?.name || '—'}</p>
                   <p className="text-[10px] text-gray-400">{p._count.id} PINs sold</p>
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#0D1B3E]/5">
+                    <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${width}%` }} />
+                  </div>
                 </div>
-                <p className="text-xs font-bold text-[#C9A84C]">{fmt(Number(p.package?.price || 0))} each</p>
+                <div className="text-right">
+                  <p className="text-[10px] text-gray-400">Current unit value</p>
+                  <p className="text-xs font-bold text-[#C9A84C]">{fmt(Number(p.package?.price || 0))}</p>
+                </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>

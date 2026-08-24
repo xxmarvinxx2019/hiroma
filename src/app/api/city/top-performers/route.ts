@@ -13,13 +13,28 @@ export async function GET(req: NextRequest) {
     }
 
     const requestedLimit = Number(req.nextUrl.searchParams.get('limit') || 10)
-    const selectedPeriod = resolvePerformancePeriod(req.nextUrl.searchParams.get('period'))
+    const selectedPeriod = resolvePerformancePeriod(
+      req.nextUrl.searchParams.get('period'),
+      new Date(),
+      req.nextUrl.searchParams.get('from'),
+      req.nextUrl.searchParams.get('to'),
+    )
+    const search = (req.nextUrl.searchParams.get('search') || '').trim()
     const limit = RESULT_LIMITS.includes(requestedLimit as (typeof RESULT_LIMITS)[number])
       ? requestedLimit
       : 10
 
     const resellerProfiles = await prisma.resellerProfile.findMany({
-      where: { city_dist_id: user.id, user: { status: 'active' } },
+      where: {
+        city_dist_id: user.id,
+        user: {
+          status: 'active',
+          ...(search ? { OR: [
+            { full_name: { contains: search, mode: 'insensitive' as const } },
+            { username: { contains: search, mode: 'insensitive' as const } },
+          ] } : {}),
+        },
+      },
       select: {
         user_id: true,
         user: { select: { full_name: true, username: true } },
@@ -67,7 +82,7 @@ export async function GET(req: NextRequest) {
       incomeByReseller.set(row.user_id, income)
     }
 
-    const performers = resellerProfiles
+    const rankedPool = resellerProfiles
       .map((profile) => {
         const income = incomeByReseller.get(profile.user_id) || {
           direct_referral: 0,
@@ -95,8 +110,8 @@ export async function GET(req: NextRequest) {
         b.commission_count - a.commission_count ||
         a.full_name.localeCompare(b.full_name)
       )
-      .slice(0, limit)
-      .map((performer, index) => ({ ...performer, rank: index + 1 }))
+    const performers = rankedPool.slice(0, limit).map((performer, index) => ({ ...performer, rank: index + 1 }))
+    const totalCreditedIncome = rankedPool.reduce((sum, performer) => sum + performer.total_income, 0)
 
     const account = await prisma.distributorProfile.findUnique({
       where: { user_id: user.id },
@@ -105,6 +120,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       performers,
+      summary: {
+        total_credited_income: totalCreditedIncome,
+        earning_resellers: rankedPool.length,
+        highest_income: rankedPool[0]?.total_income || 0,
+        average_income: rankedPool.length ? totalCreditedIncome / rankedPool.length : 0,
+      },
       filters: {
         limit,
         period: selectedPeriod.period,

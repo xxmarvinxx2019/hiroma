@@ -16,14 +16,23 @@ import { createAuditLog, formatMemberId } from "@/app/lib/auditLog";
 import { generateMemberId } from "@/app/lib/memberId";
 import { settleDirectReferral } from "@/app/lib/directReferral";
 import { settleBinaryCommission } from "@/app/lib/binaryCommission";
-import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
+import {
+  claimUnusedPin,
+  PinAlreadyClaimedError,
+} from "@/app/lib/pinRedemption";
 import {
   assertPlacementWithinReferrerSubtree,
   InvalidBinaryTreePlacementError,
   isBinaryTreeSlotConflict,
 } from "@/app/lib/binaryTreePlacement";
-import { claimIdentityAccountSlot, IdentityAccountLimitError } from "@/app/lib/identityAccountLimit";
-import { consumeAvailableStock, InsufficientStockError } from "@/app/lib/inventoryReservation";
+import {
+  claimIdentityAccountSlot,
+  IdentityAccountLimitError,
+} from "@/app/lib/identityAccountLimit";
+import {
+  consumeAvailableStock,
+  InsufficientStockError,
+} from "@/app/lib/inventoryReservation";
 // import { sendSMS, smsWelcomeReseller } from '@/app/lib/sms' // commented out to save SMS costs
 
 const isAdminDirectRegistrationEnabled = () => false;
@@ -61,6 +70,15 @@ export async function POST(req: NextRequest) {
       password,
       address,
       zip_code,
+      street_address,
+      region_code,
+      region_name,
+      province_code,
+      province_name,
+      city_muni_code,
+      city_muni_name,
+      barangay_code,
+      barangay_name,
       birthday,
       birthplace,
       identity_document_type,
@@ -112,6 +130,23 @@ export async function POST(req: NextRequest) {
         {
           error:
             "Email, complete street address, and a valid 4-digit ZIP code are required.",
+        },
+        { status: 400 },
+      );
+    }
+    if (
+      !street_address?.trim() ||
+      !region_code ||
+      !region_name ||
+      !city_muni_code ||
+      !city_muni_name ||
+      !barangay_code ||
+      !barangay_name
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Please select a complete Region, City/Municipality, and Barangay, then enter the street address.",
         },
         { status: 400 },
       );
@@ -354,6 +389,7 @@ export async function POST(req: NextRequest) {
       },
       { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 },
     );
+    const packageUnitsSnapshot = packageProducts.reduce((sum, item) => sum + item.quantity, 0);
     const registrationPinAllocation = Math.max(
       0,
       registrationEconomics.customerPayment -
@@ -428,6 +464,15 @@ export async function POST(req: NextRequest) {
           status: "active",
           address: address?.trim() || null,
           zip_code: String(zip_code),
+          street_address: street_address.trim(),
+          region_code: String(region_code),
+          region_name: String(region_name),
+          province_code: province_code ? String(province_code) : null,
+          province_name: province_name ? String(province_name) : null,
+          city_muni_code: String(city_muni_code),
+          city_muni_name: String(city_muni_name),
+          barangay_code: String(barangay_code),
+          barangay_name: String(barangay_name),
           created_by: user.id,
         },
       });
@@ -505,6 +550,7 @@ export async function POST(req: NextRequest) {
           pin_allocation: registrationPinAllocation,
           registration_profit: registrationProductProfit,
           package_name_snapshot: packageSnapshot.name,
+          package_units_snapshot: packageUnitsSnapshot,
           direct_referral_allocation: Number(
             packageSnapshot.direct_referral_bonus,
           ),
@@ -528,10 +574,14 @@ export async function POST(req: NextRequest) {
         sourceEventId: pin.id,
       });
 
-      await consumeAvailableStock(tx, user.id, packageProducts.map((item) => ({
-        product_id: item.product_id,
-        quantity: item.quantity,
-      })));
+      await consumeAvailableStock(
+        tx,
+        user.id,
+        packageProducts.map((item) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+        })),
+      );
 
       await tx.nameCapRegistry.upsert({
         where: { normalized_name: usernamePlan.identityKey },
@@ -999,7 +1049,10 @@ export async function POST(req: NextRequest) {
     }
     if (isBinaryTreeSlotConflict(error)) {
       return NextResponse.json(
-        { error: "The selected binary-tree slot was taken by another registration. Please choose another slot." },
+        {
+          error:
+            "The selected binary-tree slot was taken by another registration. Please choose another slot.",
+        },
         { status: 409 },
       );
     }
@@ -1008,11 +1061,17 @@ export async function POST(req: NextRequest) {
     }
     if (error instanceof InsufficientStockError) {
       return NextResponse.json(
-        { error: "Inventory changed during registration. Please review the available stock and try again." },
+        {
+          error:
+            "Inventory changed during registration. Please review the available stock and try again.",
+        },
         { status: 409 },
       );
     }
-    console.error("[ADMIN REGISTER RESELLER ERROR]", error instanceof Error ? error.message : error);
+    console.error(
+      "[ADMIN REGISTER RESELLER ERROR]",
+      error instanceof Error ? error.message : error,
+    );
     return NextResponse.json(
       { error: "Registration failed. Please try again." },
       { status: 500 },

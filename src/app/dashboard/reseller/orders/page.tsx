@@ -25,6 +25,9 @@ interface Order {
   payment_method:    string | null
   payment_reference: string | null
   payment_status:    string | null
+  fulfillment_method?: string
+  shipping_status?: string | null
+  shipping_fee?: number
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
 }
@@ -98,6 +101,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const PAYMENT_LABEL: Record<string, string> = {
   cash_on_pickup: '💵 Cash on Pickup',
+  payment_after_shipping_quote: '🚚 Payment after shipping quote',
   gcash:          '📱 GCash',
   bank_transfer:  '🏦 Bank Transfer',
 }
@@ -116,7 +120,10 @@ function CreateOrderModal({
   const [assignedDist, setAssignedDist]   = useState<CityDist | null>(null)
   const [selectedDistId, setSelectedDistId] = useState('')
   const [recommendedDist, setRecommendedDist] = useState<CityDist | null>(null)
+  const [nationwideSeller, setNationwideSeller] = useState<CityDist | null>(null)
+  const [fulfillmentMethod, setFulfillmentMethod] = useState<'partner_pickup' | 'nationwide_delivery'>('partner_pickup')
   const [recommendationBasis, setRecommendationBasis] = useState('assigned_fallback')
+  const [pickupDistanceKm, setPickupDistanceKm] = useState<number | null>(null)
   const [deliveryAddress, setDeliveryAddress] = useState('')
   const [registeredAddress, setRegisteredAddress] = useState('')
   const [addressSource, setAddressSource] = useState<'registered' | 'manual'>('registered')
@@ -137,7 +144,7 @@ function CreateOrderModal({
   const [products, setProducts]           = useState<Product[]>([])
   const [loadingDists, setLoadingDists]   = useState(true)
   const [cart, setCart]                   = useState<CartItem[]>([])
-  const [orderType, setOrderType]         = useState<'online' | 'offline'>('online')
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({})
   const [notes, setNotes]                 = useState('')
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState('')
@@ -147,6 +154,11 @@ function CreateOrderModal({
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentMethods, setPaymentMethods]   = useState<PaymentMethodInfo[]>([])
   const recommendationRequestId = useRef(0)
+  // The chosen fulfillment method is the source of truth. This prevents a late
+  // pickup-recommendation response from changing a nationwide order's seller.
+  const fulfillmentSellerId = fulfillmentMethod === 'nationwide_delivery'
+    ? nationwideSeller?.id || ''
+    : recommendedDist?.id || selectedDistId
 
   const loadFulfillmentRecommendation = useCallback((address?: string, location?: DeliveryLocation) => {
     const requestId = ++recommendationRequestId.current
@@ -157,18 +169,30 @@ function CreateOrderModal({
     if (location?.city_muni_name) params.set('city', location.city_muni_name)
     if (location?.barangay_name) params.set('barangay', location.barangay_name)
     const query = params.size ? `?${params}` : ''
-    return fetch(`/api/reseller/city-distributors${query}`)
-      .then((r) => r.json())
+    return fetch(`/api/reseller/city-distributors${query}`, { cache: 'no-store' })
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || 'Unable to load fulfillment locations.')
+        return data
+      })
       .then((d) => {
         if (requestId !== recommendationRequestId.current) return
         const assigned = d.assigned_distributor || d.distributors?.[0] || null
         setAssignedDist(assigned)
         setRegisteredAddress(d.registered_address || '')
         const recommended = d.recommended_distributor || assigned
+        setNationwideSeller(d.nationwide_seller || null)
         setRecommendedDist(recommended)
         setRecommendationBasis(d.recommendation_basis || 'assigned_fallback')
+        setPickupDistanceKm(typeof d.distance_km === 'number' ? d.distance_km : null)
         if (recommended?.id) setSelectedDistId(recommended.id)
         else setError(d.error || 'No active distributor is assigned to your account.')
+      })
+      .catch((requestError: unknown) => {
+        if (requestId !== recommendationRequestId.current) return
+        setNationwideSeller(null)
+        setPickupDistanceKm(null)
+        setError(requestError instanceof Error ? requestError.message : 'Unable to load fulfillment locations.')
       })
       .finally(() => {
         if (requestId === recommendationRequestId.current) setLoadingDists(false)
@@ -262,6 +286,7 @@ function CreateOrderModal({
   // Refresh the fulfillment recommendation as the delivery address changes.
   // A short delay prevents a request on every keystroke in the street field.
   useEffect(() => {
+    if (fulfillmentMethod !== 'partner_pickup') return
     const canRecommend = addressSource === 'registered'
       ? Boolean(deliveryAddress.trim())
       : Boolean(deliveryLocation.city_muni_code)
@@ -276,20 +301,20 @@ function CreateOrderModal({
       setLoadingDists(true)
       void loadFulfillmentRecommendation(
         deliveryAddress,
-        addressSource === 'manual' ? deliveryLocation : undefined
+        addressSource === 'manual' ? deliveryLocation : undefined,
       )
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [addressSource, deliveryAddress, deliveryLocation, loadFulfillmentRecommendation])
+  }, [addressSource, deliveryAddress, deliveryLocation, fulfillmentMethod, loadFulfillmentRecommendation])
 
   useEffect(() => {
-    if (!selectedDistId) { setProducts([]); setLoadingProducts(false); setPaymentMethods([]); return }
+    if (!fulfillmentSellerId) { setProducts([]); setLoadingProducts(false); setPaymentMethods([]); return }
     setLoadingProducts(true)
     // Fetch products and payment methods in parallel
     Promise.all([
-      fetch(`/api/reseller/products?city_dist_id=${selectedDistId}`).then((r) => r.json()),
+      fetch(`/api/reseller/products?seller_id=${fulfillmentSellerId}`).then((r) => r.json()),
       fetch(`/api/payment-methods?${new URLSearchParams({
-        user_id: selectedDistId,
+        user_id: fulfillmentSellerId,
         status: 'approved',
         delivery_address: deliveryAddress,
         region: deliveryLocation.region_name,
@@ -302,9 +327,9 @@ function CreateOrderModal({
       setPaymentMethods(pmData.methods || [])
     }).finally(() => setLoadingProducts(false))
     setCart([])
-    setPaymentMethod('cash_on_pickup')
+    setPaymentMethod(fulfillmentMethod === 'nationwide_delivery' ? 'payment_after_shipping_quote' : 'cash_on_pickup')
     setPaymentReference('')
-  }, [selectedDistId])
+  }, [fulfillmentSellerId, fulfillmentMethod, deliveryAddress, deliveryLocation.region_name, deliveryLocation.province_name, deliveryLocation.city_muni_name, deliveryLocation.barangay_name])
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -343,10 +368,56 @@ function CreateOrderModal({
     }
     if (!deliveryAddress.trim()) { setError('Enter the delivery address before proceeding.'); return }
     setError('')
-    setLoadingDists(true)
-    await loadFulfillmentRecommendation(deliveryAddress, addressSource === 'manual' ? deliveryLocation : undefined)
+    if (fulfillmentMethod === 'partner_pickup') {
+      setLoadingDists(true)
+      await loadFulfillmentRecommendation(deliveryAddress, addressSource === 'manual' ? deliveryLocation : undefined)
+    } else if (!nationwideSeller) {
+      setError('Hiroma Main is temporarily unavailable for nationwide delivery.'); return
+    }
     setStep('order')
   }
+
+  const changeQuantityDraft = (productId: string, value: string) => {
+    const digits = value.replace(/\D/g, '')
+    setError('')
+    setQuantityDrafts((current) => ({ ...current, [productId]: digits }))
+    if (digits === '') return
+    const quantity = Number(digits)
+    const product = products.find((item) => item.id === productId)
+    if (Number.isInteger(quantity) && quantity >= 1 && product && quantity <= product.available_quantity) {
+      updateQty(productId, quantity)
+    }
+  }
+
+  const commitQuantityDraft = (productId: string) => {
+    setQuantityDrafts((current) => {
+      const draft = current[productId]
+      const product = products.find((item) => item.id === productId)
+      const quantity = Number(draft)
+      if (draft === '' || !product || !Number.isInteger(quantity) || quantity < 1 || quantity > product.available_quantity) return current
+      const next = { ...current }
+      delete next[productId]
+      return next
+    })
+  }
+
+  const clearQuantityDraft = (productId: string) => {
+    setQuantityDrafts((current) => {
+      const next = { ...current }
+      delete next[productId]
+      return next
+    })
+  }
+
+  const quantityErrors = cart.reduce<Record<string, string>>((errors, item) => {
+    const draft = quantityDrafts[item.product.id]
+    if (draft === undefined) return errors
+    if (draft === '') errors[item.product.id] = 'Enter a quantity.'
+    else if (!Number.isInteger(Number(draft)) || Number(draft) < 1) errors[item.product.id] = 'Quantity must be at least 1.'
+    else if (Number(draft) > item.product.available_quantity) errors[item.product.id] = `Only ${item.product.available_quantity} unit(s) are available from this supplier.`
+    return errors
+  }, {})
+  const hasQuantityErrors = Object.keys(quantityErrors).length > 0
 
   const recommendationLabel: Record<string, string> = {
     exact_barangay: 'Exact barangay coverage',
@@ -358,9 +429,10 @@ function CreateOrderModal({
   }
 
   const handleSubmit = async () => {
-    if (!selectedDistId) { setError('No active distributor is assigned to your account.'); return }
+    if (!fulfillmentSellerId) { setError('No active fulfillment location is available.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
-    if (paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
+    if (hasQuantityErrors) { setError('Correct the highlighted quantity before placing the order.'); return }
+    if (fulfillmentMethod === 'partner_pickup' && paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
       setError('Please enter the payment reference number.')
       return
     }
@@ -370,7 +442,8 @@ function CreateOrderModal({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        city_dist_id:     selectedDistId,
+        city_dist_id:     fulfillmentSellerId,
+        fulfillment_method: fulfillmentMethod,
         delivery_address: deliveryAddress.trim(),
         delivery_location: {
           region: deliveryLocation.region_name,
@@ -378,7 +451,6 @@ function CreateOrderModal({
           city: deliveryLocation.city_muni_name,
           barangay: deliveryLocation.barangay_name,
         },
-        order_type:        orderType,
         notes,
         payment_method:    paymentMethod,
         payment_reference: paymentReference.trim() || null,
@@ -400,10 +472,20 @@ function CreateOrderModal({
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden">
           <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between">
-            <div><h2 className="text-sm font-semibold text-[#0D1B3E]">Delivery address</h2><p className="text-xs text-gray-400 mt-0.5">We use this only to recommend the best fulfillment distributor.</p></div>
+            <div><h2 className="text-sm font-semibold text-[#0D1B3E]">How would you like to receive your order?</h2><p className="text-xs text-gray-500 mt-0.5">Choose fulfillment first, then confirm the address.</p></div>
             <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">×</button>
           </div>
           <div className="p-5 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button type="button" onClick={() => { setFulfillmentMethod('partner_pickup'); setSelectedDistId(recommendedDist?.id || ''); setPaymentMethod('cash_on_pickup'); setPaymentReference(''); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'partner_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
+                <span className="block text-sm font-semibold text-[#0D1B3E]">📍 Partner Pickup</span>
+                <span className="block text-xs leading-5 text-gray-600 mt-1">Pick up from the nearest available Hiroma partner or branch. No courier shipping fee.</span>
+              </button>
+              <button type="button" onClick={() => { setFulfillmentMethod('nationwide_delivery'); setSelectedDistId(nationwideSeller?.id || ''); setPaymentMethod('payment_after_shipping_quote'); setPaymentReference(''); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'nationwide_delivery' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
+                <span className="block text-sm font-semibold text-[#0D1B3E]">🚚 Nationwide Delivery</span>
+                <span className="block text-xs leading-5 text-gray-600 mt-1">Hiroma Main processes and ships the order. Shipping is quoted before payment.</span>
+              </button>
+            </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => { setDeliveryAddress(registeredAddress); setAddressSource('registered') }} disabled={!registeredAddress}
                 className={`text-xs px-3 py-2 rounded-lg border transition-colors ${addressSource === 'registered' ? 'border-[#C9A84C] bg-[#fef9ee] text-[#0D1B3E]' : 'border-[#0D1B3E]/15 text-gray-500'} disabled:opacity-40`}>Use registered address</button>
@@ -421,23 +503,34 @@ function CreateOrderModal({
                   <div><label className="block text-xs text-gray-500 mb-1">Street / house no. <span className="text-[#a03030]">*</span></label><input value={deliveryLocation.street} onChange={(e) => setDeliveryLocation((current) => ({ ...current, street: e.target.value }))} placeholder="e.g. Rizal Street, House 12" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">ZIP code <span className="text-[#a03030]">*</span></label><input value={deliveryLocation.zip_code} inputMode="numeric" maxLength={4} onChange={(e) => setDeliveryLocation((current) => ({ ...current, zip_code: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="e.g. 6606" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" /></div>
                 </div>
-                {deliveryAddress && <div className="rounded-lg bg-[#e8f7ef] border border-[#1a7a4a]/30 px-3 py-2"><p className="text-[10px] text-gray-400">Delivery address preview</p><p className="text-xs text-[#1a7a4a] font-medium mt-0.5">{deliveryAddress}</p></div>}
+                {deliveryAddress && <div className="rounded-lg bg-[#e8f7ef] border border-[#1a7a4a]/30 px-3 py-2"><p className="text-[10px] text-gray-400">{fulfillmentMethod === 'partner_pickup' ? 'Address used to find a nearby pickup partner' : 'Shipping address preview'}</p><p className="text-xs text-[#1a7a4a] font-medium mt-0.5">{deliveryAddress}</p></div>}
               </div>
             ) : (
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">Delivery address <span className="text-[#a03030]">*</span></label>
-                <textarea value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} rows={3} placeholder="Street, barangay, city/municipality, province, region, ZIP code" className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] resize-none" />
+                <label className="block text-xs text-gray-500 mb-1.5">{fulfillmentMethod === 'partner_pickup' ? 'Address for pickup recommendation' : 'Delivery address'} <span className="text-[#a03030]">*</span></label>
+                <div className="relative">
+                  <textarea
+                    value={deliveryAddress}
+                    readOnly
+                    rows={3}
+                    aria-readonly="true"
+                    placeholder="No registered address available"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 pr-10 text-sm text-[#0D1B3E] outline-none resize-none cursor-not-allowed select-text"
+                  />
+                  <span className="absolute right-3 top-2.5 text-sm" aria-hidden="true">🔒</span>
+                </div>
+                <p className="text-[11px] leading-4 text-gray-500 mt-1.5">This is your registered account address and cannot be edited here. Choose “Enter different address” to use another location.</p>
               </div>
             )}
             {((addressSource === 'registered' && deliveryAddress.trim()) || (addressSource === 'manual' && deliveryLocation.city_muni_code)) && <div className="rounded-xl border border-[#C9A84C]/40 bg-[#fef9ee] px-4 py-3">
-              <p className="text-[10px] uppercase tracking-wide text-[#9a6f1e] font-semibold">Recommended fulfillment distributor</p>
-              {loadingDists ? <p className="text-xs text-gray-400 mt-1">Updating recommended distributor…</p> : recommendedDist ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">{recommendedDist.full_name}</p><p className="text-xs text-gray-500">@{recommendedDist.username}{recommendedDist.distributor_profile?.coverage_area ? ` · ${recommendedDist.distributor_profile.coverage_area}` : ''}</p><p className="text-[11px] text-[#9a6f1e] mt-1.5">{recommendationLabel[recommendationBasis] || 'Available fulfillment distributor'}</p><p className="text-[11px] text-gray-500 mt-1">Final product stock is checked again before the order is placed.</p></> : <p className="text-xs text-[#a03030] mt-1">No active fulfillment distributor is available.</p>}
+              <p className="text-[10px] uppercase tracking-wide text-[#9a6f1e] font-semibold">{fulfillmentMethod === 'partner_pickup' ? 'Recommended Hiroma partner / branch' : 'Nationwide fulfillment'}</p>
+              {fulfillmentMethod === 'nationwide_delivery' ? (nationwideSeller ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">Hiroma Main</p><p className="text-xs text-gray-600 mt-1">Your order goes directly to Hiroma Main. The courier and shipping fee will remain pending until an official quote is recorded.</p></> : <p className="text-xs text-[#a03030] mt-1">Hiroma Main is temporarily unavailable.</p>) : loadingDists ? <p className="text-xs text-gray-400 mt-1">Finding a nearby partner…</p> : recommendedDist ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">{recommendedDist.full_name}</p><p className="text-xs text-gray-500">@{recommendedDist.username}{recommendedDist.distributor_profile?.coverage_area ? ` · ${recommendedDist.distributor_profile.coverage_area}` : ''}</p><p className="text-[11px] text-[#9a6f1e] mt-1.5">{recommendationLabel[recommendationBasis] || 'Available pickup partner'}</p>{pickupDistanceKm !== null && <p className="text-[11px] font-medium text-[#0D1B3E] mt-1">Approximately {pickupDistanceKm.toLocaleString(undefined, { maximumFractionDigits: 1 })} km from this address <span className="font-normal text-gray-500">(straight-line)</span></p>}<p className="text-[11px] text-gray-500 mt-1">Final stock is checked again before the order is placed.</p></> : <p className="text-xs text-[#a03030] mt-1">No active Hiroma partner or branch is available.</p>}
             </div>}
             {error && <p className="text-xs text-[#a03030]">{error}</p>}
           </div>
           <div className="px-5 py-4 border-t border-[#0D1B3E]/8 flex gap-2 justify-end">
             <button onClick={onClose} className="text-xs px-4 py-2 rounded-lg bg-[#F0F2F8] text-[#0D1B3E]">Cancel</button>
-            <button onClick={proceedToOrder} disabled={loadingDists || !deliveryAddress.trim()} className="text-xs px-4 py-2 rounded-lg bg-[#C9A84C] text-white font-medium disabled:opacity-50">Proceed to order</button>
+            <button onClick={proceedToOrder} disabled={(fulfillmentMethod === 'partner_pickup' && loadingDists) || !deliveryAddress.trim()} className="text-xs px-4 py-2 rounded-lg bg-[#C9A84C] text-white font-medium disabled:opacity-50">Proceed to products</button>
           </div>
         </div>
       </div>
@@ -445,41 +538,41 @@ function CreateOrderModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[94dvh] sm:max-h-[90vh] flex flex-col overflow-hidden">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Place New Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {recommendedDist ? `Fulfilled by: ${recommendedDist.full_name}` : 'No fulfillment distributor available'}
+              {fulfillmentMethod === 'nationwide_delivery' ? 'Nationwide Delivery · Fulfilled by Hiroma Main' : recommendedDist ? `Partner Pickup · ${recommendedDist.full_name}` : 'No pickup partner available'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
         </div>
 
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row overflow-y-auto md:overflow-hidden">
 
           {/* Left — product picker */}
-          <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
+          <div className="flex-1 flex flex-col border-b md:border-b-0 md:border-r border-[#0D1B3E]/8 min-w-0 md:min-h-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
 
               <div className="flex items-start justify-between gap-3 rounded-lg bg-[#fef9ee] border border-[#C9A84C]/30 px-3 py-2">
-                <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-[#9a6f1e]">Delivery address</p><p className="text-xs text-[#0D1B3E] truncate mt-0.5">{deliveryAddress}</p></div>
+                <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-[#9a6f1e]">{fulfillmentMethod === 'partner_pickup' ? 'Pickup recommendation address' : 'Shipping address'}</p><p className="text-xs text-[#0D1B3E] truncate mt-0.5">{deliveryAddress}</p></div>
                 <button onClick={() => setStep('address')} className="text-[11px] text-[#9a6f1e] hover:underline flex-shrink-0">Change</button>
               </div>
 
               {/* Fulfillment distributor is selected from the delivery address; it is not the referral sponsor. */}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Fulfillment Distributor</label>
+                <label className="block text-xs text-gray-500 mb-1">{fulfillmentMethod === 'partner_pickup' ? 'Hiroma pickup partner / branch' : 'Nationwide fulfillment center'}</label>
                 {loadingDists ? (
                   <div className="h-[58px] rounded-xl bg-[#F0F2F8] animate-pulse" />
                 ) : (
                   <div className="relative">
                     <input
                       type="text"
-                      value={recommendedDist?.full_name || ''}
+                      value={(fulfillmentMethod === 'nationwide_delivery' ? 'Hiroma Main' : recommendedDist?.full_name) || ''}
                       readOnly
                       onChange={(e) => {
                         setDistSearch(e.target.value)
@@ -491,7 +584,7 @@ function CreateOrderModal({
                       placeholder="Search city distributor..."
                       className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
                     />
-                    {false && selectedDistId && (
+                    {false && fulfillmentSellerId && (
                       <button onClick={() => { setSelectedDistId(''); setDistSearch('') }}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs">✕</button>
                     )}
@@ -510,7 +603,7 @@ function CreateOrderModal({
                                 setDistSearch('')
                                 setShowDistDrop(false)
                               }}
-                              className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${selectedDistId === d.id ? 'bg-[#F0F2F8]' : ''}`}>
+                              className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${fulfillmentSellerId === d.id ? 'bg-[#F0F2F8]' : ''}`}>
                               <p className="text-xs font-medium text-[#0D1B3E]">{d.full_name}</p>
                               <p className="text-[10px] text-gray-400">@{d.username}{d.distributor_profile?.coverage_area ? ` · ${d.distributor_profile.coverage_area}` : ''}</p>
                             </div>
@@ -528,18 +621,19 @@ function CreateOrderModal({
                   </div>
                 )}
               </div>
-              {recommendedDist && (
-                <div className="rounded-lg border border-[#0D1B3E]/10 bg-[#F0F2F8]/60 px-3 py-2.5">
+              {fulfillmentMethod === 'partner_pickup' && recommendedDist && (
+                <div className="rounded-lg border border-[#0D1B3E]/10 bg-[#F0F2F8]/60 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] uppercase tracking-wide text-gray-400">Fulfillment Contact Information</p>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[#0D1B3E]/10 text-[#0D1B3E]">
-                      {recommendedDist.distributor_profile?.dist_level === 'branch' ? 'Branch' : 'City Distributor'}
+                      {recommendedDist.distributor_profile?.dist_level === 'branch' ? 'Hiroma Branch' : 'Hiroma Partner'}
                     </span>
                   </div>
                   {recommendedDist.fulfillment_location_source === 'physical_outlet' && (
                     <p className="text-[10px] text-[#1a7a4a] mt-1">Physical outlet{recommendedDist.fulfillment_outlet_name ? ` · ${recommendedDist.fulfillment_outlet_name}` : ''}</p>
                   )}
                   <p className="text-xs font-medium text-[#0D1B3E] mt-1">{recommendedDist.fulfillment_address || recommendedDist.address || recommendedDist.distributor_profile?.coverage_area || 'Address not available'}</p>
+                  {pickupDistanceKm !== null && <p className="text-[11px] text-gray-500 mt-1">Approx. {pickupDistanceKm.toLocaleString(undefined, { maximumFractionDigits: 1 })} km from your selected address (straight-line)</p>}
                   {recommendedDist.mobile ? (
                     <a href={`tel:${recommendedDist.mobile}`} className="inline-flex items-center gap-1 text-xs text-[#9a6f1e] hover:underline mt-1.5">
                       <span aria-hidden="true">☎</span> {recommendedDist.mobile}
@@ -552,22 +646,22 @@ function CreateOrderModal({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search products..."
-                disabled={!selectedDistId}
+                disabled={!fulfillmentSellerId}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 disabled:opacity-50"
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-36 md:min-h-0 max-h-72 md:max-h-none">
               {loadingProducts ? (
                 <div className="flex justify-center py-8">
                   <div className="w-5 h-5 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : filtered.length === 0 ? (
                 <p className="text-center text-xs text-gray-400 py-8">
-                  {!selectedDistId
-                    ? 'Select a city distributor to see available products.'
+                  {!fulfillmentSellerId
+                    ? 'Select a Hiroma fulfillment location to see available products.'
                     : products.length === 0
-                    ? 'No products in stock from this distributor.'
+                    ? 'No products are currently in stock at this fulfillment location.'
                     : 'No products found.'}
                 </p>
               ) : (
@@ -600,11 +694,11 @@ function CreateOrderModal({
           </div>
 
           {/* Right — cart + payment */}
-          <div className="w-60 flex flex-col flex-shrink-0">
+          <div className="w-full md:w-72 flex flex-col flex-shrink-0 md:min-h-0">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0">
               <p className="text-xs font-semibold text-[#0D1B3E]">Order Summary</p>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-24 max-h-56 md:max-h-none">
               {cart.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center pt-4">No items yet</p>
               ) : (
@@ -612,16 +706,21 @@ function CreateOrderModal({
                   <div key={c.product.id} className="text-xs">
                     <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
                     <div className="flex items-center gap-1 mt-1">
-                      <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
+                      <button onClick={() => { clearQuantityDraft(c.product.id); updateQty(c.product.id, c.quantity - 1) }}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">−</button>
-                      <input type="number" min={1} max={c.product.available_quantity} value={c.quantity}
-                        onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v)) updateQty(c.product.id, v) }}
-                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5" />
-                      <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
+                      <input type="text" inputMode="numeric" pattern="[0-9]*" value={quantityDrafts[c.product.id] ?? String(c.quantity)}
+                        onChange={(e) => changeQuantityDraft(c.product.id, e.target.value)}
+                        onBlur={() => commitQuantityDraft(c.product.id)}
+                        onFocus={(e) => e.currentTarget.select()}
+                        aria-label={`Quantity for ${c.product.name}`}
+                        aria-invalid={Boolean(quantityErrors[c.product.id])}
+                        className={`w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border outline-none py-0.5 ${quantityErrors[c.product.id] ? 'border-[#C23B3B] focus:border-[#C23B3B]' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`} />
+                      <button onClick={() => { clearQuantityDraft(c.product.id); updateQty(c.product.id, c.quantity + 1) }}
                         disabled={c.quantity >= c.product.available_quantity}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0 disabled:opacity-40">+</button>
                       <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
+                    {quantityErrors[c.product.id] && <p className="mt-1.5 text-[10px] leading-4 text-[#C23B3B]" role="alert">{quantityErrors[c.product.id]}</p>}
                   </div>
                 ))
               )}
@@ -633,18 +732,13 @@ function CreateOrderModal({
                 <span>₱{total.toLocaleString()}</span>
               </div>
 
-              {/* Order type */}
-              <div className="flex gap-1">
-                {(['online', 'offline'] as const).map((t) => (
-                  <button key={t} onClick={() => setOrderType(t)}
-                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${
-                      orderType === t ? 'bg-[#0D1B3E] text-white' : 'bg-[#F0F2F8] text-gray-400'
-                    }`}>{t}</button>
-                ))}
+              <div className="rounded-lg bg-[#eef4ff] border border-[#2563eb]/20 px-3 py-2">
+                <p className="text-xs font-medium text-[#0D1B3E]">Online order</p>
+                <p className="text-[11px] leading-4 text-gray-600 mt-0.5">The system records reseller-account orders as online automatically.</p>
               </div>
 
               {/* Payment method */}
-              <div>
+              <div className={fulfillmentMethod === 'nationwide_delivery' ? 'hidden' : ''}>
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
                   {/* Cash on pickup — always available */}
@@ -687,13 +781,20 @@ function CreateOrderModal({
                 )}
               </div>
 
+              {fulfillmentMethod === 'nationwide_delivery' && (
+                <div className="rounded-lg border border-[#C9A84C]/40 bg-[#fef9ee] px-3 py-2.5">
+                  <p className="text-xs font-semibold text-[#0D1B3E]">Payment after shipping quote</p>
+                  <p className="text-[11px] leading-4 text-gray-600 mt-1">Product total is shown now, but it is not the final payable amount. Hiroma Main must record the official courier fee first.</p>
+                </div>
+              )}
+
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
                 placeholder="Notes (optional)" rows={2}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 resize-none" />
 
               {error && <p className="text-xs text-[#a03030]">{error}</p>}
 
-              <button onClick={handleSubmit} disabled={submitting || cart.length === 0}
+              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || hasQuantityErrors}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
                 {submitting ? 'Placing...' : 'Place Order'}
               </button>
@@ -750,6 +851,17 @@ export default function ResellerOrdersPage() {
 
   useEffect(() => { fetchOrders() }, [fetchOrders])
 
+  useEffect(() => {
+    const openCheckoutFromHash = () => {
+      if (window.location.hash !== '#place-order') return
+      setShowCreate(true)
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+    openCheckoutFromHash()
+    window.addEventListener('hashchange', openCheckoutFromHash)
+    return () => window.removeEventListener('hashchange', openCheckoutFromHash)
+  }, [])
+
   const handleCancel = async (orderId: string) => {
     setCancelling(orderId)
     await fetch('/api/reseller/orders', {
@@ -767,12 +879,12 @@ export default function ResellerOrdersPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-[#0D1B3E]">My Orders</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Your orders from city distributors</p>
+          <h1 className="text-xl font-semibold text-[#0D1B3E]">Shop &amp; My Orders</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Place a pickup or nationwide delivery order, then track it here.</p>
         </div>
         <button onClick={() => setShowCreate(true)}
           className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium">
-          + New Order
+          + Place New Order
         </button>
       </div>
 

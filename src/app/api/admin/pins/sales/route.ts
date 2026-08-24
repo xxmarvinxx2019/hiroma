@@ -1,17 +1,32 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { getDashboardPeriod } from '@/app/lib/dashboardPeriod'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    let period
+    try {
+      period = getDashboardPeriod(req.nextUrl.searchParams)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid dashboard period.' },
+        { status: 400 },
+      )
+    }
+
     // ── Recent PIN sales ──
     const recentSales = await prisma.order.findMany({
-      where: { notes: { contains: 'PIN sale' } },
+      where: {
+        notes: { contains: 'PIN sale' },
+        status: { not: 'cancelled' },
+        created_at: { gte: period.start, lt: period.end },
+      },
       orderBy: { created_at: 'desc' },
       take: 20,
       select: {
@@ -28,6 +43,10 @@ export async function GET() {
     // ── By city distributor — group by city_dist_id, count only ──
     const byDistributorRaw = await prisma.pin.groupBy({
       by: ['city_dist_id'],
+      where: {
+        status: 'used',
+        used_at: { gte: period.start, lt: period.end },
+      },
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },
       take: 5,
@@ -44,6 +63,8 @@ export async function GET() {
           where: {
             buyer_id: d.city_dist_id,
             notes: { contains: 'PIN sale' },
+            status: { not: 'cancelled' },
+            created_at: { gte: period.start, lt: period.end },
           },
           _sum: { total_amount: true },
         })
@@ -59,6 +80,10 @@ export async function GET() {
     // ── By package — group by package_id, count only ──
     const byPackageRaw = await prisma.pin.groupBy({
       by: ['package_id'],
+      where: {
+        status: 'used',
+        used_at: { gte: period.start, lt: period.end },
+      },
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },
       take: 5,

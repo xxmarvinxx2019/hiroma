@@ -55,6 +55,9 @@ export async function GET(req: NextRequest) {
           status:         true,
           payment_status: true,
           payment_method: true,
+          fulfillment_method: true,
+          shipping_status: true,
+          shipping_fee: true,
           total_amount:   true,
           created_at:     true,
           notes:          true,
@@ -108,14 +111,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, payment_method, payment_reference, city_dist_id, delivery_address, delivery_location } = await req.json()
+    const { notes, items, payment_method, payment_reference, city_dist_id, delivery_address, delivery_location, fulfillment_method } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
     }
 
-    if (!['online', 'offline'].includes(order_type)) {
-      return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
+    if (!['partner_pickup', 'nationwide_delivery'].includes(fulfillment_method)) {
+      return NextResponse.json({ error: 'Choose Partner Pickup or Nationwide Delivery.' }, { status: 400 })
     }
 
     if (!delivery_address || typeof delivery_address !== 'string' || !delivery_address.trim()) {
@@ -133,12 +136,12 @@ export async function POST(req: NextRequest) {
         city_dist_id: true,
       },
     })
-    const activeDistributors = await prisma.user.findMany({
-      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: 'city' } } },
-      select: { id: true, full_name: true, username: true, distributor_profile: { select: { coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true } } },
-    })
+    const activeDistributors = fulfillment_method === 'partner_pickup' ? await prisma.user.findMany({
+      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: { in: ['city', 'branch'] } } } },
+      select: { id: true, full_name: true, username: true, distributor_profile: { select: { coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true, fulfillment_latitude: true, fulfillment_longitude: true } } },
+    }) : []
     const location = delivery_location && typeof delivery_location === 'object' ? delivery_location as Record<string, unknown> : {}
-    const recommendation = profile?.city_dist_id ? recommendFulfillmentDistributor(activeDistributors.map((distributor) => ({
+    const recommendation = fulfillment_method === 'partner_pickup' && profile?.city_dist_id ? recommendFulfillmentDistributor(activeDistributors.map((distributor) => ({
       id: distributor.id,
       full_name: distributor.full_name,
       coverage_area: distributor.distributor_profile?.coverage_area,
@@ -153,19 +156,27 @@ export async function POST(req: NextRequest) {
       city: typeof location.city === 'string' ? location.city : '',
       barangay: typeof location.barangay === 'string' ? location.barangay : '',
     }) : null
-    const cityDist = activeDistributors.find(({ id }) => id === recommendation?.distributor.id) || null
+    const pickupPartner = activeDistributors.find(({ id }) => id === recommendation?.distributor.id) || null
+    const nationwideSeller = fulfillment_method === 'nationwide_delivery'
+      ? await prisma.user.findFirst({
+          // Never route commerce to the reserved `hiroma` network/root node.
+          where: { username: 'hiroadmin', role: 'admin', status: 'active' },
+          select: { id: true, full_name: true, username: true },
+        })
+      : null
+    const seller = fulfillment_method === 'nationwide_delivery' ? nationwideSeller : pickupPartner
 
-    if (!cityDist) {
-      return NextResponse.json({ error: 'No active distributor is assigned to your account.' }, { status: 400 })
+    if (!seller) {
+      return NextResponse.json({ error: fulfillment_method === 'nationwide_delivery' ? 'Hiroma Main is temporarily unavailable for nationwide delivery.' : 'No active Hiroma partner or branch is available for pickup.' }, { status: 400 })
     }
-    if (city_dist_id && city_dist_id !== cityDist.id) {
+    if (fulfillment_method === 'partner_pickup' && city_dist_id && city_dist_id !== seller.id) {
       return NextResponse.json({ error: 'The fulfillment recommendation changed. Refresh the order and try again.' }, { status: 409 })
     }
 
     // Validate products
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const sellerProfile = await prisma.distributorProfile.findUnique({
-      where: { user_id: cityDist.id },
+      where: { user_id: seller.id },
       select: { dist_level: true },
     })
     const sellerIsBranch = sellerProfile?.dist_level === 'branch'
@@ -184,7 +195,7 @@ export async function POST(req: NextRequest) {
     const productMap = new Map(products.map((p) => [p.id, p]))
 
     const inventory = await prisma.inventory.findMany({
-      where: { owner_id: cityDist.id, product_id: { in: productIds } },
+      where: { owner_id: seller.id, product_id: { in: productIds } },
       select: { product_id: true, quantity: true },
     })
     const stockByProduct = new Map(inventory.map((item) => [item.product_id, item.quantity]))
@@ -194,7 +205,7 @@ export async function POST(req: NextRequest) {
     if (unavailable) {
       const product = productMap.get(unavailable.product_id)
       return NextResponse.json({
-        error: `Insufficient stock for ${product?.name || 'one or more items'} at ${cityDist.full_name}. Please change fulfillment distributor or adjust the quantity.`,
+        error: `Only ${stockByProduct.get(unavailable.product_id) || 0} unit(s) of ${product?.name || 'this product'} are available at ${seller.full_name}. Please reduce the quantity.`,
       }, { status: 400 })
     }
 
@@ -212,17 +223,20 @@ export async function POST(req: NextRequest) {
     })
 
     const order = await prisma.$transaction(async (tx) => {
-      await reserveOrderStock(tx, cityDist.id, items)
+      await reserveOrderStock(tx, seller.id, items)
       return tx.order.create({ data: {
         buyer_id:          user.id,
-        seller_id:         cityDist.id,
-        order_type,
+        seller_id:         seller.id,
+        order_type:        'online',
         status:            'pending',
         total_amount,
         is_cross_purchase: false,
+        fulfillment_method,
+        shipping_status:   fulfillment_method === 'nationwide_delivery' ? 'quote_pending' : null,
+        shipping_fee:      0,
         delivery_address:   delivery_address.trim(),
         notes:             notes?.trim() || null,
-        payment_method:      payment_method || 'cash_on_pickup',
+        payment_method:      fulfillment_method === 'nationwide_delivery' ? 'payment_after_shipping_quote' : (payment_method || 'cash_on_pickup'),
         payment_reference:   payment_reference?.trim()   || null,
         payment_status:      'unpaid',
         items:             { create: orderItems },
@@ -234,7 +248,9 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json({
       success: true,
-      message: `Order placed to ${cityDist.full_name}.`,
+      message: fulfillment_method === 'nationwide_delivery'
+        ? 'Order sent to Hiroma Main. Shipping fee and final payable total are pending an official courier quote.'
+        : `Pickup order sent to ${seller.full_name}.`,
       order,
     })
   } catch (error) {

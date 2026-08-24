@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "reset:prelaunch": "tsx scripts/prelaunch-reset.ts",
     "test:binary-accounting": "tsx --test tests/binaryAccounting.test.ts tests/dateRangePresets.test.ts",
     "verify:binary-accounting": "tsx scripts/verify-binary-accounting.ts"
   },

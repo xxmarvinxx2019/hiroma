@@ -1,0 +1,4 @@
+ALTER TABLE "pins"
+ADD COLUMN IF NOT EXISTS "cancelled_at" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "cancelled_by" UUID,
+ADD COLUMN IF NOT EXISTS "cancellation_reason" VARCHAR(500);

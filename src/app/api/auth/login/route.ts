@@ -184,7 +184,9 @@ export async function POST(req: NextRequest) {
       status:        'normal',
     })
 
-    const staffRedirect = user.role === 'staff' && owner.role === 'admin'
+    const staffRedirect = user.role === 'staff' && staffProfile?.staff_type === 'area_manager'
+      ? '/dashboard/area-manager'
+      : user.role === 'staff' && owner.role === 'admin'
       ? firstAdminStaffRoute(permissions || [])
       : getDashboardRoute(owner.role as UserRole)
     return NextResponse.json({
