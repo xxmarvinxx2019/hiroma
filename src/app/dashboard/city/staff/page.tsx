@@ -11,7 +11,7 @@ const permissionKeys = STAFF_PERMISSIONS.map(({ key }) => key)
 const emptyForm = { full_name: '', username: '', password: '', mobile: '', email: '', permissions: [] as string[] }
 const presets = [
   { label: 'Registration Staff', permissions: ['dashboard', 'resellers', 'register_reseller', 'pins'] },
-  { label: 'Sales Staff', permissions: ['dashboard', 'resellers', 'orders'] },
+  { label: 'Cashier / POS Staff', permissions: ['dashboard', 'resellers', 'orders', 'pos'] },
   { label: 'Inventory Staff', permissions: ['dashboard', 'inventory'] },
   { label: 'Custom Access', permissions: [] },
 ]

@@ -5,6 +5,7 @@ export const STAFF_PERMISSIONS = [
   { key: 'pins', label: 'PINs', description: 'View and use the owner account PIN inventory.' },
   { key: 'inventory', label: 'Inventory', description: 'View and manage product inventory.' },
   { key: 'orders', label: 'Orders / Sales', description: 'Create walk-in sales and manage orders.' },
+  { key: 'pos', label: 'Point of Sale', description: 'Use the assigned POS terminal, shifts, offline sales, and sync queue.' },
   { key: 'payment_methods', label: 'Payment Methods', description: 'View and manage payment methods.' },
   { key: 'pin_requests', label: 'PIN Requests', description: 'View and submit PIN requests.' },
 ] as const
