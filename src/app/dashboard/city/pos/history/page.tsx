@@ -267,6 +267,13 @@ export default function PosShiftHistoryPage() {
                         {row.payment_reference ? <span className="ml-2 text-gray-500">Ref: {row.payment_reference}</span> : null}
                         <span className={`ml-2 rounded-full px-2 py-1 font-bold ${row.status === "finalized" ? "bg-green-100 text-green-700" : ["rejected", "voided", "refunded"].includes(row.status) ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{row.status === "finalized" ? "Paid" : row.status === "rejected" ? "Rejected" : row.status === "voided" ? "VOIDED" : row.status === "refunded" ? "REFUNDED" : "Pending verification"}</span>
                       </div>
+                      {row.transaction_type === "member_sale" ? (
+                        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+                          <b>Member/Reseller receipt · Not eligible for void or refund.</b> The purchase may include PU, rewards, commissions, rank progress, or wallet credits.
+                        </p>
+                      ) : (
+                        <p className="mt-3 text-xs font-semibold text-emerald-700">Non-member/SRP receipt · Eligible for an independently reviewed void or refund request.</p>
+                      )}
                     </article>
                   ))
                 ) : (

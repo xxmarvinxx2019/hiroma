@@ -23,11 +23,20 @@ test('POS adjustment approval enforces maker approver and restores stock once', 
   assert.match(route, /payment_status: request\.request_type === 'void' \? 'voided' : 'refunded'/)
 })
 
-test('member POS reversals remain locked until commission clawback exists', () => {
+test('member POS reversals remain locked by permanent Hiroma refund policy', () => {
   const route = read('src/app/api/city/pos/adjustments/route.ts')
   assert.match(route, /transaction\.transaction_type !== 'non_member_sale'/)
-  assert.match(route, /PU, commissions, and wallet credits require a separate verified reversal workflow/)
+  assert.match(route, /member and reseller sales are not eligible for void or refund/)
   assert.match(route, /POS_MEMBER_REVERSAL_LOCKED/)
+})
+
+test('member receipts clearly disclose the non-refundable policy', () => {
+  const adjustments = read('src/app/dashboard/city/pos/adjustments/page.tsx')
+  const history = read('src/app/dashboard/city/pos/history/page.tsx')
+  const receipt = read('src/app/dashboard/city/pos/page.tsx')
+  assert.match(adjustments, /Member\/Reseller sale · Not eligible for void or refund/)
+  assert.match(history, /Member\/Reseller receipt · Not eligible for void or refund/)
+  assert.match(receipt, /Member\/Reseller purchase · Not eligible for void or refund/)
 })
 
 test('POS adjustment routes accept cashier or approver permission', () => {

@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       select: { id: true, receipt_number: true, transaction_type: true, total_snapshot: true },
     })
     if (!transaction) return NextResponse.json({ error: 'Only your own finalized POS receipt can be submitted for adjustment.' }, { status: 404 })
-    if (transaction.transaction_type !== 'non_member_sale') return NextResponse.json({ error: 'Member-sale refunds are temporarily locked because PU, commissions, and wallet credits require a separate verified reversal workflow. No financial record was changed.' }, { status: 409 })
+    if (transaction.transaction_type !== 'non_member_sale') return NextResponse.json({ error: 'Hiroma policy: member and reseller sales are not eligible for void or refund because the purchase may include PU, rewards, commissions, rank progress, or wallet credits. No financial record was changed.' }, { status: 409 })
 
     const created = await prisma.posAdjustmentRequest.create({
       data: {
@@ -181,7 +181,7 @@ export async function PATCH(req: NextRequest) {
     const code = error instanceof Error ? error.message : ''
     if (code === 'POS_SELF_APPROVAL') return NextResponse.json({ error: 'Maker–approver control: a different authorized account must review this request.' }, { status: 403 })
     if (code === 'POS_ADJUSTMENT_NOT_PENDING' || code === 'POS_TRANSACTION_NOT_ADJUSTABLE') return NextResponse.json({ error: 'This request is no longer pending or the receipt was already adjusted.' }, { status: 409 })
-    if (code === 'POS_MEMBER_REVERSAL_LOCKED') return NextResponse.json({ error: 'Member-sale reversal is locked to protect PU, commissions, and wallet records.' }, { status: 409 })
+    if (code === 'POS_MEMBER_REVERSAL_LOCKED') return NextResponse.json({ error: 'Hiroma policy: member and reseller sales are not eligible for void or refund because rewards and financial credits must remain final.' }, { status: 409 })
     return NextResponse.json({ error: 'Unable to save the void or refund decision safely.' }, { status: 500 })
   }
 }

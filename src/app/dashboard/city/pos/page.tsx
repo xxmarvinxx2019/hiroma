@@ -53,6 +53,7 @@ type Receipt = {
   payment_status?: "paid" | "pending_verification" | "rejected";
   created_at: string;
   customer_name: string;
+  customer_type?: "member" | "non_member";
   cashier_name: string;
   payment_method: string;
   payment_reference?: string | null;
@@ -447,6 +448,7 @@ export default function PointOfSalePage() {
         receipt_number: receiptNumber,
         created_at: localCreatedAt,
         customer_name: customerName || "Walk-in Customer",
+        customer_type: "non_member",
         cashier_name: data.cashier.full_name,
         payment_method: "Cash",
         total,
@@ -986,6 +988,7 @@ export default function PointOfSalePage() {
                 <p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p>
                 {receipt.sync_status === "saved_offline" && <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800">Recorded offline · awaiting synchronization</p>}
                 {receipt.payment_status === "pending_verification" && <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">Pending independent verification. This is not yet a paid receipt; do not release products until an authorized approver confirms the payment.</p>}
+                {receipt.customer_type === "member" && <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">Member/Reseller purchase · Not eligible for void or refund because this transaction may include PU, rewards, commissions, rank progress, or wallet credits.</p>}
               </div>
               <div className="mt-5 border-y py-4 text-sm">
                 <div className="flex justify-between gap-4">
