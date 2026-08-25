@@ -17,7 +17,9 @@ test('closing cannot finalize while transactions still need synchronization or r
   assert.match(route, /pending_sync/)
   assert.match(route, /synced_pending_review/)
   assert.match(route, /needs_correction/)
-  assert.match(route, /status: finalized \? 'finalized' : 'locally_closed'/)
+  assert.match(route, /if \(pending > 0\)/)
+  assert.match(route, /SHIFT_SYNC_INCOMPLETE/)
+  assert.doesNotMatch(route, /status: finalized \? 'finalized' : 'locally_closed'/)
   assert.match(route, /active_terminal_key: null/)
 })
 

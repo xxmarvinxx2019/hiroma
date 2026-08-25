@@ -92,6 +92,9 @@ export async function GET() {
         items: { select: { product_name_snapshot: true, quantity: true, unit_price_snapshot: true, subtotal_snapshot: true } },
       },
     })
+    const pendingSyncCount = await prisma.posTransaction.count({
+      where: { shift_id: shift.id, cashier_id: actorId, status: { in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'] } },
+    })
     const groups = new Map<string, { method: string; count: number; amount: number; provider_verified: boolean }>()
     for (const row of transactions) {
       const current = groups.get(row.payment_method_snapshot) || { method: row.payment_method_snapshot, count: 0, amount: 0, provider_verified: row.payment_method_snapshot.toLowerCase() === 'cash' }
@@ -116,6 +119,8 @@ export async function GET() {
         items: row.items.map((item) => ({ ...item, unit_price: Number(item.unit_price_snapshot), subtotal: Number(item.subtotal_snapshot) })),
       })),
       payment_groups: [...groups.values()].map((group) => ({ ...group, method: group.method.toLowerCase() === 'cash' ? 'Cash' : group.method, amount: closed ? group.amount : null })),
+      pending_sync_count: pendingSyncCount,
+      server_sync_complete: pendingSyncCount === 0,
       totals_hidden_until_close: !closed,
     })
   } catch (error) {

@@ -51,16 +51,17 @@ export async function PATCH(req: Request) {
       const shift = await tx.posShift.findFirst({ where: { id: shiftId, owner_id: user.id, status: 'open' }, select: { id: true, opening_cash: true } })
       if (!shift) return null
       const pending = await tx.posTransaction.count({ where: { shift_id: shift.id, status: { in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'] } } })
+      if (pending > 0) return { blocked: true as const, pending }
       const cashSales = await tx.posTransaction.aggregate({ where: { shift_id: shift.id, payment_method_snapshot: 'cash', status: { in: ['approved', 'finalized'] } }, _sum: { total_snapshot: true } })
       const expected = Number(shift.opening_cash) + Number(cashSales._sum.total_snapshot || 0)
-      const finalized = pending === 0
       return tx.posShift.update({
         where: { id: shift.id },
-        data: { closed_by_id: actorId, status: finalized ? 'finalized' : 'locally_closed', active_terminal_key: null, counted_cash: new Prisma.Decimal(countedCash), expected_cash_snapshot: new Prisma.Decimal(expected), variance_snapshot: new Prisma.Decimal(countedCash - expected), local_closed_at: new Date(), server_finalized_at: finalized ? new Date() : null },
+        data: { closed_by_id: actorId, status: 'finalized', active_terminal_key: null, counted_cash: new Prisma.Decimal(countedCash), expected_cash_snapshot: new Prisma.Decimal(expected), variance_snapshot: new Prisma.Decimal(countedCash - expected), local_closed_at: new Date(), server_finalized_at: new Date() },
         select: { id: true, status: true, expected_cash_snapshot: true, counted_cash: true, variance_snapshot: true, server_finalized_at: true },
       })
     })
     if (!result) return NextResponse.json({ error: 'Open shift not found or already closed.' }, { status: 409 })
+    if ('blocked' in result) return NextResponse.json({ error: `This shift cannot close because ${result.pending} transaction${result.pending === 1 ? ' is' : 's are'} not fully synchronized. Reconnect, finish synchronization, and resolve any transaction needing attention.`, code: 'SHIFT_SYNC_INCOMPLETE', pending_transactions: result.pending }, { status: 409 })
     return NextResponse.json({ shift: result })
   } catch (error) {
     console.error('[POS CLOSE SHIFT]', error)
