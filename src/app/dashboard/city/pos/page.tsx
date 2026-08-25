@@ -227,6 +227,15 @@ export default function PointOfSalePage() {
           setError("");
           return;
         }
+        if (result.code === "SHIFT_EXPLANATION_REQUIRED") {
+          setRecountRequired(true);
+          setRecountMismatch({
+            cash: result.required_explanations?.cash === true,
+            inventory: result.required_explanations?.inventory === true,
+          });
+          setError("");
+          return;
+        }
         throw new Error(result.error || "Unable to submit shift closing.");
       }
       const pendingApproval = result.pending_approval === true;

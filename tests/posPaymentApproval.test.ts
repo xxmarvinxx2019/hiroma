@@ -86,4 +86,7 @@ test('shift recount explanations are required per mismatched category', () => {
   assert.match(page, /Inventory recount explanation/)
   assert.match(page, /cash_explanation: cashRecountExplanation/)
   assert.match(page, /inventory_explanation: inventoryRecountExplanation/)
+  assert.match(page, /result\.code === "SHIFT_EXPLANATION_REQUIRED"/)
+  assert.match(page, /result\.required_explanations\?\.cash === true/)
+  assert.match(page, /result\.required_explanations\?\.inventory === true/)
 })
