@@ -28,6 +28,7 @@ const navItems = [
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
       { label: 'Point of Sale', href: '/dashboard/city/pos', icon: '🧾' },
+      { label: 'Shift History', href: '/dashboard/city/pos/history', icon: '🕘' },
       { label: 'Reports', href: '/dashboard/city/reports', icon: '📈' },
       { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑' },
@@ -51,6 +52,7 @@ const navPermission: Record<string, string> = {
   '/dashboard/city/inventory': 'inventory',
   '/dashboard/city/orders': 'orders',
   '/dashboard/city/pos': 'pos',
+  '/dashboard/city/pos/history': 'pos',
   '/dashboard/city/reports': 'orders',
   '/dashboard/city/payment-methods': 'payment_methods',
   '/dashboard/city/pin-requests': 'pin_requests',
@@ -85,6 +87,7 @@ function Sidebar({
 }) {
   const isActive = (href: string) => {
     if (href === '/dashboard/city') return pathname === href
+    if (href === '/dashboard/city/pos') return pathname === href
     return pathname.startsWith(href)
   }
 

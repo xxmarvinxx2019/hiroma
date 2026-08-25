@@ -42,7 +42,7 @@ export async function POST(req: Request) {
         },
         orderBy: { product: { name: 'asc' } },
       }),
-      prisma.paymentMethod.findMany({ where: { user_id: user.id, status: 'approved' }, select: { id: true, type: true, account_name: true, bank_name: true } }),
+      prisma.paymentMethod.findMany({ where: { user_id: user.id, status: 'approved' }, select: { id: true, type: true, account_name: true, account_number: true, bank_name: true } }),
       prisma.posShift.findFirst({ where: { terminal_id: terminal.id, opened_by_id: actorId, status: 'open' }, select: { id: true, opened_at: true, opening_cash: true } }),
     ])
 

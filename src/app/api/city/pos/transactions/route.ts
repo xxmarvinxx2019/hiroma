@@ -53,7 +53,7 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
     customer_name: transaction.customer_name_snapshot || 'Walk-in Customer',
     customer_type: transaction.transaction_type === 'member_sale' ? 'member' : 'non_member',
     cashier_name: transaction.cashier.full_name || transaction.cashier.username,
-    payment_method: transaction.payment_method_snapshot,
+    payment_method: transaction.payment_method_snapshot.toLowerCase() === 'cash' ? 'Cash' : transaction.payment_method_snapshot,
     payment_reference: transaction.payment_reference,
     subtotal: Number(transaction.subtotal_snapshot),
     total: Number(transaction.total_snapshot),
@@ -67,6 +67,60 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
       subtotal: Number(item.subtotal_snapshot),
       stock_after: item.local_stock_after,
     })),
+  }
+}
+
+export async function GET() {
+  const user = await getCurrentUser()
+  if (!user || user.role !== 'city') return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 })
+  const actorId = user.actor_id || user.id
+  try {
+    const shift = await prisma.posShift.findFirst({
+      where: { owner_id: user.id, opened_by_id: actorId },
+      orderBy: [{ opened_at: 'desc' }],
+      select: { id: true, terminal_id: true, status: true, opening_cash: true, expected_cash_snapshot: true, counted_cash: true, variance_snapshot: true, opened_at: true, local_closed_at: true },
+    })
+    if (!shift) return NextResponse.json({ shift: null, transactions: [], payment_groups: [] })
+    const transactions = await prisma.posTransaction.findMany({
+      where: { shift_id: shift.id, cashier_id: actorId, status: { in: ['approved', 'finalized'] } },
+      orderBy: { finalized_at: 'desc' },
+      select: {
+        id: true, client_transaction_id: true, transaction_type: true, customer_name_snapshot: true,
+        payment_method_snapshot: true, payment_reference: true, total_snapshot: true, amount_received_snapshot: true,
+        change_snapshot: true, finalized_at: true,
+        order: { select: { id: true, order_number: true } },
+        items: { select: { product_name_snapshot: true, quantity: true, unit_price_snapshot: true, subtotal_snapshot: true } },
+      },
+    })
+    const groups = new Map<string, { method: string; count: number; amount: number; provider_verified: boolean }>()
+    for (const row of transactions) {
+      const current = groups.get(row.payment_method_snapshot) || { method: row.payment_method_snapshot, count: 0, amount: 0, provider_verified: row.payment_method_snapshot.toLowerCase() === 'cash' }
+      current.count += 1
+      current.amount += Number(row.total_snapshot)
+      groups.set(row.payment_method_snapshot, current)
+    }
+    const closed = shift.status !== 'open'
+    return NextResponse.json({
+      shift: {
+        ...shift,
+        opening_cash: Number(shift.opening_cash),
+        expected_cash: closed && shift.expected_cash_snapshot != null ? Number(shift.expected_cash_snapshot) : null,
+        counted_cash: shift.counted_cash != null ? Number(shift.counted_cash) : null,
+        variance: closed && shift.variance_snapshot != null ? Number(shift.variance_snapshot) : null,
+      },
+      transactions: transactions.map((row) => ({
+        ...row,
+        payment_method_snapshot: row.payment_method_snapshot.toLowerCase() === 'cash' ? 'Cash' : row.payment_method_snapshot,
+        receipt_number: row.order?.order_number || (row.order ? `POS-${row.order.id.slice(0, 8).toUpperCase()}` : `POS-${row.id.slice(0, 8).toUpperCase()}`),
+        total: Number(row.total_snapshot), amount_received: Number(row.amount_received_snapshot), change: Number(row.change_snapshot),
+        items: row.items.map((item) => ({ ...item, unit_price: Number(item.unit_price_snapshot), subtotal: Number(item.subtotal_snapshot) })),
+      })),
+      payment_groups: [...groups.values()].map((group) => ({ ...group, method: group.method.toLowerCase() === 'cash' ? 'Cash' : group.method, amount: closed ? group.amount : null })),
+      totals_hidden_until_close: !closed,
+    })
+  } catch (error) {
+    console.error('[POS SHIFT HISTORY]', error)
+    return NextResponse.json({ error: 'Unable to load this cashier shift history.' }, { status: 500 })
   }
 }
 
@@ -118,12 +172,12 @@ export async function POST(req: NextRequest) {
         : null
       if (customerType === 'member' && !member) throw new Error('POS_MEMBER_INVALID')
 
-      let paymentMethodSnapshot = 'Cash'
+      let paymentMethodSnapshot = 'cash'
       if (paymentSelection !== 'cash') {
-        const method = await tx.paymentMethod.findFirst({ where: { id: paymentSelection, user_id: user.id, status: 'approved' }, select: { type: true, account_name: true } })
+        const method = await tx.paymentMethod.findFirst({ where: { id: paymentSelection, user_id: user.id, status: 'approved' }, select: { type: true, account_name: true, account_number: true, bank_name: true } })
         if (!method) throw new Error('POS_PAYMENT_INVALID')
         if (!paymentReference) throw new Error('POS_PAYMENT_REFERENCE_REQUIRED')
-        paymentMethodSnapshot = `${method.type.toUpperCase()} · ${method.account_name}`.slice(0, 120)
+        paymentMethodSnapshot = `${method.type.toUpperCase()} · ${method.account_name} · ${method.account_number}${method.bank_name ? ` · ${method.bank_name}` : ''}`.slice(0, 120)
       }
 
       const owner = await tx.user.findUnique({ where: { id: user.id }, select: { distributor_profile: { select: { dist_level: true } } } })
