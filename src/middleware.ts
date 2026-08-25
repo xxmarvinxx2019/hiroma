@@ -89,6 +89,9 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(COOKIE_NAME)?.value
 
   if (!token) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Your session has expired. Please sign in again.' }, { status: 401 })
+    }
     return NextResponse.redirect(new URL('/login', req.url))
   }
 
@@ -98,6 +101,9 @@ export async function middleware(req: NextRequest) {
     const role = payload.role as string
 
     if (!role) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'Your session is invalid. Please sign in again.' }, { status: 401 })
+      }
       return NextResponse.redirect(new URL('/login', req.url))
     }
 
@@ -168,7 +174,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   } catch {
     // ── Invalid or expired token ──
-    const response = NextResponse.redirect(new URL('/login', req.url))
+    const response = pathname.startsWith('/api/')
+      ? NextResponse.json({ error: 'Your session has expired. Please sign in again.' }, { status: 401 })
+      : NextResponse.redirect(new URL('/login', req.url))
     response.cookies.delete(COOKIE_NAME)
     return response
   }
