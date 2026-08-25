@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { randomUUID } from 'node:crypto'
 
 function cleanText(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+function locationCode(value: string | null | undefined): string {
+  return (value || 'MAIN')
+    .replace(/[^a-z0-9]/gi, '')
+    .slice(0, 3)
+    .toUpperCase()
+    .padEnd(3, 'X')
 }
 
 export async function POST(req: Request) {
@@ -19,37 +28,124 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Terminal installation ID and name are required.' }, { status: 400 })
     }
 
-    const existing = await prisma.posTerminal.findUnique({ where: { installation_id: installationId } })
+    const existing = await prisma.posTerminal.findUnique({
+      where: { installation_id: installationId },
+    })
     if (existing && existing.owner_id !== user.id) {
-      return NextResponse.json({ error: 'This POS installation is already assigned to another location.' }, { status: 409 })
+      return NextResponse.json(
+        {
+          error: 'This POS installation is already assigned to another location.',
+        },
+        { status: 409 },
+      )
     }
 
     const actorId = user.actor_id || user.id
+    const terminalId = existing?.id || randomUUID()
     const terminal = existing
-      ? await prisma.posTerminal.update({ where: { id: existing.id }, data: { platform, is_active: true } })
-      : await prisma.posTerminal.create({ data: { owner_id: user.id, installation_id: installationId, name: terminalName, platform } })
+      ? await prisma.posTerminal.update({
+          where: { id: existing.id },
+          data: { platform, is_active: true },
+        })
+      : await prisma.posTerminal.create({
+          data: {
+            id: terminalId,
+            owner_id: user.id,
+            installation_id: installationId,
+            name: terminalName,
+            platform,
+            receipt_code: terminalId.replaceAll('-', '').slice(-7).toUpperCase(),
+          },
+        })
 
     const [owner, inventory, paymentMethods, openShift] = await Promise.all([
       prisma.user.findUnique({
         where: { id: user.id },
-        select: { id: true, full_name: true, distributor_profile: { select: { dist_level: true, coverage_area: true, fulfillment_outlet_name: true } } },
+        select: {
+          id: true,
+          full_name: true,
+          distributor_profile: {
+            select: {
+              dist_level: true,
+              coverage_area: true,
+              fulfillment_outlet_name: true,
+            },
+          },
+        },
       }),
       prisma.inventory.findMany({
         where: { owner_id: user.id, product: { is_active: true } },
         select: {
-          product_id: true, quantity: true, reserved_quantity: true, updated_at: true,
-          product: { select: { name: true, type: true, reseller_price: true, price: true, city_price: true, branch_price: true, cost_price: true, pu_value: true } },
+          product_id: true,
+          quantity: true,
+          reserved_quantity: true,
+          updated_at: true,
+          product: {
+            select: {
+              name: true,
+              type: true,
+              reseller_price: true,
+              price: true,
+              city_price: true,
+              branch_price: true,
+              cost_price: true,
+              pu_value: true,
+            },
+          },
         },
         orderBy: { product: { name: 'asc' } },
       }),
-      prisma.paymentMethod.findMany({ where: { user_id: user.id, status: 'approved' }, select: { id: true, type: true, account_name: true, account_number: true, bank_name: true } }),
-      prisma.posShift.findFirst({ where: { terminal_id: terminal.id, opened_by_id: actorId, status: 'open' }, select: { id: true, opened_at: true, opening_cash: true } }),
+      prisma.paymentMethod.findMany({
+        where: { user_id: user.id, status: 'approved' },
+        select: {
+          id: true,
+          type: true,
+          account_name: true,
+          account_number: true,
+          bank_name: true,
+        },
+      }),
+      prisma.posShift.findFirst({
+        where: {
+          terminal_id: terminal.id,
+          opened_by_id: actorId,
+          status: 'open',
+        },
+        select: { id: true, opened_at: true, opening_cash: true },
+      }),
     ])
 
-    await prisma.posTerminal.update({ where: { id: terminal.id }, data: { last_catalog_at: new Date(), last_inventory_at: new Date() } })
+    await prisma.posTerminal.update({
+      where: { id: terminal.id },
+      data: { last_catalog_at: new Date(), last_inventory_at: new Date() },
+    })
+
+    const suppliedRange = body.receipt_range
+    const validRange = suppliedRange && suppliedRange.terminal_id === terminal.id && Number.isInteger(suppliedRange.start) && Number.isInteger(suppliedRange.end) && Number.isInteger(suppliedRange.next) && suppliedRange.start > 0 && suppliedRange.start <= suppliedRange.next && suppliedRange.next <= suppliedRange.end && suppliedRange.end < terminal.receipt_sequence_next
+    let receiptRange = validRange ? suppliedRange : null
+    if (!receiptRange) {
+      const reserved = await prisma.posTerminal.update({
+        where: { id: terminal.id },
+        data: { receipt_sequence_next: { increment: 100 } },
+        select: { receipt_sequence_next: true },
+      })
+      receiptRange = {
+        terminal_id: terminal.id,
+        start: reserved.receipt_sequence_next - 100,
+        end: reserved.receipt_sequence_next - 1,
+        next: reserved.receipt_sequence_next - 100,
+      }
+    }
 
     return NextResponse.json({
-      terminal: { id: terminal.id, name: terminal.name, installation_id: terminal.installation_id },
+      terminal: {
+        id: terminal.id,
+        name: terminal.name,
+        installation_id: terminal.installation_id,
+        receipt_code: terminal.receipt_code,
+      },
+      receipt_location_code: locationCode(owner?.distributor_profile?.coverage_area || owner?.full_name),
+      receipt_range: receiptRange,
       location: owner,
       open_shift: openShift,
       catalog: inventory.map((row) => ({

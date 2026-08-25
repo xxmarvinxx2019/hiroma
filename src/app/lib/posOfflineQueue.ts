@@ -40,6 +40,21 @@ export const saveQueuedSale = (sale: PosQueuedSale) => operateStore('readwrite',
 export const deleteQueuedSale = (id: string) => operateStore('readwrite', (store) => store.delete(id))
 export const listQueuedSales = () => operateStore<PosQueuedSale[]>('readonly', (store) => store.getAll())
 
-export function permanentReceiptNumber(terminalId: string, transactionId: string): string {
-  return `HRM-${terminalId.slice(0, 8).toUpperCase()}-${transactionId.replaceAll('-', '').toUpperCase()}`
+export type PosReceiptRange = {
+  terminal_id: string
+  start: number
+  end: number
+  next: number
+}
+
+export function permanentReceiptNumber(locationCode: string, terminalCode: string, date: Date, sequence: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || ''
+  const stamp = `${value('year')}${value('month')}${value('day')}`
+  return `HRM-${locationCode}-${terminalCode}-${stamp}-${String(sequence).padStart(6, '0')}`
 }

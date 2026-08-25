@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import PosInstallControl from "@/app/components/pos/PosInstallControl";
-import { deleteQueuedSale, listQueuedSales, permanentReceiptNumber, PosQueuedSale, saveQueuedSale } from "@/app/lib/posOfflineQueue";
+import { deleteQueuedSale, listQueuedSales, permanentReceiptNumber, PosQueuedSale, PosReceiptRange, saveQueuedSale } from "@/app/lib/posOfflineQueue";
 
 type Bootstrap = {
-  terminal: { id: string; name: string };
+  terminal: { id: string; name: string; receipt_code: string };
+  receipt_location_code: string;
+  receipt_range: PosReceiptRange;
   location: {
     full_name: string;
     distributor_profile?: {
@@ -96,6 +98,12 @@ export default function PointOfSalePage() {
       localStorage.setItem(installationKey, installationId);
     }
     const platform = `${navigator.platform || "Web"} · ${navigator.userAgent.includes("Mobile") ? "Mobile" : "Desktop"}`;
+    let receiptRange: PosReceiptRange | null = null;
+    try {
+      receiptRange = JSON.parse(localStorage.getItem("hiroma_pos_receipt_range") || "null");
+    } catch {
+      localStorage.removeItem("hiroma_pos_receipt_range");
+    }
     fetch("/api/city/pos/bootstrap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -103,6 +111,7 @@ export default function PointOfSalePage() {
         installation_id: installationId,
         name: `POS ${installationId.slice(0, 8).toUpperCase()}`,
         platform,
+        receipt_range: receiptRange,
       }),
     })
       .then(async (response) => {
@@ -110,6 +119,7 @@ export default function PointOfSalePage() {
         if (!response.ok) throw new Error(result.error || "Unable to initialize POS.");
         setError("");
         setData(result);
+        localStorage.setItem("hiroma_pos_receipt_range", JSON.stringify(result.receipt_range));
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to initialize POS."));
     return () => {
@@ -270,11 +280,21 @@ export default function PointOfSalePage() {
   async function completeSale() {
     if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return;
     if (!transactionId.current) transactionId.current = crypto.randomUUID();
-    const receiptNumber = permanentReceiptNumber(data.terminal.id, transactionId.current);
     const localCreatedAt = new Date().toISOString();
+    const range = data.receipt_range;
+    if (!range || range.next > range.end) {
+      setError("This terminal needs a new reserved receipt-number range. Reconnect and refresh the POS.");
+      return;
+    }
+    const receiptSequence = range.next;
+    const nextRange = { ...range, next: range.next + 1 };
+    const receiptNumber = permanentReceiptNumber(data.receipt_location_code, data.terminal.receipt_code, new Date(localCreatedAt), receiptSequence);
+    setData((current) => (current ? { ...current, receipt_range: nextRange } : current));
+    localStorage.setItem("hiroma_pos_receipt_range", JSON.stringify(nextRange));
     const payload = {
       client_transaction_id: transactionId.current,
       receipt_number: receiptNumber,
+      receipt_sequence: receiptSequence,
       terminal_id: data.terminal.id,
       shift_id: data.open_shift.id,
       customer_type: customerType,
@@ -423,7 +443,9 @@ export default function PointOfSalePage() {
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
               <h2 className="text-lg font-bold text-[#071638]">{data?.open_shift ? "Shift is open" : "Start cashier operations"}</h2>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{data?.open_shift ? "This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift." : "Enter the physical cash currently inside the drawer before accepting the first transaction."}</p>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+                {data?.open_shift ? "This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift." : "Enter the physical cash currently inside the drawer before accepting the first transaction."}
+              </p>
             </div>
             <button disabled={!data || Boolean(data.open_shift)} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
               {data?.open_shift ? "Shift Open" : "Open Shift"}
@@ -440,11 +462,19 @@ export default function PointOfSalePage() {
             <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,.65fr)]">
               <div className="border-b p-5 lg:border-b-0 lg:border-r sm:p-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <button type="button" onClick={() => selectCustomerType("member")} className={`rounded-xl border p-4 text-left transition ${customerType === "member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}>
+                  <button
+                    type="button"
+                    onClick={() => selectCustomerType("member")}
+                    className={`rounded-xl border p-4 text-left transition ${customerType === "member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}
+                  >
                     <b className="block text-sm text-[#071638]">Member / Reseller</b>
                     <span className="mt-1 block text-xs text-gray-500">Identify member · reseller price</span>
                   </button>
-                  <button type="button" onClick={() => selectCustomerType("non_member")} className={`rounded-xl border p-4 text-left transition ${customerType === "non_member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}>
+                  <button
+                    type="button"
+                    onClick={() => selectCustomerType("non_member")}
+                    className={`rounded-xl border p-4 text-left transition ${customerType === "non_member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}
+                  >
                     <b className="block text-sm text-[#071638]">Non-member</b>
                     <span className="mt-1 block text-xs text-gray-500">Walk-in customer · SRP</span>
                   </button>
@@ -469,7 +499,12 @@ export default function PointOfSalePage() {
                     ) : (
                       <>
                         <label className="text-xs font-bold text-[#071638]">Search member nationwide</label>
-                        <input value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Username, member ID, or full name" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                        <input
+                          value={memberSearch}
+                          onChange={(event) => setMemberSearch(event.target.value)}
+                          placeholder="Username, member ID, or full name"
+                          className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
+                        />
                         {memberSearch.trim().length > 0 && memberSearch.trim().length < 2 && <p className="mt-2 text-xs text-amber-700">Enter at least 2 characters.</p>}
                         {(searchingMember || memberResults.length > 0) && (
                           <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border bg-white shadow-xl">
@@ -503,13 +538,24 @@ export default function PointOfSalePage() {
                     <span className="text-xs font-bold text-[#071638]">
                       Customer name <span className="font-normal text-gray-400">(optional)</span>
                     </span>
-                    <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} maxLength={120} placeholder="Walk-in customer" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                    <input
+                      value={customerName}
+                      onChange={(event) => setCustomerName(event.target.value)}
+                      maxLength={120}
+                      placeholder="Walk-in customer"
+                      className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
+                    />
                   </label>
                 )}
 
                 <div className="mt-5 border-t pt-5">
                   <label className="text-xs font-bold text-[#071638]">Products</label>
-                  <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products…" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                  <input
+                    value={productSearch}
+                    onChange={(event) => setProductSearch(event.target.value)}
+                    placeholder="Search products…"
+                    className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
+                  />
                 </div>
                 <div className="mt-3 space-y-2">
                   {filteredProducts.map((product) => {
@@ -531,7 +577,16 @@ export default function PointOfSalePage() {
                           <button disabled={quantity === 0} onClick={() => setQuantity(product.product_id, quantity - 1)} className="h-9 w-9 rounded-lg border font-bold disabled:opacity-30">
                             −
                           </button>
-                          <input aria-label={`${product.name} quantity`} type="number" min="0" max={product.stock} value={quantity || ""} placeholder="0" onChange={(event) => setQuantity(product.product_id, Number(event.target.value))} className="h-9 w-16 rounded-lg border text-center text-sm font-bold outline-none focus:border-[#d4af45]" />
+                          <input
+                            aria-label={`${product.name} quantity`}
+                            type="number"
+                            min="0"
+                            max={product.stock}
+                            value={quantity || ""}
+                            placeholder="0"
+                            onChange={(event) => setQuantity(product.product_id, Number(event.target.value))}
+                            className="h-9 w-16 rounded-lg border text-center text-sm font-bold outline-none focus:border-[#d4af45]"
+                          />
                           <button disabled={quantity >= product.stock} onClick={() => setQuantity(product.product_id, quantity + 1)} className="h-9 w-9 rounded-lg bg-[#071638] font-bold text-white disabled:opacity-30">
                             +
                           </button>
@@ -610,7 +665,13 @@ export default function PointOfSalePage() {
                   {!isCash && (
                     <label className="mt-4 block text-xs font-bold text-[#071638]">
                       Payment reference
-                      <input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} maxLength={160} placeholder="Transaction or reference number" className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                      <input
+                        value={paymentReference}
+                        onChange={(event) => setPaymentReference(event.target.value)}
+                        maxLength={160}
+                        placeholder="Transaction or reference number"
+                        className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]"
+                      />
                     </label>
                   )}
                   {isCash && received >= total && total > 0 && (
@@ -622,10 +683,18 @@ export default function PointOfSalePage() {
                     </p>
                   )}
                   {!customerReady && <p className="mt-3 text-xs font-semibold text-amber-700">Identify and verify the member before checkout.</p>}
-                  <button disabled={!customerReady || !paymentReady || cartRows.length === 0 || submittingSale || (!online && (!isCash || customerType === "member"))} onClick={completeSale} className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
+                  <button
+                    disabled={!customerReady || !paymentReady || cartRows.length === 0 || submittingSale || (!online && (!isCash || customerType === "member"))}
+                    onClick={completeSale}
+                    className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                     {submittingSale ? "Completing safely…" : online ? "Complete Sale" : "Save Offline Sale"}
                   </button>
-                  <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">{online ? "Online checkout revalidates the shift, official price, payment, and stock before saving exactly once." : "Offline checkout currently supports non-member cash sales. Its permanent receipt number remains unchanged after synchronization."}</p>
+                  <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">
+                    {online
+                      ? "Online checkout revalidates the shift, official price, payment, and stock before saving exactly once."
+                      : "Offline checkout currently supports non-member cash sales. Its permanent receipt number remains unchanged after synchronization."}
+                  </p>
                 </div>
               </aside>
             </div>

@@ -3,27 +3,26 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { permanentReceiptNumber } from '../src/app/lib/posOfflineQueue'
 
-test('a POS receipt number remains deterministic from its permanent transaction UUID', () => {
-  const terminal = '12345678-1234-4234-9234-123456789abc'
-  const transaction = 'abcdef12-3456-4789-9234-abcdef123456'
-  const first = permanentReceiptNumber(terminal, transaction)
-  assert.equal(first, 'HRM-12345678-ABCDEF12345647899234ABCDEF123456')
-  assert.equal(permanentReceiptNumber(terminal, transaction), first)
-  assert.match(first, /^HRM-[A-F0-9]{8}-[A-F0-9]{32}$/)
+test('a printed POS receipt uses the standardized readable format', () => {
+  const date = new Date(2026, 7, 25, 11, 30)
+  const first = permanentReceiptNumber('SOG', '1F879AA', date, 123)
+  assert.equal(first, 'HRM-SOG-1F879AA-260825-000123')
+  assert.equal(permanentReceiptNumber('SOG', '1F879AA', date, 123), first)
+  assert.match(first, /^HRM-[A-Z0-9]{3}-[A-F0-9]{7}-[0-9]{6}-[0-9]{6}$/)
 })
 
-test('different transaction UUIDs cannot print the same receipt number', () => {
-  const terminal = '12345678-1234-4234-9234-123456789abc'
-  assert.notEqual(
-    permanentReceiptNumber(terminal, 'abcdef12-3456-4789-9234-abcdef123456'),
-    permanentReceiptNumber(terminal, 'abcdef12-3456-4789-9234-bbcdef123456'),
-  )
+test('different reserved sequences cannot print the same receipt number', () => {
+  const date = new Date(2026, 7, 25)
+  assert.notEqual(permanentReceiptNumber('SOG', '1F879AA', date, 123), permanentReceiptNumber('SOG', '1F879AA', date, 124))
 })
 
 test('the server persists and replays the client-issued permanent receipt number', () => {
   const route = readFileSync('src/app/api/city/pos/transactions/route.ts', 'utf8')
   const migration = readFileSync('prisma/migrations/20260825150000_add_permanent_pos_receipt/migration.sql', 'utf8')
+  const reservationMigration = readFileSync('prisma/migrations/20260825160000_add_pos_receipt_sequence_reservation/migration.sql', 'utf8')
   assert.match(route, /receipt_number: receiptNumber/)
   assert.match(route, /receipt_number: transaction\.receipt_number/)
+  assert.match(route, /POS_RECEIPT_UNRESERVED/)
   assert.match(migration, /CREATE UNIQUE INDEX "pos_transactions_receipt_number_key"/)
+  assert.match(reservationMigration, /pos_transactions_terminal_id_receipt_sequence_key/)
 })
