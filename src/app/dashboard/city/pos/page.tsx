@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import PosInstallControl from '@/app/components/pos/PosInstallControl'
 
 type Bootstrap = {
@@ -13,6 +13,11 @@ type Bootstrap = {
 
 type Member = { id: string; member_id: string | null; username: string; full_name: string }
 type CustomerType = 'member' | 'non_member'
+type Receipt = {
+  client_transaction_id: string; receipt_number: string; created_at: string; customer_name: string; cashier_name: string
+  payment_method: string; payment_reference?: string | null; total: number; amount_received: number; change: number
+  items: Array<{ product_id: string; name: string; quantity: number; unit_price: number; subtotal: number; stock_after: number }>
+}
 
 export default function PointOfSalePage() {
   const [data, setData] = useState<Bootstrap | null>(null)
@@ -31,6 +36,10 @@ export default function PointOfSalePage() {
   const [cart, setCart] = useState<Record<string, number>>({})
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [amountReceived, setAmountReceived] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [submittingSale, setSubmittingSale] = useState(false)
+  const [receipt, setReceipt] = useState<Receipt | null>(null)
+  const transactionId = useRef('')
 
   useEffect(() => {
     const updateConnection = () => setOnline(navigator.onLine)
@@ -61,7 +70,6 @@ export default function PointOfSalePage() {
 
   useEffect(() => {
     if (customerType !== 'member' || selectedMember || memberSearch.trim().length < 2 || !online) {
-      setMemberResults([])
       return
     }
     const controller = new AbortController()
@@ -91,7 +99,7 @@ export default function PointOfSalePage() {
   const received = Number(amountReceived) || 0
   const isCash = paymentMethod === 'cash'
   const customerReady = customerType === 'non_member' || Boolean(selectedMember)
-  const paymentReady = isCash ? received >= total && total > 0 : total > 0
+  const paymentReady = isCash ? received >= total && total > 0 : total > 0 && paymentReference.trim().length > 0
 
   function setQuantity(productId: string, next: number) {
     const product = data?.catalog.find((item) => item.product_id === productId)
@@ -107,6 +115,8 @@ export default function PointOfSalePage() {
     setMemberResults([])
     setCart({})
     setAmountReceived('')
+    setPaymentReference('')
+    transactionId.current = ''
   }
 
   useEffect(() => {
@@ -134,6 +144,58 @@ export default function PointOfSalePage() {
       setError(reason instanceof Error ? reason.message : 'Unable to open shift.')
     } finally {
       setSavingShift(false)
+    }
+  }
+
+  async function completeSale() {
+    if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return
+    if (!online) {
+      setError('This checkout is ready, but offline sale queuing is not enabled yet. Reconnect before completing this sale.')
+      return
+    }
+    if (!transactionId.current) transactionId.current = crypto.randomUUID()
+    setSubmittingSale(true)
+    setError('')
+    try {
+      const response = await fetch('/api/city/pos/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_transaction_id: transactionId.current,
+          terminal_id: data.terminal.id,
+          shift_id: data.open_shift.id,
+          customer_type: customerType,
+          member_id: selectedMember?.id || null,
+          customer_name: customerName,
+          payment_method: paymentMethod,
+          payment_reference: isCash ? null : paymentReference,
+          amount_received: isCash ? received : total,
+          items: cartRows.map((row) => ({ product_id: row.product_id, quantity: row.quantity })),
+          local_created_at: new Date().toISOString(),
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'The sale could not be completed.')
+      const nextReceipt = result.receipt as Receipt
+      setReceipt(nextReceipt)
+      setData((current) => current ? {
+        ...current,
+        catalog: current.catalog.map((product) => {
+          const sold = nextReceipt.items.find((item) => item.product_id === product.product_id)
+          return sold ? { ...product, stock: sold.stock_after } : product
+        }),
+      } : current)
+      setCart({})
+      setSelectedMember(null)
+      setMemberSearch('')
+      setCustomerName('')
+      setAmountReceived('')
+      setPaymentReference('')
+      transactionId.current = ''
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The sale could not be completed safely.')
+    } finally {
+      setSubmittingSale(false)
     }
   }
 
@@ -179,17 +241,19 @@ export default function PointOfSalePage() {
             <h3 className="font-bold text-[#071638]">Order summary</h3>
             <div className="mt-4 min-h-32 flex-1 space-y-3">{cartRows.length ? cartRows.map((row) => <div key={row.product_id} className="rounded-xl border bg-white p-3"><div className="flex justify-between gap-3"><b className="text-sm text-[#071638]">{row.name}</b><b className="text-sm">₱{row.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div><p className="mt-1 text-xs text-gray-500">{row.quantity} × ₱{row.unitPrice.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></div>) : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No items yet</p>}</div>
             <div className="mt-5 border-t pt-5"><div className="flex items-center justify-between text-lg font-bold text-[#071638]"><span>Total</span><span>₱{total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-              <label className="mt-4 block text-xs font-bold text-[#071638]">Payment method<select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setAmountReceived('') }} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]">{data.payment_methods.map((method) => <option key={method.id} value={method.type === 'cash' ? 'cash' : method.id}>{method.type === 'cash' ? 'Cash' : `${method.type.toUpperCase()} · ${method.account_name}`}</option>)}</select></label>
+              <label className="mt-4 block text-xs font-bold text-[#071638]">Payment method<select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setAmountReceived(''); setPaymentReference('') }} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]">{data.payment_methods.map((method) => <option key={method.id} value={method.type === 'cash' ? 'cash' : method.id}>{method.type === 'cash' ? 'Cash' : `${method.type.toUpperCase()} · ${method.account_name}`}</option>)}</select></label>
               {isCash && <label className="mt-4 block text-xs font-bold text-[#071638]">Cash received<div className="mt-2 flex items-center rounded-xl border bg-white px-3 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input value={amountReceived} onChange={(event) => setAmountReceived(event.target.value)} type="number" min="0" step="0.01" className="w-full bg-transparent px-2 py-3 text-sm font-bold outline-none" /></div></label>}
+              {!isCash && <label className="mt-4 block text-xs font-bold text-[#071638]">Payment reference<input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} maxLength={160} placeholder="Transaction or reference number" className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]" /></label>}
               {isCash && received >= total && total > 0 && <p className="mt-3 text-sm font-bold text-green-700">Change: ₱{(received - total).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>}
               {!customerReady && <p className="mt-3 text-xs font-semibold text-amber-700">Identify and verify the member before checkout.</p>}
-              <button disabled className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] opacity-50">Complete Sale</button>
-              <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">Checkout preview is ready. Server finalization and offline synchronization are connected in the next safety stage; no inventory is changed yet.{customerReady && paymentReady ? ' This order is ready for that finalizer.' : ''}</p>
+              <button disabled={!online || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale} onClick={completeSale} className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">{submittingSale ? 'Completing safely…' : 'Complete Sale'}</button>
+              <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">Online checkout revalidates the shift, official price, payment, and stock before saving exactly once.{!online ? ' Offline queuing will be enabled in the next safety stage.' : ''}</p>
             </div>
           </aside>
         </div>
       </section>}
       {showOpenShift && <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="open-shift-title"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 id="open-shift-title" className="text-xl font-bold text-[#071638]">Open cashier shift</h2><p className="mt-2 text-sm leading-6 text-gray-600">Count the cash already in the drawer. This becomes the shift’s opening cash—not a sale.</p><label className="mt-5 block text-sm font-bold text-[#071638]">Opening cash</label><div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input type="number" min="0" step="0.01" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none" /></div><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowOpenShift(false)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">Cancel</button><button type="button" disabled={savingShift || Number(openingCash) < 0} onClick={openShift} className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] disabled:opacity-50">{savingShift ? 'Opening…' : 'Confirm & Open'}</button></div></div></div>}
+      {receipt && <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title"><div className="my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="text-center"><p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p><h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">Payment received</h2><p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p></div><div className="mt-5 border-y py-4 text-sm"><div className="flex justify-between gap-4"><span className="text-gray-500">Customer</span><b className="text-right">{receipt.customer_name}</b></div><div className="mt-2 flex justify-between gap-4"><span className="text-gray-500">Cashier</span><b className="text-right">{receipt.cashier_name}</b></div><div className="mt-2 flex justify-between gap-4"><span className="text-gray-500">Date</span><b className="text-right">{new Date(receipt.created_at).toLocaleString('en-PH')}</b></div></div><div className="my-4 space-y-3">{receipt.items.map((item) => <div key={item.product_id} className="flex justify-between gap-4 text-sm"><div><b>{item.name}</b><p className="text-xs text-gray-500">{item.quantity} × ₱{item.unit_price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></div><b>₱{item.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>)}</div><div className="border-t pt-4 text-sm"><div className="flex justify-between text-lg font-bold"><span>Total</span><span>₱{receipt.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div><div className="mt-2 flex justify-between"><span className="text-gray-500">Payment</span><b>{receipt.payment_method}</b></div><div className="mt-2 flex justify-between"><span className="text-gray-500">Received</span><b>₱{receipt.amount_received.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>{receipt.change > 0 && <div className="mt-2 flex justify-between text-green-700"><span>Change</span><b>₱{receipt.change.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>}</div><div className="mt-6 grid grid-cols-2 gap-2"><button onClick={() => window.print()} className="rounded-xl border px-4 py-3 text-sm font-bold">Print receipt</button><button onClick={() => setReceipt(null)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">New sale</button></div></div></div>}
     </div>
   </main>
 }
