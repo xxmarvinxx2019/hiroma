@@ -57,6 +57,7 @@ const navPermission: Record<string, string> = {
   '/dashboard/city/pos': 'pos',
   '/dashboard/city/pos/registrations': 'pos|register_reseller',
   '/dashboard/city/pos/approvals': 'pos_approve',
+  '/dashboard/city/pos/shift-approvals': 'pos_approve',
   '/dashboard/city/pos/history': 'pos',
   '/dashboard/city/pos/sync': 'pos',
   '/dashboard/city/reports': 'reports|orders',
@@ -98,7 +99,7 @@ function Sidebar({
       return pathname.startsWith(href) || pathname.startsWith('/dashboard/city/pos/new-registration')
     }
     if (href === '/dashboard/city/pos/approvals') {
-      return pathname === href || pathname.startsWith('/dashboard/city/pos/registration-approvals')
+      return pathname === href || pathname.startsWith('/dashboard/city/pos/registration-approvals') || pathname.startsWith('/dashboard/city/pos/shift-approvals')
     }
     return pathname.startsWith(href)
   }
