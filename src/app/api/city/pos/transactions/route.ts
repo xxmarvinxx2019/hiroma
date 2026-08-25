@@ -120,25 +120,39 @@ export async function GET(req: NextRequest) {
       : []
     const requestedShiftId = req.nextUrl.searchParams.get('shift_id') || ''
     const auditedShiftId = auditRequested ? requestedShiftId || auditShifts[0]?.id || '' : ''
-    const shift = await prisma.posShift.findFirst({
-      where: auditRequested
-        ? { id: auditedShiftId || undefined, owner_id: user.id }
-        : { owner_id: user.id, opened_by_id: actorId },
-      orderBy: [{ opened_at: 'desc' }],
-      select: {
-        id: true,
-        terminal_id: true,
-        status: true,
-        opening_cash: true,
-        expected_cash_snapshot: true,
-        counted_cash: true,
-        variance_snapshot: true,
-        opened_at: true,
-        local_closed_at: true,
-        opened_by: { select: { id: true, full_name: true, username: true } },
-        terminal: { select: { id: true, name: true, receipt_code: true } },
-      },
-    })
+    const shiftSelect = {
+      id: true,
+      terminal_id: true,
+      status: true,
+      opening_cash: true,
+      expected_cash_snapshot: true,
+      counted_cash: true,
+      variance_snapshot: true,
+      opened_at: true,
+      local_closed_at: true,
+      opened_by: { select: { id: true, full_name: true, username: true } },
+      terminal: { select: { id: true, name: true, receipt_code: true } },
+    } as const
+    const shift = auditRequested
+      ? await prisma.posShift.findFirst({
+          where: { id: auditedShiftId || undefined, owner_id: user.id },
+          orderBy: [{ opened_at: 'desc' }],
+          select: shiftSelect,
+        })
+      : requestedShiftId
+        ? await prisma.posShift.findFirst({
+            where: { id: requestedShiftId, owner_id: user.id, opened_by_id: actorId },
+            select: shiftSelect,
+          })
+        : await prisma.posShift.findFirst({
+            where: { owner_id: user.id, opened_by_id: actorId, status: { in: ['open', 'needs_review', 'locally_closed'] } },
+            orderBy: [{ opened_at: 'desc' }],
+            select: shiftSelect,
+          }) || await prisma.posShift.findFirst({
+            where: { owner_id: user.id, opened_by_id: actorId },
+            orderBy: [{ opened_at: 'desc' }],
+            select: shiftSelect,
+          })
     if (!shift)
       return NextResponse.json({
         shift: null,

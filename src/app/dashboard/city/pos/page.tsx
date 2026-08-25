@@ -478,7 +478,7 @@ export default function PointOfSalePage() {
               </p>
             </div>
             {data?.open_shift ? (
-              <a href="/dashboard/city/pos/history" className="inline-flex items-center justify-center rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#10285e]">
+              <a href={`/dashboard/city/pos/history?shift_id=${encodeURIComponent(data.open_shift.id)}`} className="inline-flex items-center justify-center rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#10285e]">
                 Close Shift →
               </a>
             ) : (

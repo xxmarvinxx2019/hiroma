@@ -82,6 +82,10 @@ export default function PosShiftHistoryPage() {
       const params = new URLSearchParams();
       if (view === "audit") params.set("view", "audit");
       if (view === "audit" && selectedShiftId) params.set("shift_id", selectedShiftId);
+      if (view === "mine" && typeof window !== "undefined") {
+        const linkedShiftId = new URLSearchParams(window.location.search).get("shift_id");
+        if (linkedShiftId) params.set("shift_id", linkedShiftId);
+      }
       const response = await fetch(`/api/city/pos/transactions${params.size ? `?${params}` : ""}`, {
         cache: "no-store",
       });
