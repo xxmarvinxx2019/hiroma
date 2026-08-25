@@ -80,6 +80,7 @@ export default function PosShiftHistoryPage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to load shift history.");
       setData(result);
+      setView(result.access?.view === "audit" ? "audit" : "mine");
       if (view === "audit" && !selectedShiftId && result.shift?.id) setSelectedShiftId(result.shift.id);
       setError("");
     } catch (reason) {
@@ -137,13 +138,6 @@ export default function PosShiftHistoryPage() {
   const receiptPages = Math.max(1, Math.ceil((data?.transactions.length || 0) / receiptsPerPage));
   const visibleTransactions = (data?.transactions || []).slice((receiptPage - 1) * receiptsPerPage, receiptPage * receiptsPerPage);
 
-  function changeView(next: "mine" | "audit") {
-    setView(next);
-    setSelectedShiftId("");
-    setReceiptPage(1);
-    setData(null);
-  }
-
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
@@ -157,14 +151,6 @@ export default function PosShiftHistoryPage() {
             Return to POS
           </Link>
         </header>
-        {data?.access.can_audit ? (
-          <section className="mt-5 rounded-2xl border bg-white p-2">
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => changeView("mine")} className={`rounded-xl px-4 py-3 text-sm font-bold ${view === "mine" ? "bg-[#071638] text-white" : "text-gray-600 hover:bg-gray-50"}`}>My Shift</button>
-              <button onClick={() => changeView("audit")} className={`rounded-xl px-4 py-3 text-sm font-bold ${view === "audit" ? "bg-[#071638] text-white" : "text-gray-600 hover:bg-gray-50"}`}>Cashier Audit</button>
-            </div>
-          </section>
-        ) : null}
         {view === "audit" && data?.access.can_audit ? (
           <section className="mt-4 rounded-2xl border bg-white p-5">
             <label className="block text-xs font-bold uppercase tracking-wide text-gray-500">

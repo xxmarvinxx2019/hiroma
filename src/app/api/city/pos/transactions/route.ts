@@ -95,9 +95,10 @@ export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'city') return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 })
   const actorId = user.actor_id || user.id
-  const auditRequested = req.nextUrl.searchParams.get('view') === 'audit'
   const canAudit = !user.is_staff || user.permissions?.includes('pos_approve') === true
-  if (auditRequested && !canAudit) return NextResponse.json({ error: 'You do not have permission to audit cashier shifts.' }, { status: 403 })
+  // Owners and authorized approvers always receive the accountability view.
+  // Cashiers remain scoped to the shift they personally opened.
+  const auditRequested = canAudit
   try {
     const auditShifts = canAudit
       ? await prisma.posShift.findMany({
