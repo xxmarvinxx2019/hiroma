@@ -97,12 +97,22 @@ export async function PATCH(req: Request) {
         const inventoryMismatch = rows.some((row) => row.variance !== 0)
         const mismatch = cashMismatch || inventoryMismatch
         const recountConfirmed = body.recount_confirmed === true
-        const explanation = typeof body.explanation === 'string' ? body.explanation.trim().slice(0, 1000) : ''
+        const legacyExplanation = typeof body.explanation === 'string' ? body.explanation.trim().slice(0, 1000) : ''
+        const cashExplanation = typeof body.cash_explanation === 'string' ? body.cash_explanation.trim().slice(0, 500) : legacyExplanation
+        const inventoryExplanation = typeof body.inventory_explanation === 'string' ? body.inventory_explanation.trim().slice(0, 500) : legacyExplanation
         if (mismatch && shift.closing_count_attempts < 1 && !recountConfirmed) {
           await tx.posShift.update({ where: { id: shift.id }, data: { closing_count_attempts: 1 } })
           return { recountRequired: true as const, cashMismatch, inventoryMismatch }
         }
-        if (mismatch && explanation.length < 5) return { explanationRequired: true as const }
+        const missingCashExplanation = cashMismatch && cashExplanation.length < 5
+        const missingInventoryExplanation = inventoryMismatch && inventoryExplanation.length < 5
+        if (missingCashExplanation || missingInventoryExplanation) {
+          return { explanationRequired: true as const, cash: missingCashExplanation, inventory: missingInventoryExplanation }
+        }
+        const explanation = [
+          cashMismatch ? `Cash recount: ${cashExplanation}` : '',
+          inventoryMismatch ? `Inventory recount: ${inventoryExplanation}` : '',
+        ].filter(Boolean).join('\n')
 
         const audit = await tx.inventoryAuditSession.upsert({
           where: { pos_shift_id: shift.id },
@@ -208,7 +218,11 @@ export async function PATCH(req: Request) {
         inventory: result.inventoryMismatch,
       },
     }, { status: 409 })
-    if ('explanationRequired' in result) return NextResponse.json({ error: 'A difference remains after recounting. Enter a clear explanation before submitting this shift for manager review.', code: 'SHIFT_EXPLANATION_REQUIRED' }, { status: 400 })
+    if ('explanationRequired' in result) return NextResponse.json({
+      error: 'A difference remains after recounting. Explain each mismatched section before submitting for manager review.',
+      code: 'SHIFT_EXPLANATION_REQUIRED',
+      required_explanations: { cash: result.cash, inventory: result.inventory },
+    }, { status: 400 })
     if ('branchSubmitted' in result) return NextResponse.json({ shift: result.shift, audit: result.audit, pending_approval: true })
     return NextResponse.json({ shift: result })
   } catch (error) {

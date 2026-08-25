@@ -73,3 +73,17 @@ test('payment account and reference are unique together', () => {
   assert.match(schema, /@@unique\(\[payment_method_id, payment_reference\]\)/)
   assert.match(migration, /pos_transactions_payment_method_id_payment_reference_key/)
 })
+
+test('shift recount explanations are required per mismatched category', () => {
+  const shifts = read('src/app/api/city/pos/shifts/route.ts')
+  const page = read('src/app/dashboard/city/pos/page.tsx')
+  assert.match(shifts, /body\.cash_explanation/)
+  assert.match(shifts, /body\.inventory_explanation/)
+  assert.match(shifts, /missingCashExplanation/)
+  assert.match(shifts, /missingInventoryExplanation/)
+  assert.match(shifts, /required_explanations: \{ cash: result\.cash, inventory: result\.inventory \}/)
+  assert.match(page, /Cash recount explanation/)
+  assert.match(page, /Inventory recount explanation/)
+  assert.match(page, /cash_explanation: cashRecountExplanation/)
+  assert.match(page, /inventory_explanation: inventoryRecountExplanation/)
+})

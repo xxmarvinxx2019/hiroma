@@ -92,7 +92,8 @@ export default function PointOfSalePage() {
   const [inventoryCounts, setInventoryCounts] = useState<Record<string, { counted: string; damaged: string; expired: string }>>({});
   const [recountRequired, setRecountRequired] = useState(false);
   const [recountMismatch, setRecountMismatch] = useState({ cash: false, inventory: false });
-  const [closingExplanation, setClosingExplanation] = useState("");
+  const [cashRecountExplanation, setCashRecountExplanation] = useState("");
+  const [inventoryRecountExplanation, setInventoryRecountExplanation] = useState("");
   const [closingResult, setClosingResult] = useState<{ pendingApproval: boolean; message: string } | null>(null);
   const [customerType, setCustomerType] = useState<CustomerType>("non_member");
   const [memberSearch, setMemberSearch] = useState("");
@@ -170,7 +171,8 @@ export default function PointOfSalePage() {
     setClosingResult(null);
     setRecountRequired(false);
     setRecountMismatch({ cash: false, inventory: false });
-    setClosingExplanation("");
+    setCashRecountExplanation("");
+    setInventoryRecountExplanation("");
     setCountedCash("");
     setInventoryCounts({});
     setError("");
@@ -202,7 +204,8 @@ export default function PointOfSalePage() {
           shift_id: data.open_shift.id,
           counted_cash: Number(countedCash),
           recount_confirmed: recountRequired,
-          explanation: closingExplanation,
+          cash_explanation: cashRecountExplanation,
+          inventory_explanation: inventoryRecountExplanation,
           inventory_counts: closingData.branch_closing.required
             ? closingData.branch_closing.inventory.map((item) => ({
                 product_id: item.product_id,
@@ -221,6 +224,8 @@ export default function PointOfSalePage() {
             cash: result.mismatch_categories?.cash === true,
             inventory: result.mismatch_categories?.inventory === true,
           });
+          setError("");
+          return;
         }
         throw new Error(result.error || "Unable to submit shift closing.");
       }
@@ -523,7 +528,9 @@ export default function PointOfSalePage() {
   const missingClosingProducts = closingData?.branch_closing.required
     ? closingData.branch_closing.inventory.filter((item) => inventoryCounts[item.product_id]?.counted === "").length
     : 0;
-  const closingExplanationComplete = !recountRequired || closingExplanation.trim().length >= 5;
+  const closingExplanationComplete = !recountRequired
+    || ((!recountMismatch.cash || cashRecountExplanation.trim().length >= 5)
+      && (!recountMismatch.inventory || inventoryRecountExplanation.trim().length >= 5));
   const closeShiftReady = Boolean(
     closingData && online && queuedSales.length === 0 && closingData.server_sync_complete && countedCash !== "" && Number(countedCash) >= 0 && closingInventoryComplete && closingExplanationComplete,
   );
@@ -912,13 +919,17 @@ export default function PointOfSalePage() {
                     </section>
                   )}
 
-                  {recountRequired && <label className="mt-5 block text-sm font-bold text-[#071638]">Recount explanation<input value={closingExplanation} onChange={(event) => setClosingExplanation(event.target.value)} maxLength={1000} placeholder="Describe what was recounted or why a difference remains." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
+                  {recountRequired && <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    {recountMismatch.cash && <label className="block text-sm font-bold text-[#071638]">Cash recount explanation <span className="text-red-600">*</span><textarea value={cashRecountExplanation} onChange={(event) => setCashRecountExplanation(event.target.value)} maxLength={500} rows={3} placeholder="Explain how the drawer cash was recounted or why the difference may remain." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
+                    {recountMismatch.inventory && <label className="block text-sm font-bold text-[#071638]">Inventory recount explanation <span className="text-red-600">*</span><textarea value={inventoryRecountExplanation} onChange={(event) => setInventoryRecountExplanation(event.target.value)} maxLength={500} rows={3} placeholder="Explain how the products were recounted or why the difference may remain." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
+                  </div>}
                   {!closeShiftReady && (
                     <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold leading-5 text-amber-900">
                       {countedCash === "" ? <p>• Enter the physical cash in the drawer.</p> : null}
                       {missingClosingProducts > 0 ? <p>• Enter the physical count for {missingClosingProducts} remaining product{missingClosingProducts === 1 ? "" : "s"}.</p> : null}
                       {!closingInventoryComplete && missingClosingProducts === 0 ? <p>• Check the inventory values. Damaged plus expired units cannot exceed the physical count.</p> : null}
-                      {!closingExplanationComplete ? <p>• Enter a clear recount explanation.</p> : null}
+                      {recountMismatch.cash && cashRecountExplanation.trim().length < 5 ? <p>• Enter a clear cash recount explanation.</p> : null}
+                      {recountMismatch.inventory && inventoryRecountExplanation.trim().length < 5 ? <p>• Enter a clear inventory recount explanation.</p> : null}
                     </div>
                   )}
                   <div className="mt-6 flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end">
