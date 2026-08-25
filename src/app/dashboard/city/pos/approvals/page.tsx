@@ -77,9 +77,13 @@ export default function PosPaymentApprovalsPage() {
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-col justify-between gap-4 rounded-2xl bg-[#071638] p-6 text-white sm:flex-row sm:items-center">
-          <div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#d4af45]">Maker–approver control</p><h1 className="mt-2 text-2xl font-bold">POS Payment Approvals</h1><p className="mt-1 text-sm text-white/65">Confirm money in the official account before products, earnings, or member rewards are finalized.</p></div>
+          <div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#d4af45]">Maker–approver control</p><h1 className="mt-2 text-2xl font-bold">Approval Center</h1><p className="mt-1 text-sm text-white/65">Confirm money in the official account before products, earnings, or member rewards are finalized.</p></div>
           <Link href="/dashboard/city/pos" className="rounded-xl bg-[#d4af45] px-4 py-3 text-center text-sm font-bold text-[#071638]">Return to POS</Link>
         </header>
+        <nav className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border bg-white p-2" aria-label="Approval type">
+          <Link href="/dashboard/city/pos/approvals" className="rounded-xl bg-[#071638] px-4 py-3 text-center text-sm font-bold text-white">Sales Payments</Link>
+          <Link href="/dashboard/city/pos/registration-approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Registration Payments</Link>
+        </nav>
         {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
         {notice && <p className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-800">{notice}</p>}
         <section className="mt-5 overflow-hidden rounded-2xl border bg-white">

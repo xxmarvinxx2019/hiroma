@@ -28,10 +28,8 @@ const navItems = [
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
       { label: 'Point of Sale', href: '/dashboard/city/pos', icon: '🧾' },
-      { label: 'New Registration', href: '/dashboard/city/pos/new-registration', icon: '➕' },
-      { label: 'Registration Queue', href: '/dashboard/city/pos/registrations', icon: '📝' },
-      { label: 'Payment Approvals', href: '/dashboard/city/pos/approvals', icon: '✅' },
-      { label: 'Registration Approvals', href: '/dashboard/city/pos/registration-approvals', icon: '🛡️' },
+      { label: 'Registration Center', href: '/dashboard/city/pos/registrations', icon: '📝' },
+      { label: 'Approval Center', href: '/dashboard/city/pos/approvals', icon: '✅' },
       { label: 'Shift History', href: '/dashboard/city/pos/history', icon: '🕘' },
       { label: 'Sync Center', href: '/dashboard/city/pos/sync', icon: '🔄' },
       { label: 'Reports', href: '/dashboard/city/reports', icon: '📈' },
@@ -57,10 +55,8 @@ const navPermission: Record<string, string> = {
   '/dashboard/city/inventory': 'inventory',
   '/dashboard/city/orders': 'orders',
   '/dashboard/city/pos': 'pos',
-  '/dashboard/city/pos/new-registration': 'pos',
-  '/dashboard/city/pos/registrations': 'pos',
+  '/dashboard/city/pos/registrations': 'pos|register_reseller',
   '/dashboard/city/pos/approvals': 'pos_approve',
-  '/dashboard/city/pos/registration-approvals': 'pos_approve',
   '/dashboard/city/pos/history': 'pos',
   '/dashboard/city/pos/sync': 'pos',
   '/dashboard/city/reports': 'reports|orders',
@@ -98,7 +94,12 @@ function Sidebar({
   const isActive = (href: string) => {
     if (href === '/dashboard/city') return pathname === href
     if (href === '/dashboard/city/pos') return pathname === href
-    if (href === '/dashboard/city/pos/approvals') return pathname === href
+    if (href === '/dashboard/city/pos/registrations') {
+      return pathname.startsWith(href) || pathname.startsWith('/dashboard/city/pos/new-registration')
+    }
+    if (href === '/dashboard/city/pos/approvals') {
+      return pathname === href || pathname.startsWith('/dashboard/city/pos/registration-approvals')
+    }
     return pathname.startsWith(href)
   }
 
@@ -243,6 +244,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
   const currentLabel =
     navItems
       .flatMap((g) => g.items)
+      .sort((a, b) => b.href.length - a.href.length)
       .find((i) =>
         i.href === '/dashboard/city' ? pathname === i.href : pathname.startsWith(i.href)
       )?.label || 'Dashboard'

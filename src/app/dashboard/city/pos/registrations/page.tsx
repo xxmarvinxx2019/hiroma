@@ -32,7 +32,9 @@ export default function PosRegistrationsPage() {
 
   async function load() {
     const response = await fetch('/api/city/pos/registrations', { cache: 'no-store' })
-    const result = await response.json()
+    const body = await response.text()
+    let result: { error?: string; registrations?: Intake[] } = {}
+    try { result = body ? JSON.parse(body) : {} } catch { /* handled using the standard message below */ }
     if (!response.ok) throw new Error(result.error || 'Unable to load POS registrations.')
     setRows(result.registrations || [])
   }
@@ -57,10 +59,15 @@ export default function PosRegistrationsPage() {
   }
 
   return <div className="mx-auto max-w-6xl p-6">
-    <div className="mb-5">
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#A97912]">Point of Sale</p>
-      <h1 className="text-2xl font-bold text-[#071638]">Registration Queue</h1>
-      <p className="text-sm text-slate-500">Track payment verification, physical package release, and account encoding without duplicate stock deductions.</p>
+    <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#A97912]">Point of Sale</p>
+        <h1 className="text-2xl font-bold text-[#071638]">Registration Center</h1>
+        <p className="text-sm text-slate-500">Track payment verification, package release, and final account encoding in one place.</p>
+      </div>
+      <Link href="/dashboard/city/pos/new-registration" className="rounded-xl bg-[#C9A84C] px-4 py-2.5 text-center text-sm font-bold text-[#071638]">
+        + New Registration
+      </Link>
     </div>
     {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">

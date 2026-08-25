@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 
 type Approval = {
   id: string
@@ -22,7 +23,9 @@ export default function RegistrationApprovalsPage() {
   const [busy, setBusy] = useState('')
   async function load() {
     const response = await fetch('/api/city/pos/registration-approvals', { cache: 'no-store' })
-    const result = await response.json()
+    const body = await response.text()
+    let result: { error?: string; approvals?: Approval[] } = {}
+    try { result = body ? JSON.parse(body) : {} } catch { /* handled using the standard message below */ }
     if (!response.ok) throw new Error(result.error || 'Unable to load registration approvals.')
     setRows(result.approvals || [])
   }
@@ -46,8 +49,13 @@ export default function RegistrationApprovalsPage() {
   }
   return <div className="mx-auto max-w-6xl p-6">
     <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#A97912]">Independent approval</p>
-    <h1 className="text-2xl font-bold text-[#071638]">Registration Payment Approvals</h1>
-    <p className="mb-5 text-sm text-slate-500">Confirm the money in the actual bank or e-wallet account. A screenshot alone is not proof of settlement.</p>
+    <h1 className="text-2xl font-bold text-[#071638]">Approval Center</h1>
+    <p className="text-sm text-slate-500">Confirm money in the official receiving account before approving a transaction.</p>
+    <nav className="my-4 grid grid-cols-2 gap-2 rounded-2xl border bg-white p-2" aria-label="Approval type">
+      <Link href="/dashboard/city/pos/approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Sales Payments</Link>
+      <Link href="/dashboard/city/pos/registration-approvals" className="rounded-xl bg-[#071638] px-4 py-3 text-center text-sm font-bold text-white">Registration Payments</Link>
+    </nav>
+    <p className="mb-5 text-sm text-slate-500">A screenshot is supporting evidence only. Verify the exact amount in the bank or e-wallet account.</p>
     {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     <div className="grid gap-4">
       {rows.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-400">No registration payments need review.</div> : rows.map((row) => <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-5">
