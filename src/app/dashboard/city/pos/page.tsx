@@ -177,6 +177,9 @@ export default function PointOfSalePage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to prepare shift closing.");
       setClosingData(result);
+      setInventoryCounts(Object.fromEntries(
+        result.branch_closing.inventory.map((item: { product_id: string }) => [item.product_id, { counted: "", damaged: "0", expired: "0" }]),
+      ));
     } catch (reason) {
       setClosingData(null);
       setError(reason instanceof Error ? reason.message : "Unable to prepare shift closing.");
@@ -503,8 +506,15 @@ export default function PointOfSalePage() {
 
   const closingInventoryComplete = !closingData?.branch_closing.required || closingData.branch_closing.inventory.every((item) => {
     const row = inventoryCounts[item.product_id];
-    return row && row.counted !== "" && Number.isInteger(Number(row.counted)) && Number(row.counted) >= 0;
+    if (!row || row.counted === "" || row.damaged === "" || row.expired === "") return false;
+    const counted = Number(row.counted);
+    const damaged = Number(row.damaged);
+    const expired = Number(row.expired);
+    return [counted, damaged, expired].every((value) => Number.isInteger(value) && value >= 0) && damaged + expired <= counted;
   });
+  const missingClosingProducts = closingData?.branch_closing.required
+    ? closingData.branch_closing.inventory.filter((item) => inventoryCounts[item.product_id]?.counted === "").length
+    : 0;
   const closingExplanationComplete = !recountRequired || closingExplanation.trim().length >= 5;
   const closeShiftReady = Boolean(
     closingData && online && queuedSales.length === 0 && closingData.server_sync_complete && countedCash !== "" && Number(countedCash) >= 0 && closingInventoryComplete && closingExplanationComplete,
@@ -870,8 +880,9 @@ export default function PointOfSalePage() {
                   {error && <p className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
                   {recountRequired && <p className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">A difference was detected. Recount the cash and all products. If a difference remains, explain what you verified before resubmitting.</p>}
 
-                  <label className="block text-sm font-bold text-[#071638]">Physical cash in drawer
-                    <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input disabled={!online} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none disabled:opacity-50" /></div>
+                  <label className="block text-sm font-bold text-[#071638]">Physical cash in drawer <span className="text-red-600">*</span>
+                    <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input required disabled={!online} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="Enter total physical cash" className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none disabled:opacity-50" /></div>
+                    <span className="mt-2 block text-xs font-normal leading-5 text-gray-500">Enter the complete physical cash in the drawer, including the opening cash. This field cannot be left blank.</span>
                   </label>
 
                   {closingData.branch_closing.required && (
@@ -879,10 +890,10 @@ export default function PointOfSalePage() {
                       <div className="border-b bg-[#f7f8fb] p-4"><h3 className="font-bold text-[#071638]">Physical inventory count</h3><p className="mt-1 text-xs text-gray-500">Enter the quantity physically present. Do not rely on the POS stock display.</p></div>
                       <div className="divide-y">
                         {closingData.branch_closing.inventory.map((item) => {
-                          const row = inventoryCounts[item.product_id] || { counted: "", damaged: "", expired: "" };
+                          const row = inventoryCounts[item.product_id] || { counted: "", damaged: "0", expired: "0" };
                           return <div key={item.product_id} className="grid gap-3 p-4 sm:grid-cols-[1fr_130px_110px_110px] sm:items-end">
                             <p className="self-center text-sm font-bold text-[#071638]">{item.product_name}</p>
-                            {([['counted', 'Physical count'], ['damaged', 'Damaged'], ['expired', 'Expired']] as const).map(([field, label]) => <label key={field} className="text-xs font-bold text-gray-600">{label}<input type="number" min="0" step="1" value={row[field]} onChange={(event) => setInventoryCounts((current) => ({ ...current, [item.product_id]: { ...(current[item.product_id] || { counted: "", damaged: "", expired: "" }), [field]: event.target.value } }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-center text-sm outline-none focus:border-[#d4af45]" /></label>)}
+                            {([['counted', 'Physical count *'], ['damaged', 'Damaged'], ['expired', 'Expired']] as const).map(([field, label]) => <label key={field} className="text-xs font-bold text-gray-600">{label}<input required type="number" min="0" step="1" value={row[field]} onChange={(event) => setInventoryCounts((current) => ({ ...current, [item.product_id]: { ...(current[item.product_id] || { counted: "", damaged: "0", expired: "0" }), [field]: event.target.value } }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-center text-sm outline-none focus:border-[#d4af45]" /></label>)}
                           </div>;
                         })}
                       </div>
@@ -890,6 +901,14 @@ export default function PointOfSalePage() {
                   )}
 
                   {recountRequired && <label className="mt-5 block text-sm font-bold text-[#071638]">Recount explanation<input value={closingExplanation} onChange={(event) => setClosingExplanation(event.target.value)} maxLength={1000} placeholder="Describe what was recounted or why a difference remains." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
+                  {!closeShiftReady && (
+                    <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold leading-5 text-amber-900">
+                      {countedCash === "" ? <p>• Enter the physical cash in the drawer.</p> : null}
+                      {missingClosingProducts > 0 ? <p>• Enter the physical count for {missingClosingProducts} remaining product{missingClosingProducts === 1 ? "" : "s"}.</p> : null}
+                      {!closingInventoryComplete && missingClosingProducts === 0 ? <p>• Check the inventory values. Damaged plus expired units cannot exceed the physical count.</p> : null}
+                      {!closingExplanationComplete ? <p>• Enter a clear recount explanation.</p> : null}
+                    </div>
+                  )}
                   <div className="mt-6 flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end">
                     <button type="button" onClick={() => setShowCloseShift(false)} className="rounded-xl border px-5 py-3 text-sm font-bold">Cancel</button>
                     <button type="button" disabled={!closeShiftReady || closingShift} onClick={submitCloseShift} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-40">{closingShift ? "Submitting safely…" : closingData.branch_closing.required ? "Submit Counts for Approval" : "Confirm & Close Shift"}</button>
