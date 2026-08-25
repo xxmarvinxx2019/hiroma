@@ -88,7 +88,14 @@ export default function PointOfSalePage() {
   const transactionId = useRef("");
 
   useEffect(() => {
-    const updateConnection = () => setOnline(navigator.onLine);
+    const updateConnection = () => {
+      const isOnline = navigator.onLine;
+      setOnline(isOnline);
+      if (!isOnline) {
+        setPaymentMethod("cash");
+        setPaymentReference("");
+      }
+    };
     updateConnection();
     window.addEventListener("online", updateConnection);
     window.addEventListener("offline", updateConnection);
@@ -280,6 +287,12 @@ export default function PointOfSalePage() {
 
   async function completeSale() {
     if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return;
+    if (!online && !isCash) {
+      setPaymentMethod("cash");
+      setPaymentReference("");
+      setError("Offline mode accepts cash only. Reconnect before accepting GCash, e-wallet, or bank payments.");
+      return;
+    }
     if (!transactionId.current) transactionId.current = crypto.randomUUID();
     const localCreatedAt = new Date().toISOString();
     const range = data.receipt_range;
@@ -303,6 +316,7 @@ export default function PointOfSalePage() {
       customer_name: customerName,
       payment_method: paymentMethod,
       payment_reference: isCash ? null : paymentReference,
+      captured_offline: !online,
       amount_received: isCash ? received : total,
       items: cartRows.map((row) => ({
         product_id: row.product_id,
@@ -311,10 +325,6 @@ export default function PointOfSalePage() {
       local_created_at: localCreatedAt,
     };
     if (!online) {
-      if (!isCash) {
-        setError("Non-cash payments require an internet connection for verification.");
-        return;
-      }
       if (customerType === "member") {
         setError("Offline member verification is not enabled yet. Reconnect or record this as a non-member cash sale.");
         return;
@@ -640,6 +650,7 @@ export default function PointOfSalePage() {
                     Payment method
                     <select
                       value={paymentMethod}
+                      disabled={!online}
                       onChange={(event) => {
                         setPaymentMethod(event.target.value);
                         setAmountReceived("");
@@ -647,13 +658,18 @@ export default function PointOfSalePage() {
                       }}
                       className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]"
                     >
-                      {data.payment_methods.map((method) => (
+                      {data.payment_methods.filter((method) => online || method.type === "cash").map((method) => (
                         <option key={method.id} value={method.type === "cash" ? "cash" : method.id}>
                           {method.type === "cash" ? "Cash" : `${method.type.toUpperCase()} · ${method.account_name}${method.account_number ? ` · ${method.account_number}` : ""}`}
                         </option>
                       ))}
                     </select>
                   </label>
+                  {!online && (
+                    <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900" role="status">
+                      <b>Offline mode: Cash only.</b> GCash, e-wallet, and bank payments require an internet connection and independent verification before products can be released.
+                    </div>
+                  )}
                   {isCash && (
                     <label className="mt-4 block text-xs font-bold text-[#071638]">
                       Cash received

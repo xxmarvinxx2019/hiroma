@@ -25,6 +25,19 @@ test('non-cash POS sales wait for independent payment verification', () => {
   assert.match(transactions, /POS_PAYMENT_REFERENCE_DUPLICATE/)
 })
 
+test('offline POS checkout is cash-only in both the client and server', () => {
+  const page = read('src/app/dashboard/city/pos/page.tsx')
+  const transactions = read('src/app/api/city/pos/transactions/route.ts')
+  const bootstrap = read('src/app/api/city/pos/bootstrap/route.ts')
+  assert.match(page, /setPaymentMethod\("cash"\)/)
+  assert.match(page, /captured_offline: !online/)
+  assert.match(page, /disabled=\{!online\}/)
+  assert.match(page, /Offline mode: Cash only\./)
+  assert.match(transactions, /capturedOffline && paymentSelection !== 'cash'/)
+  assert.match(transactions, /OFFLINE_CASH_ONLY/)
+  assert.match(bootstrap, /payment_methods: \['cash'\]/)
+})
+
 test('approver cannot review their own payment and rejection restores reserved stock', () => {
   const approvals = read('src/app/api/city/pos/approvals/route.ts')
   assert.match(approvals, /transaction\.cashier_id === actorId/)

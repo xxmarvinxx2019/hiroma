@@ -162,6 +162,7 @@ export async function POST(req: Request) {
       payment_methods: [{ id: 'cash', type: 'cash', account_name: 'Cash' }, ...paymentMethods],
       offline_policy: {
         requires_active_shift: true,
+        payment_methods: ['cash'],
         registration_requires_online_review: true,
         server_finalization_requires_sync: true,
         inventory_mode: 'terminal_allowance',

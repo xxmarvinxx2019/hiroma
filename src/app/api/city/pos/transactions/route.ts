@@ -231,6 +231,7 @@ export async function POST(req: NextRequest) {
     const customerName = text(body.customer_name, 120)
     const paymentSelection = text(body.payment_method, 120)
     const paymentReference = text(body.payment_reference, 160) || null
+    const capturedOffline = body.captured_offline === true
     const notes = text(body.notes, 500) || null
     const items = parseItems(body.items)
     const amountReceived = money(body.amount_received)
@@ -249,6 +250,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error: 'Review the customer, cart, payment, and transaction details.',
+        },
+        { status: 400 },
+      )
+    }
+    if (capturedOffline && paymentSelection !== 'cash') {
+      return NextResponse.json(
+        {
+          error: 'Offline POS transactions accept cash only. GCash, e-wallet, and bank payments must be received and verified while connected to the internet.',
+          code: 'OFFLINE_CASH_ONLY',
         },
         { status: 400 },
       )
@@ -511,6 +521,7 @@ export async function POST(req: NextRequest) {
             details: {
               client_transaction_id: clientTransactionId,
               order_id: order.id,
+              captured_offline: capturedOffline,
             },
           },
         })
