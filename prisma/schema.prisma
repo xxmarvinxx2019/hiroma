@@ -1050,6 +1050,7 @@ model PosShift {
 model PosTransaction {
   id                       String               @id @default(uuid()) @db.Uuid
   client_transaction_id    String               @unique @db.Uuid
+  receipt_number           String               @unique @db.VarChar(80)
   owner_id                 String
   terminal_id              String               @db.Uuid
   shift_id                 String?              @db.Uuid

@@ -8,6 +8,7 @@ import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
 import prisma from '@/app/lib/prisma'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const RECEIPT = /^HRM-[A-F0-9]{8}-[A-F0-9]{32}$/
 
 type RequestedItem = { product_id: string; quantity: number }
 
@@ -48,7 +49,7 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
     transaction_id: transaction.id,
     client_transaction_id: transaction.client_transaction_id,
     order_id: transaction.order.id,
-    receipt_number: transaction.order.order_number || `POS-${transaction.order.id.slice(0, 8).toUpperCase()}`,
+    receipt_number: transaction.receipt_number,
     created_at: transaction.finalized_at || transaction.order.created_at,
     customer_name: transaction.customer_name_snapshot || 'Walk-in Customer',
     customer_type: transaction.transaction_type === 'member_sale' ? 'member' : 'non_member',
@@ -85,7 +86,7 @@ export async function GET() {
       where: { shift_id: shift.id, cashier_id: actorId, status: { in: ['approved', 'finalized'] } },
       orderBy: { finalized_at: 'desc' },
       select: {
-        id: true, client_transaction_id: true, transaction_type: true, customer_name_snapshot: true,
+        id: true, client_transaction_id: true, receipt_number: true, transaction_type: true, customer_name_snapshot: true,
         payment_method_snapshot: true, payment_reference: true, total_snapshot: true, amount_received_snapshot: true,
         change_snapshot: true, finalized_at: true,
         order: { select: { id: true, order_number: true } },
@@ -114,7 +115,7 @@ export async function GET() {
       transactions: transactions.map((row) => ({
         ...row,
         payment_method_snapshot: row.payment_method_snapshot.toLowerCase() === 'cash' ? 'Cash' : row.payment_method_snapshot,
-        receipt_number: row.order?.order_number || (row.order ? `POS-${row.order.id.slice(0, 8).toUpperCase()}` : `POS-${row.id.slice(0, 8).toUpperCase()}`),
+        receipt_number: row.receipt_number,
         total: Number(row.total_snapshot), amount_received: Number(row.amount_received_snapshot), change: Number(row.change_snapshot),
         items: row.items.map((item) => ({ ...item, unit_price: Number(item.unit_price_snapshot), subtotal: Number(item.subtotal_snapshot) })),
       })),
@@ -137,6 +138,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const clientTransactionId = text(body.client_transaction_id, 36)
+    const receiptNumber = text(body.receipt_number, 80).toUpperCase()
     submittedClientTransactionId = clientTransactionId
     const terminalId = text(body.terminal_id, 36)
     const shiftId = text(body.shift_id, 36)
@@ -151,7 +153,7 @@ export async function POST(req: NextRequest) {
     const localCreatedAt = new Date(body.local_created_at)
     const actorId = user.actor_id || user.id
 
-    if (!UUID.test(clientTransactionId) || !UUID.test(terminalId) || !UUID.test(shiftId)) {
+    if (!UUID.test(clientTransactionId) || !UUID.test(terminalId) || !UUID.test(shiftId) || !RECEIPT.test(receiptNumber)) {
       return NextResponse.json({ error: 'The POS transaction, terminal, or shift identifier is invalid.' }, { status: 400 })
     }
     if (!customerType || (customerType === 'member' && !memberId) || !items || !paymentSelection || !Number.isFinite(amountReceived) || amountReceived < 0 || Number.isNaN(localCreatedAt.getTime())) {
@@ -171,6 +173,7 @@ export async function POST(req: NextRequest) {
       ])
       if (!terminal) throw new Error('POS_TERMINAL_INVALID')
       if (!shift) throw new Error('POS_SHIFT_INVALID')
+      if (!receiptNumber.startsWith(`HRM-${terminalId.slice(0, 8).toUpperCase()}-`)) throw new Error('POS_RECEIPT_INVALID')
 
       const member = customerType === 'member'
         ? await tx.user.findFirst({ where: { id: memberId, role: 'reseller', status: 'active' }, select: { id: true, full_name: true, username: true } })
@@ -240,6 +243,7 @@ export async function POST(req: NextRequest) {
       const posTransaction = await tx.posTransaction.create({
         data: {
           client_transaction_id: clientTransactionId,
+          receipt_number: receiptNumber,
           owner_id: user.id,
           terminal_id: terminalId,
           shift_id: shiftId,
@@ -325,6 +329,7 @@ export async function POST(req: NextRequest) {
       POS_ID_CONFLICT: ['That transaction identifier is already assigned to another location.', 409],
       POS_TERMINAL_INVALID: ['This POS terminal is inactive or no longer assigned to this location.', 403],
       POS_SHIFT_INVALID: ['Your cashier shift is no longer open. Refresh the POS before accepting another sale.', 409],
+      POS_RECEIPT_INVALID: ['The permanent receipt number does not belong to this POS terminal.', 409],
       POS_MEMBER_INVALID: ['The selected member is inactive or no longer valid. Verify the member again.', 409],
       POS_PAYMENT_INVALID: ['The selected payment method is no longer available.', 409],
       POS_PAYMENT_REFERENCE_REQUIRED: ['Enter the payment reference before completing this non-cash sale.', 400],

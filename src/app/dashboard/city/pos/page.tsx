@@ -1,259 +1,752 @@
-'use client'
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import PosInstallControl from '@/app/components/pos/PosInstallControl'
+import { useEffect, useMemo, useRef, useState } from "react";
+import PosInstallControl from "@/app/components/pos/PosInstallControl";
+import { deleteQueuedSale, listQueuedSales, permanentReceiptNumber, PosQueuedSale, saveQueuedSale } from "@/app/lib/posOfflineQueue";
 
 type Bootstrap = {
-  terminal: { id: string; name: string }
-  location: { full_name: string; distributor_profile?: { dist_level: string; fulfillment_outlet_name?: string | null } | null } | null
-  catalog: Array<{ product_id: string; name: string; type: string; stock: number; reseller_price: number; srp_price: number; pu_value: number }>
-  payment_methods: Array<{ id: string; type: string; account_name: string; account_number?: string; bank_name?: string | null }>
-  open_shift: { id: string; opened_at: string; opening_cash?: number } | null
-}
+  terminal: { id: string; name: string };
+  location: {
+    full_name: string;
+    distributor_profile?: {
+      dist_level: string;
+      fulfillment_outlet_name?: string | null;
+    } | null;
+  } | null;
+  catalog: Array<{
+    product_id: string;
+    name: string;
+    type: string;
+    stock: number;
+    reseller_price: number;
+    srp_price: number;
+    pu_value: number;
+  }>;
+  payment_methods: Array<{
+    id: string;
+    type: string;
+    account_name: string;
+    account_number?: string;
+    bank_name?: string | null;
+  }>;
+  open_shift: { id: string; opened_at: string; opening_cash?: number } | null;
+};
 
-type Member = { id: string; member_id: string | null; username: string; full_name: string }
-type CustomerType = 'member' | 'non_member'
+type Member = {
+  id: string;
+  member_id: string | null;
+  username: string;
+  full_name: string;
+};
+type CustomerType = "member" | "non_member";
 type Receipt = {
-  client_transaction_id: string; receipt_number: string; created_at: string; customer_name: string; cashier_name: string
-  payment_method: string; payment_reference?: string | null; total: number; amount_received: number; change: number
-  items: Array<{ product_id: string; name: string; quantity: number; unit_price: number; subtotal: number; stock_after: number }>
-}
+  client_transaction_id: string;
+  receipt_number: string;
+  created_at: string;
+  customer_name: string;
+  cashier_name: string;
+  payment_method: string;
+  payment_reference?: string | null;
+  total: number;
+  amount_received: number;
+  change: number;
+  items: Array<{
+    product_id: string;
+    name: string;
+    quantity: number;
+    unit_price: number;
+    subtotal: number;
+    stock_after: number;
+  }>;
+  sync_status?: "saved_offline" | "synced";
+};
 
 export default function PointOfSalePage() {
-  const [data, setData] = useState<Bootstrap | null>(null)
-  const [error, setError] = useState('')
-  const [online, setOnline] = useState(true)
-  const [showOpenShift, setShowOpenShift] = useState(false)
-  const [openingCash, setOpeningCash] = useState('0')
-  const [savingShift, setSavingShift] = useState(false)
-  const [customerType, setCustomerType] = useState<CustomerType>('non_member')
-  const [memberSearch, setMemberSearch] = useState('')
-  const [memberResults, setMemberResults] = useState<Member[]>([])
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null)
-  const [searchingMember, setSearchingMember] = useState(false)
-  const [customerName, setCustomerName] = useState('')
-  const [productSearch, setProductSearch] = useState('')
-  const [cart, setCart] = useState<Record<string, number>>({})
-  const [paymentMethod, setPaymentMethod] = useState('cash')
-  const [amountReceived, setAmountReceived] = useState('')
-  const [paymentReference, setPaymentReference] = useState('')
-  const [submittingSale, setSubmittingSale] = useState(false)
-  const [receipt, setReceipt] = useState<Receipt | null>(null)
-  const transactionId = useRef('')
+  const [data, setData] = useState<Bootstrap | null>(null);
+  const [error, setError] = useState("");
+  const [online, setOnline] = useState(true);
+  const [showOpenShift, setShowOpenShift] = useState(false);
+  const [openingCash, setOpeningCash] = useState("0");
+  const [savingShift, setSavingShift] = useState(false);
+  const [customerType, setCustomerType] = useState<CustomerType>("non_member");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberResults, setMemberResults] = useState<Member[]>([]);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [searchingMember, setSearchingMember] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [amountReceived, setAmountReceived] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [submittingSale, setSubmittingSale] = useState(false);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [queuedSales, setQueuedSales] = useState<PosQueuedSale[]>([]);
+  const transactionId = useRef("");
 
   useEffect(() => {
-    const updateConnection = () => setOnline(navigator.onLine)
-    updateConnection()
-    window.addEventListener('online', updateConnection)
-    window.addEventListener('offline', updateConnection)
-    const installationKey = 'hiroma_pos_installation_id'
-    let installationId = localStorage.getItem(installationKey)
+    const updateConnection = () => setOnline(navigator.onLine);
+    updateConnection();
+    window.addEventListener("online", updateConnection);
+    window.addEventListener("offline", updateConnection);
+    const installationKey = "hiroma_pos_installation_id";
+    let installationId = localStorage.getItem(installationKey);
     if (!installationId) {
-      installationId = crypto.randomUUID()
-      localStorage.setItem(installationKey, installationId)
+      installationId = crypto.randomUUID();
+      localStorage.setItem(installationKey, installationId);
     }
-    const platform = `${navigator.platform || 'Web'} · ${navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop'}`
-    fetch('/api/city/pos/bootstrap', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ installation_id: installationId, name: `POS ${installationId.slice(0, 8).toUpperCase()}`, platform }),
-    }).then(async (response) => {
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || 'Unable to initialize POS.')
-      setError('')
-      setData(result)
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to initialize POS.'))
+    const platform = `${navigator.platform || "Web"} · ${navigator.userAgent.includes("Mobile") ? "Mobile" : "Desktop"}`;
+    fetch("/api/city/pos/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        installation_id: installationId,
+        name: `POS ${installationId.slice(0, 8).toUpperCase()}`,
+        platform,
+      }),
+    })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to initialize POS.");
+        setError("");
+        setData(result);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to initialize POS."));
     return () => {
-      window.removeEventListener('online', updateConnection)
-      window.removeEventListener('offline', updateConnection)
-    }
-  }, [])
+      window.removeEventListener("online", updateConnection);
+      window.removeEventListener("offline", updateConnection);
+    };
+  }, []);
+
+  async function refreshQueue() {
+    setQueuedSales((await listQueuedSales()).sort((a, b) => a.created_at.localeCompare(b.created_at)));
+  }
 
   useEffect(() => {
-    if (customerType !== 'member' || selectedMember || memberSearch.trim().length < 2 || !online) {
-      return
-    }
-    const controller = new AbortController()
-    const timer = window.setTimeout(async () => {
-      setSearchingMember(true)
-      try {
-        const response = await fetch(`/api/city/pos/members?search=${encodeURIComponent(memberSearch.trim())}`, { signal: controller.signal, cache: 'no-store' })
-        const result = await response.json()
-        if (!response.ok) throw new Error(result.error || 'Unable to search members.')
-        setMemberResults(result.members || [])
-      } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Unable to search members.')
-      } finally {
-        if (!controller.signal.aborted) setSearchingMember(false)
-      }
-    }, 300)
-    return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [customerType, memberSearch, online, selectedMember])
+    const timer = window.setTimeout(() => void refreshQueue(), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
-  const filteredProducts = useMemo(() => data?.catalog.filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase())) || [], [data?.catalog, productSearch])
-  const cartRows = useMemo(() => data?.catalog.filter((product) => (cart[product.product_id] || 0) > 0).map((product) => {
-    const quantity = cart[product.product_id]
-    const unitPrice = customerType === 'member' ? product.reseller_price : product.srp_price
-    return { ...product, quantity, unitPrice, subtotal: quantity * unitPrice }
-  }) || [], [cart, customerType, data?.catalog])
-  const total = useMemo(() => cartRows.reduce((sum, row) => sum + row.subtotal, 0), [cartRows])
-  const received = Number(amountReceived) || 0
-  const isCash = paymentMethod === 'cash'
-  const customerReady = customerType === 'non_member' || Boolean(selectedMember)
-  const paymentReady = isCash ? received >= total && total > 0 : total > 0 && paymentReference.trim().length > 0
+  useEffect(() => {
+    if (!online) return;
+    let cancelled = false;
+    let active = false;
+    async function synchronize() {
+      if (active) return;
+      active = true;
+      const queue = await listQueuedSales();
+      for (const sale of queue) {
+        if (cancelled) return;
+        await saveQueuedSale({ ...sale, status: "syncing", error: undefined });
+        try {
+          const response = await fetch("/api/city/pos/transactions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(sale.payload),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Synchronization needs attention.");
+          await deleteQueuedSale(sale.client_transaction_id);
+        } catch (reason) {
+          await saveQueuedSale({
+            ...sale,
+            status: "needs_attention",
+            error: reason instanceof Error ? reason.message : "Synchronization needs attention.",
+          });
+        }
+      }
+      if (!cancelled) await refreshQueue();
+      active = false;
+    }
+    void synchronize();
+    const timer = window.setInterval(() => void synchronize(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [online]);
+
+  useEffect(() => {
+    if (customerType !== "member" || selectedMember || memberSearch.trim().length < 2 || !online) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchingMember(true);
+      try {
+        const response = await fetch(`/api/city/pos/members?search=${encodeURIComponent(memberSearch.trim())}`, { signal: controller.signal, cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to search members.");
+        setMemberResults(result.members || []);
+      } catch (reason) {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to search members.");
+      } finally {
+        if (!controller.signal.aborted) setSearchingMember(false);
+      }
+    }, 300);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [customerType, memberSearch, online, selectedMember]);
+
+  const filteredProducts = useMemo(() => data?.catalog.filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase())) || [], [data?.catalog, productSearch]);
+  const cartRows = useMemo(
+    () =>
+      data?.catalog
+        .filter((product) => (cart[product.product_id] || 0) > 0)
+        .map((product) => {
+          const quantity = cart[product.product_id];
+          const unitPrice = customerType === "member" ? product.reseller_price : product.srp_price;
+          return {
+            ...product,
+            quantity,
+            unitPrice,
+            subtotal: quantity * unitPrice,
+          };
+        }) || [],
+    [cart, customerType, data?.catalog],
+  );
+  const total = useMemo(() => cartRows.reduce((sum, row) => sum + row.subtotal, 0), [cartRows]);
+  const received = Number(amountReceived) || 0;
+  const isCash = paymentMethod === "cash";
+  const customerReady = customerType === "non_member" || Boolean(selectedMember);
+  const paymentReady = isCash ? received >= total && total > 0 : total > 0 && paymentReference.trim().length > 0;
 
   function setQuantity(productId: string, next: number) {
-    const product = data?.catalog.find((item) => item.product_id === productId)
-    if (!product) return
-    const quantity = Math.max(0, Math.min(product.stock, Number.isFinite(next) ? Math.floor(next) : 0))
-    setCart((current) => ({ ...current, [productId]: quantity }))
+    const product = data?.catalog.find((item) => item.product_id === productId);
+    if (!product) return;
+    const quantity = Math.max(0, Math.min(product.stock, Number.isFinite(next) ? Math.floor(next) : 0));
+    setCart((current) => ({ ...current, [productId]: quantity }));
   }
 
   function selectCustomerType(next: CustomerType) {
-    setCustomerType(next)
-    setSelectedMember(null)
-    setMemberSearch('')
-    setMemberResults([])
-    setCart({})
-    setAmountReceived('')
-    setPaymentReference('')
-    transactionId.current = ''
+    setCustomerType(next);
+    setSelectedMember(null);
+    setMemberSearch("");
+    setMemberResults([]);
+    setCart({});
+    setAmountReceived("");
+    setPaymentReference("");
+    transactionId.current = "";
   }
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-    navigator.serviceWorker.register('/sw-pos.js', { scope: '/dashboard/city/pos', updateViaCache: 'none' }).catch((reason) => {
-      console.warn('[POS SERVICE WORKER]', reason)
-    })
-  }, [])
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker
+      .register("/sw-pos.js", {
+        scope: "/dashboard/city/pos",
+        updateViaCache: "none",
+      })
+      .catch((reason) => {
+        console.warn("[POS SERVICE WORKER]", reason);
+      });
+  }, []);
 
   async function openShift() {
-    if (!data?.terminal.id) return
-    setSavingShift(true)
-    setError('')
+    if (!data?.terminal.id) return;
+    setSavingShift(true);
+    setError("");
     try {
-      const response = await fetch('/api/city/pos/shifts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ terminal_id: data.terminal.id, opening_cash: Number(openingCash) }),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || 'Unable to open shift.')
-      setData((current) => current ? { ...current, open_shift: result.shift } : current)
-      setShowOpenShift(false)
+      const response = await fetch("/api/city/pos/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminal_id: data.terminal.id,
+          opening_cash: Number(openingCash),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to open shift.");
+      setData((current) => (current ? { ...current, open_shift: result.shift } : current));
+      setShowOpenShift(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to open shift.')
+      setError(reason instanceof Error ? reason.message : "Unable to open shift.");
     } finally {
-      setSavingShift(false)
+      setSavingShift(false);
     }
   }
 
   async function completeSale() {
-    if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return
+    if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return;
+    if (!transactionId.current) transactionId.current = crypto.randomUUID();
+    const receiptNumber = permanentReceiptNumber(data.terminal.id, transactionId.current);
+    const localCreatedAt = new Date().toISOString();
+    const payload = {
+      client_transaction_id: transactionId.current,
+      receipt_number: receiptNumber,
+      terminal_id: data.terminal.id,
+      shift_id: data.open_shift.id,
+      customer_type: customerType,
+      member_id: selectedMember?.id || null,
+      customer_name: customerName,
+      payment_method: paymentMethod,
+      payment_reference: isCash ? null : paymentReference,
+      amount_received: isCash ? received : total,
+      items: cartRows.map((row) => ({
+        product_id: row.product_id,
+        quantity: row.quantity,
+      })),
+      local_created_at: localCreatedAt,
+    };
     if (!online) {
-      setError('This checkout is ready, but offline sale queuing is not enabled yet. Reconnect before completing this sale.')
-      return
+      if (!isCash) {
+        setError("Non-cash payments require an internet connection for verification.");
+        return;
+      }
+      if (customerType === "member") {
+        setError("Offline member verification is not enabled yet. Reconnect or record this as a non-member cash sale.");
+        return;
+      }
+      const offlineReceipt: Receipt = {
+        client_transaction_id: transactionId.current,
+        receipt_number: receiptNumber,
+        created_at: localCreatedAt,
+        customer_name: customerName || "Walk-in Customer",
+        cashier_name: "Current cashier",
+        payment_method: "Cash",
+        total,
+        amount_received: received,
+        change: Math.round((received - total) * 100) / 100,
+        sync_status: "saved_offline",
+        items: cartRows.map((row) => ({
+          product_id: row.product_id,
+          name: row.name,
+          quantity: row.quantity,
+          unit_price: row.unitPrice,
+          subtotal: row.subtotal,
+          stock_after: row.stock - row.quantity,
+        })),
+      };
+      await saveQueuedSale({
+        client_transaction_id: transactionId.current,
+        receipt_number: receiptNumber,
+        payload,
+        receipt: offlineReceipt as unknown as Record<string, unknown>,
+        status: "saved_offline",
+        created_at: localCreatedAt,
+      });
+      setReceipt(offlineReceipt);
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              catalog: current.catalog.map((product) => {
+                const sold = cartRows.find((row) => row.product_id === product.product_id);
+                return sold ? { ...product, stock: product.stock - sold.quantity } : product;
+              }),
+            }
+          : current,
+      );
+      await refreshQueue();
+      setCart({});
+      setCustomerName("");
+      setAmountReceived("");
+      transactionId.current = "";
+      return;
     }
-    if (!transactionId.current) transactionId.current = crypto.randomUUID()
-    setSubmittingSale(true)
-    setError('')
+    setSubmittingSale(true);
+    setError("");
     try {
-      const response = await fetch('/api/city/pos/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_transaction_id: transactionId.current,
-          terminal_id: data.terminal.id,
-          shift_id: data.open_shift.id,
-          customer_type: customerType,
-          member_id: selectedMember?.id || null,
-          customer_name: customerName,
-          payment_method: paymentMethod,
-          payment_reference: isCash ? null : paymentReference,
-          amount_received: isCash ? received : total,
-          items: cartRows.map((row) => ({ product_id: row.product_id, quantity: row.quantity })),
-          local_created_at: new Date().toISOString(),
-        }),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || 'The sale could not be completed.')
-      const nextReceipt = result.receipt as Receipt
-      setReceipt(nextReceipt)
-      setData((current) => current ? {
-        ...current,
-        catalog: current.catalog.map((product) => {
-          const sold = nextReceipt.items.find((item) => item.product_id === product.product_id)
-          return sold ? { ...product, stock: sold.stock_after } : product
-        }),
-      } : current)
-      setCart({})
-      setSelectedMember(null)
-      setMemberSearch('')
-      setCustomerName('')
-      setAmountReceived('')
-      setPaymentReference('')
-      transactionId.current = ''
+      const response = await fetch("/api/city/pos/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The sale could not be completed.");
+      const nextReceipt = result.receipt as Receipt;
+      setReceipt(nextReceipt);
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              catalog: current.catalog.map((product) => {
+                const sold = nextReceipt.items.find((item) => item.product_id === product.product_id);
+                return sold ? { ...product, stock: sold.stock_after } : product;
+              }),
+            }
+          : current,
+      );
+      setCart({});
+      setSelectedMember(null);
+      setMemberSearch("");
+      setCustomerName("");
+      setAmountReceived("");
+      setPaymentReference("");
+      transactionId.current = "";
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The sale could not be completed safely.')
+      setError(reason instanceof Error ? reason.message : "The sale could not be completed safely.");
     } finally {
-      setSubmittingSale(false)
+      setSubmittingSale(false);
     }
   }
 
-  return <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
-    <div className="mx-auto max-w-7xl">
-      <header className="rounded-2xl bg-[#071638] p-5 text-white shadow-sm sm:p-7">
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d4af45]">Hiroma Point of Sale</p>
-        <div className="mt-2 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-          <div><h1 className="text-2xl font-bold">{data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || 'Loading terminal…'}</h1><p className="mt-1 text-sm text-white/65">Dedicated cashier workspace · installable web POS · controlled offline queue</p></div>
-          <div className="flex flex-col items-start gap-2 sm:items-end"><span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? '● Online' : '○ Offline'}</span><PosInstallControl /></div>
-        </div>
-      </header>
-
-      {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-      <section className="mt-5 grid gap-4 md:grid-cols-3">
-        <article className="rounded-2xl border bg-white p-5"><p className="text-xs font-bold uppercase text-gray-500">Terminal</p><p className="mt-2 text-lg font-bold text-[#071638]">{data?.terminal.name || 'Initializing…'}</p><p className="mt-1 text-sm text-gray-500">Bound to this browser installation</p></article>
-        <article className="rounded-2xl border bg-white p-5"><p className="text-xs font-bold uppercase text-gray-500">Catalog Snapshot</p><p className="mt-2 text-lg font-bold text-[#071638]">{data ? `${data.catalog.length} products` : 'Loading…'}</p><p className="mt-1 text-sm text-gray-500">Admin prices remain read-only</p></article>
-        <article className="rounded-2xl border bg-white p-5"><p className="text-xs font-bold uppercase text-gray-500">Shift</p><p className="mt-2 text-lg font-bold text-[#071638]">{data?.open_shift ? 'Open' : 'Not opened'}</p><p className="mt-1 text-sm text-gray-500">Final close requires successful sync</p></article>
-      </section>
-
-      <section className="mt-5 rounded-2xl border bg-white p-5 sm:p-7">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="text-lg font-bold text-[#071638]">{data?.open_shift ? 'Shift is open' : 'Start cashier operations'}</h2><p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{data?.open_shift ? 'This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift.' : 'Enter the physical cash currently inside the drawer before accepting the first transaction.'}</p></div><button disabled={!data || Boolean(data.open_shift)} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">{data?.open_shift ? 'Shift Open' : 'Open Shift'}</button></div>
-      </section>
-
-      {data?.open_shift && <section className="mt-5 overflow-hidden rounded-2xl border bg-white">
-        <div className="border-b px-5 py-4 sm:px-6"><h2 className="text-lg font-bold text-[#071638]">New walk-in sale</h2><p className="mt-1 text-sm text-gray-500">Choose the customer type first. Member sales use reseller price; non-member sales use SRP.</p></div>
-        <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,.65fr)]">
-          <div className="border-b p-5 lg:border-b-0 lg:border-r sm:p-6">
-            <div className="grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => selectCustomerType('member')} className={`rounded-xl border p-4 text-left transition ${customerType === 'member' ? 'border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]' : 'hover:bg-gray-50'}`}><b className="block text-sm text-[#071638]">Member / Reseller</b><span className="mt-1 block text-xs text-gray-500">Identify member · reseller price</span></button>
-              <button type="button" onClick={() => selectCustomerType('non_member')} className={`rounded-xl border p-4 text-left transition ${customerType === 'non_member' ? 'border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]' : 'hover:bg-gray-50'}`}><b className="block text-sm text-[#071638]">Non-member</b><span className="mt-1 block text-xs text-gray-500">Walk-in customer · SRP</span></button>
+  return (
+    <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl">
+        <header className="rounded-2xl bg-[#071638] p-5 text-white shadow-sm sm:p-7">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d4af45]">Hiroma Point of Sale</p>
+          <div className="mt-2 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+            <div>
+              <h1 className="text-2xl font-bold">{data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || "Loading terminal…"}</h1>
+              <p className="mt-1 text-sm text-white/65">Dedicated cashier workspace · installable web POS · controlled offline queue</p>
             </div>
-
-            {customerType === 'member' ? <div className="relative mt-4">
-              {selectedMember ? <div className="flex items-center justify-between gap-3 rounded-xl border border-green-300 bg-green-50 p-4"><div><span className="text-xs font-bold uppercase text-green-700">Verified member</span><b className="mt-1 block text-sm text-[#071638]">{selectedMember.full_name}</b><span className="text-xs text-gray-500">@{selectedMember.username}{selectedMember.member_id ? ` · ${selectedMember.member_id}` : ''}</span></div><button onClick={() => setSelectedMember(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">Change</button></div> : <><label className="text-xs font-bold text-[#071638]">Search member nationwide</label><input value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Username, member ID, or full name" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />{memberSearch.trim().length > 0 && memberSearch.trim().length < 2 && <p className="mt-2 text-xs text-amber-700">Enter at least 2 characters.</p>}{(searchingMember || memberResults.length > 0) && <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border bg-white shadow-xl">{searchingMember ? <p className="p-4 text-sm text-gray-500">Searching…</p> : memberResults.map((member) => <button key={member.id} onClick={() => { setSelectedMember(member); setMemberResults([]) }} className="block w-full border-b px-4 py-3 text-left last:border-0 hover:bg-[#fff9e8]"><b className="block text-sm text-[#071638]">{member.full_name}</b><span className="text-xs text-gray-500">@{member.username}{member.member_id ? ` · ${member.member_id}` : ''}</span></button>)}</div>}</>}
-            </div> : <label className="mt-4 block"><span className="text-xs font-bold text-[#071638]">Customer name <span className="font-normal text-gray-400">(optional)</span></span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} maxLength={120} placeholder="Walk-in customer" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" /></label>}
-
-            <div className="mt-5 border-t pt-5"><label className="text-xs font-bold text-[#071638]">Products</label><input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products…" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" /></div>
-            <div className="mt-3 space-y-2">{filteredProducts.map((product) => { const price = customerType === 'member' ? product.reseller_price : product.srp_price; const quantity = cart[product.product_id] || 0; return <article key={product.product_id} className="flex flex-col justify-between gap-3 rounded-xl border p-4 sm:flex-row sm:items-center"><div><b className="text-sm text-[#071638]">{product.name}</b><p className="mt-1 text-xs text-gray-500">₱{price.toLocaleString('en-PH', { minimumFractionDigits: 2 })} · {product.stock} in stock · {product.pu_value} PU</p></div><div className="flex items-center gap-2"><button disabled={quantity === 0} onClick={() => setQuantity(product.product_id, quantity - 1)} className="h-9 w-9 rounded-lg border font-bold disabled:opacity-30">−</button><input aria-label={`${product.name} quantity`} type="number" min="0" max={product.stock} value={quantity || ''} placeholder="0" onChange={(event) => setQuantity(product.product_id, Number(event.target.value))} className="h-9 w-16 rounded-lg border text-center text-sm font-bold outline-none focus:border-[#d4af45]"/><button disabled={quantity >= product.stock} onClick={() => setQuantity(product.product_id, quantity + 1)} className="h-9 w-9 rounded-lg bg-[#071638] font-bold text-white disabled:opacity-30">+</button></div></article> })}{filteredProducts.length === 0 && <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No matching products.</p>}</div>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? "● Online" : "○ Offline"}</span>
+              {queuedSales.length > 0 && <span className="rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1.5 text-xs font-bold text-amber-200">{queuedSales.length} awaiting sync</span>}
+              <PosInstallControl />
+            </div>
           </div>
+        </header>
 
-          <aside className="flex flex-col bg-[#fbfcff] p-5 sm:p-6">
-            <h3 className="font-bold text-[#071638]">Order summary</h3>
-            <div className="mt-4 min-h-32 flex-1 space-y-3">{cartRows.length ? cartRows.map((row) => <div key={row.product_id} className="rounded-xl border bg-white p-3"><div className="flex justify-between gap-3"><b className="text-sm text-[#071638]">{row.name}</b><b className="text-sm">₱{row.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div><p className="mt-1 text-xs text-gray-500">{row.quantity} × ₱{row.unitPrice.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></div>) : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No items yet</p>}</div>
-            <div className="mt-5 border-t pt-5"><div className="flex items-center justify-between text-lg font-bold text-[#071638]"><span>Total</span><span>₱{total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-              <label className="mt-4 block text-xs font-bold text-[#071638]">Payment method<select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setAmountReceived(''); setPaymentReference('') }} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]">{data.payment_methods.map((method) => <option key={method.id} value={method.type === 'cash' ? 'cash' : method.id}>{method.type === 'cash' ? 'Cash' : `${method.type.toUpperCase()} · ${method.account_name}${method.account_number ? ` · ${method.account_number}` : ''}`}</option>)}</select></label>
-              {isCash && <label className="mt-4 block text-xs font-bold text-[#071638]">Cash received<div className="mt-2 flex items-center rounded-xl border bg-white px-3 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input value={amountReceived} onChange={(event) => setAmountReceived(event.target.value)} type="number" min="0" step="0.01" className="w-full bg-transparent px-2 py-3 text-sm font-bold outline-none" /></div></label>}
-              {!isCash && <label className="mt-4 block text-xs font-bold text-[#071638]">Payment reference<input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} maxLength={160} placeholder="Transaction or reference number" className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]" /></label>}
-              {isCash && received >= total && total > 0 && <p className="mt-3 text-sm font-bold text-green-700">Change: ₱{(received - total).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>}
-              {!customerReady && <p className="mt-3 text-xs font-semibold text-amber-700">Identify and verify the member before checkout.</p>}
-              <button disabled={!online || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale} onClick={completeSale} className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">{submittingSale ? 'Completing safely…' : 'Complete Sale'}</button>
-              <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">Online checkout revalidates the shift, official price, payment, and stock before saving exactly once.{!online ? ' Offline queuing will be enabled in the next safety stage.' : ''}</p>
+        {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
+        <section className="mt-5 grid gap-4 md:grid-cols-3">
+          <article className="rounded-2xl border bg-white p-5">
+            <p className="text-xs font-bold uppercase text-gray-500">Terminal</p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">{data?.terminal.name || "Initializing…"}</p>
+            <p className="mt-1 text-sm text-gray-500">Bound to this browser installation</p>
+          </article>
+          <article className="rounded-2xl border bg-white p-5">
+            <p className="text-xs font-bold uppercase text-gray-500">Catalog Snapshot</p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">{data ? `${data.catalog.length} products` : "Loading…"}</p>
+            <p className="mt-1 text-sm text-gray-500">Admin prices remain read-only</p>
+          </article>
+          <article className="rounded-2xl border bg-white p-5">
+            <p className="text-xs font-bold uppercase text-gray-500">Shift</p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">{data?.open_shift ? "Open" : "Not opened"}</p>
+            <p className="mt-1 text-sm text-gray-500">Final close requires successful sync</p>
+          </article>
+        </section>
+
+        <section className="mt-5 rounded-2xl border bg-white p-5 sm:p-7">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="text-lg font-bold text-[#071638]">{data?.open_shift ? "Shift is open" : "Start cashier operations"}</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{data?.open_shift ? "This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift." : "Enter the physical cash currently inside the drawer before accepting the first transaction."}</p>
             </div>
-          </aside>
-        </div>
-      </section>}
-      {showOpenShift && <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="open-shift-title"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 id="open-shift-title" className="text-xl font-bold text-[#071638]">Open cashier shift</h2><p className="mt-2 text-sm leading-6 text-gray-600">Count the cash already in the drawer. This becomes the shift’s opening cash—not a sale.</p><label className="mt-5 block text-sm font-bold text-[#071638]">Opening cash</label><div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input type="number" min="0" step="0.01" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none" /></div><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowOpenShift(false)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">Cancel</button><button type="button" disabled={savingShift || Number(openingCash) < 0} onClick={openShift} className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] disabled:opacity-50">{savingShift ? 'Opening…' : 'Confirm & Open'}</button></div></div></div>}
-      {receipt && <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title"><div className="my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="text-center"><p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p><h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">Payment received</h2><p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p></div><div className="mt-5 border-y py-4 text-sm"><div className="flex justify-between gap-4"><span className="text-gray-500">Customer</span><b className="text-right">{receipt.customer_name}</b></div><div className="mt-2 flex justify-between gap-4"><span className="text-gray-500">Cashier</span><b className="text-right">{receipt.cashier_name}</b></div><div className="mt-2 flex justify-between gap-4"><span className="text-gray-500">Date</span><b className="text-right">{new Date(receipt.created_at).toLocaleString('en-PH')}</b></div></div><div className="my-4 space-y-3">{receipt.items.map((item) => <div key={item.product_id} className="flex justify-between gap-4 text-sm"><div><b>{item.name}</b><p className="text-xs text-gray-500">{item.quantity} × ₱{item.unit_price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></div><b>₱{item.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>)}</div><div className="border-t pt-4 text-sm"><div className="flex justify-between text-lg font-bold"><span>Total</span><span>₱{receipt.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div><div className="mt-2 flex justify-between"><span className="text-gray-500">Payment</span><b>{receipt.payment_method}</b></div><div className="mt-2 flex justify-between"><span className="text-gray-500">Received</span><b>₱{receipt.amount_received.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>{receipt.change > 0 && <div className="mt-2 flex justify-between text-green-700"><span>Change</span><b>₱{receipt.change.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</b></div>}</div><div className="mt-6 grid grid-cols-2 gap-2"><button onClick={() => window.print()} className="rounded-xl border px-4 py-3 text-sm font-bold">Print receipt</button><button onClick={() => setReceipt(null)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">New sale</button></div></div></div>}
-    </div>
-  </main>
+            <button disabled={!data || Boolean(data.open_shift)} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
+              {data?.open_shift ? "Shift Open" : "Open Shift"}
+            </button>
+          </div>
+        </section>
+
+        {data?.open_shift && (
+          <section className="mt-5 overflow-hidden rounded-2xl border bg-white">
+            <div className="border-b px-5 py-4 sm:px-6">
+              <h2 className="text-lg font-bold text-[#071638]">New walk-in sale</h2>
+              <p className="mt-1 text-sm text-gray-500">Choose the customer type first. Member sales use reseller price; non-member sales use SRP.</p>
+            </div>
+            <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,.65fr)]">
+              <div className="border-b p-5 lg:border-b-0 lg:border-r sm:p-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={() => selectCustomerType("member")} className={`rounded-xl border p-4 text-left transition ${customerType === "member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}>
+                    <b className="block text-sm text-[#071638]">Member / Reseller</b>
+                    <span className="mt-1 block text-xs text-gray-500">Identify member · reseller price</span>
+                  </button>
+                  <button type="button" onClick={() => selectCustomerType("non_member")} className={`rounded-xl border p-4 text-left transition ${customerType === "non_member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}>
+                    <b className="block text-sm text-[#071638]">Non-member</b>
+                    <span className="mt-1 block text-xs text-gray-500">Walk-in customer · SRP</span>
+                  </button>
+                </div>
+
+                {customerType === "member" ? (
+                  <div className="relative mt-4">
+                    {selectedMember ? (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-green-300 bg-green-50 p-4">
+                        <div>
+                          <span className="text-xs font-bold uppercase text-green-700">Verified member</span>
+                          <b className="mt-1 block text-sm text-[#071638]">{selectedMember.full_name}</b>
+                          <span className="text-xs text-gray-500">
+                            @{selectedMember.username}
+                            {selectedMember.member_id ? ` · ${selectedMember.member_id}` : ""}
+                          </span>
+                        </div>
+                        <button onClick={() => setSelectedMember(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">
+                          Change
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <label className="text-xs font-bold text-[#071638]">Search member nationwide</label>
+                        <input value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Username, member ID, or full name" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                        {memberSearch.trim().length > 0 && memberSearch.trim().length < 2 && <p className="mt-2 text-xs text-amber-700">Enter at least 2 characters.</p>}
+                        {(searchingMember || memberResults.length > 0) && (
+                          <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border bg-white shadow-xl">
+                            {searchingMember ? (
+                              <p className="p-4 text-sm text-gray-500">Searching…</p>
+                            ) : (
+                              memberResults.map((member) => (
+                                <button
+                                  key={member.id}
+                                  onClick={() => {
+                                    setSelectedMember(member);
+                                    setMemberResults([]);
+                                  }}
+                                  className="block w-full border-b px-4 py-3 text-left last:border-0 hover:bg-[#fff9e8]"
+                                >
+                                  <b className="block text-sm text-[#071638]">{member.full_name}</b>
+                                  <span className="text-xs text-gray-500">
+                                    @{member.username}
+                                    {member.member_id ? ` · ${member.member_id}` : ""}
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <label className="mt-4 block">
+                    <span className="text-xs font-bold text-[#071638]">
+                      Customer name <span className="font-normal text-gray-400">(optional)</span>
+                    </span>
+                    <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} maxLength={120} placeholder="Walk-in customer" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                  </label>
+                )}
+
+                <div className="mt-5 border-t pt-5">
+                  <label className="text-xs font-bold text-[#071638]">Products</label>
+                  <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products…" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                </div>
+                <div className="mt-3 space-y-2">
+                  {filteredProducts.map((product) => {
+                    const price = customerType === "member" ? product.reseller_price : product.srp_price;
+                    const quantity = cart[product.product_id] || 0;
+                    return (
+                      <article key={product.product_id} className="flex flex-col justify-between gap-3 rounded-xl border p-4 sm:flex-row sm:items-center">
+                        <div>
+                          <b className="text-sm text-[#071638]">{product.name}</b>
+                          <p className="mt-1 text-xs text-gray-500">
+                            ₱
+                            {price.toLocaleString("en-PH", {
+                              minimumFractionDigits: 2,
+                            })}{" "}
+                            · {product.stock} in stock · {product.pu_value} PU
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button disabled={quantity === 0} onClick={() => setQuantity(product.product_id, quantity - 1)} className="h-9 w-9 rounded-lg border font-bold disabled:opacity-30">
+                            −
+                          </button>
+                          <input aria-label={`${product.name} quantity`} type="number" min="0" max={product.stock} value={quantity || ""} placeholder="0" onChange={(event) => setQuantity(product.product_id, Number(event.target.value))} className="h-9 w-16 rounded-lg border text-center text-sm font-bold outline-none focus:border-[#d4af45]" />
+                          <button disabled={quantity >= product.stock} onClick={() => setQuantity(product.product_id, quantity + 1)} className="h-9 w-9 rounded-lg bg-[#071638] font-bold text-white disabled:opacity-30">
+                            +
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {filteredProducts.length === 0 && <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No matching products.</p>}
+                </div>
+              </div>
+
+              <aside className="flex flex-col bg-[#fbfcff] p-5 sm:p-6">
+                <h3 className="font-bold text-[#071638]">Order summary</h3>
+                <div className="mt-4 min-h-32 flex-1 space-y-3">
+                  {cartRows.length ? (
+                    cartRows.map((row) => (
+                      <div key={row.product_id} className="rounded-xl border bg-white p-3">
+                        <div className="flex justify-between gap-3">
+                          <b className="text-sm text-[#071638]">{row.name}</b>
+                          <b className="text-sm">
+                            ₱
+                            {row.subtotal.toLocaleString("en-PH", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </b>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {row.quantity} × ₱
+                          {row.unitPrice.toLocaleString("en-PH", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No items yet</p>
+                  )}
+                </div>
+                <div className="mt-5 border-t pt-5">
+                  <div className="flex items-center justify-between text-lg font-bold text-[#071638]">
+                    <span>Total</span>
+                    <span>
+                      ₱
+                      {total.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <label className="mt-4 block text-xs font-bold text-[#071638]">
+                    Payment method
+                    <select
+                      value={paymentMethod}
+                      onChange={(event) => {
+                        setPaymentMethod(event.target.value);
+                        setAmountReceived("");
+                        setPaymentReference("");
+                      }}
+                      className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]"
+                    >
+                      {data.payment_methods.map((method) => (
+                        <option key={method.id} value={method.type === "cash" ? "cash" : method.id}>
+                          {method.type === "cash" ? "Cash" : `${method.type.toUpperCase()} · ${method.account_name}${method.account_number ? ` · ${method.account_number}` : ""}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {isCash && (
+                    <label className="mt-4 block text-xs font-bold text-[#071638]">
+                      Cash received
+                      <div className="mt-2 flex items-center rounded-xl border bg-white px-3 focus-within:border-[#d4af45]">
+                        <span className="font-bold text-gray-500">₱</span>
+                        <input value={amountReceived} onChange={(event) => setAmountReceived(event.target.value)} type="number" min="0" step="0.01" className="w-full bg-transparent px-2 py-3 text-sm font-bold outline-none" />
+                      </div>
+                    </label>
+                  )}
+                  {!isCash && (
+                    <label className="mt-4 block text-xs font-bold text-[#071638]">
+                      Payment reference
+                      <input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} maxLength={160} placeholder="Transaction or reference number" className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                    </label>
+                  )}
+                  {isCash && received >= total && total > 0 && (
+                    <p className="mt-3 text-sm font-bold text-green-700">
+                      Change: ₱
+                      {(received - total).toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </p>
+                  )}
+                  {!customerReady && <p className="mt-3 text-xs font-semibold text-amber-700">Identify and verify the member before checkout.</p>}
+                  <button disabled={!customerReady || !paymentReady || cartRows.length === 0 || submittingSale || (!online && (!isCash || customerType === "member"))} onClick={completeSale} className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
+                    {submittingSale ? "Completing safely…" : online ? "Complete Sale" : "Save Offline Sale"}
+                  </button>
+                  <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">{online ? "Online checkout revalidates the shift, official price, payment, and stock before saving exactly once." : "Offline checkout currently supports non-member cash sales. Its permanent receipt number remains unchanged after synchronization."}</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+        )}
+        {showOpenShift && (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="open-shift-title">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 id="open-shift-title" className="text-xl font-bold text-[#071638]">
+                Open cashier shift
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-gray-600">Count the cash already in the drawer. This becomes the shift’s opening cash—not a sale.</p>
+              <label className="mt-5 block text-sm font-bold text-[#071638]">Opening cash</label>
+              <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]">
+                <span className="font-bold text-gray-500">₱</span>
+                <input type="number" min="0" step="0.01" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none" />
+              </div>
+              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setShowOpenShift(false)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">
+                  Cancel
+                </button>
+                <button type="button" disabled={savingShift || Number(openingCash) < 0} onClick={openShift} className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] disabled:opacity-50">
+                  {savingShift ? "Opening…" : "Confirm & Open"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {receipt && (
+          <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+            <div className="my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="text-center">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p>
+                <h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">
+                  Payment received
+                </h2>
+                <p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p>
+                {receipt.sync_status === "saved_offline" && <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800">Recorded offline · awaiting synchronization</p>}
+              </div>
+              <div className="mt-5 border-y py-4 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-500">Customer</span>
+                  <b className="text-right">{receipt.customer_name}</b>
+                </div>
+                <div className="mt-2 flex justify-between gap-4">
+                  <span className="text-gray-500">Cashier</span>
+                  <b className="text-right">{receipt.cashier_name}</b>
+                </div>
+                <div className="mt-2 flex justify-between gap-4">
+                  <span className="text-gray-500">Date</span>
+                  <b className="text-right">{new Date(receipt.created_at).toLocaleString("en-PH")}</b>
+                </div>
+              </div>
+              <div className="my-4 space-y-3">
+                {receipt.items.map((item) => (
+                  <div key={item.product_id} className="flex justify-between gap-4 text-sm">
+                    <div>
+                      <b>{item.name}</b>
+                      <p className="text-xs text-gray-500">
+                        {item.quantity} × ₱
+                        {item.unit_price.toLocaleString("en-PH", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </p>
+                    </div>
+                    <b>
+                      ₱
+                      {item.subtotal.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </b>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t pt-4 text-sm">
+                <div className="flex justify-between text-lg font-bold">
+                  <span>Total</span>
+                  <span>
+                    ₱
+                    {receipt.total.toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <span className="text-gray-500">Payment</span>
+                  <b>{receipt.payment_method}</b>
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <span className="text-gray-500">Received</span>
+                  <b>
+                    ₱
+                    {receipt.amount_received.toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </b>
+                </div>
+                {receipt.change > 0 && (
+                  <div className="mt-2 flex justify-between text-green-700">
+                    <span>Change</span>
+                    <b>
+                      ₱
+                      {receipt.change.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </b>
+                  </div>
+                )}
+              </div>
+              <div className="mt-6 grid grid-cols-2 gap-2">
+                <button onClick={() => window.print()} className="rounded-xl border px-4 py-3 text-sm font-bold">
+                  Print receipt
+                </button>
+                <button onClick={() => setReceipt(null)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">
+                  New sale
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }
