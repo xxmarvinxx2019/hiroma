@@ -47,6 +47,17 @@ test('POS visibly identifies the authenticated cashier', () => {
   assert.match(page, /cashier_name: data\.cashier\.full_name/)
 })
 
+test('cashier navigation exposes a POS-only sync center without financial totals', () => {
+  const layout = read('src/app/dashboard/city/layout.tsx')
+  const sync = read('src/app/dashboard/city/pos/sync/page.tsx')
+  assert.match(layout, /Sync Center.*\/dashboard\/city\/pos\/sync/)
+  assert.match(layout, /'\/dashboard\/city\/pos\/sync': 'pos'/)
+  assert.match(sync, /listQueuedSales/)
+  assert.match(sync, /Retry sync/)
+  assert.match(sync, /Running sales and expected cash are intentionally hidden/)
+  assert.doesNotMatch(sync, /expected_cash_snapshot|total_snapshot|payment_groups/)
+})
+
 test('approver cannot review their own payment and rejection restores reserved stock', () => {
   const approvals = read('src/app/api/city/pos/approvals/route.ts')
   assert.match(approvals, /transaction\.cashier_id === actorId/)
