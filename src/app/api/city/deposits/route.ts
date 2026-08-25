@@ -20,7 +20,8 @@ export async function GET() {
   const user = await branchUser()
   if (!user) return NextResponse.json({ error: 'Branch access required.' }, { status: 403 })
   const deposits = await prisma.branchCashDeposit.findMany({ where: { branch_id: user.id }, orderBy: { deposited_at: 'desc' }, take: 100 })
-  return NextResponse.json({ deposits: await Promise.all(deposits.map(async (row) => ({ ...row, proof_storage_path: undefined, proof_url: await getDepositProofUrl(row.proof_storage_path), expected_cash_snapshot: Number(row.expected_cash_snapshot), deposit_amount: Number(row.deposit_amount), variance_amount: Number(row.variance_amount) }))), can_confirm: !user.is_staff })
+  const canConfirm = !user.is_staff || user.permissions?.includes('pos_approve') === true
+  return NextResponse.json({ deposits: await Promise.all(deposits.map(async (row) => ({ ...row, proof_storage_path: undefined, proof_url: await getDepositProofUrl(row.proof_storage_path), expected_cash_snapshot: Number(row.expected_cash_snapshot), deposit_amount: Number(row.deposit_amount), variance_amount: Number(row.variance_amount) }))), can_confirm: canConfirm })
 }
 
 export async function POST(req: NextRequest) {
@@ -52,7 +53,8 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const user = await branchUser()
-    if (!user || user.is_staff) return NextResponse.json({ error: 'Only the Branch Manager can confirm a submitted deposit.' }, { status: 403 })
+    const authorizedApprover = Boolean(user && (!user.is_staff || user.permissions?.includes('pos_approve')))
+    if (!user || !authorizedApprover) return NextResponse.json({ error: 'Only the Branch Manager or assigned Operations Approver can confirm a submitted deposit.' }, { status: 403 })
     const body = await req.json(), id = String(body.id || ''), notes = String(body.notes || '').trim()
     const deposit = await prisma.branchCashDeposit.findFirst({ where: { id, branch_id: user.id }, select: { id: true, status: true, submitted_by: true, deposit_amount: true } })
     if (!deposit || deposit.status !== 'submitted') return NextResponse.json({ error: 'Submitted deposit not found.' }, { status: 404 })
@@ -64,7 +66,7 @@ export async function PATCH(req: NextRequest) {
         data: { status: 'confirmed', confirmed_by: who.id, confirmed_by_name_snapshot: who.name, confirmed_at: new Date(), notes: notes || undefined },
       })
       if (claimed.count !== 1) throw new DepositConfirmationConflictError('This deposit was already confirmed or changed. Refresh to see its latest status.')
-      await tx.inventoryAuditEvent.create({ data: { owner_id: user.id, actor_id: who.id, actor_name_snapshot: who.name, event_type: 'cash_deposit_confirmed', total_value: deposit.deposit_amount, reference_type: 'branch_cash_deposit', reference_id: id, reason: notes || 'Confirmed by Branch Manager' } })
+      await tx.inventoryAuditEvent.create({ data: { owner_id: user.id, actor_id: who.id, actor_name_snapshot: who.name, event_type: 'cash_deposit_confirmed', total_value: deposit.deposit_amount, reference_type: 'branch_cash_deposit', reference_id: id, reason: notes || 'Confirmed by authorized Operations Approver' } })
     })
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -12,7 +12,7 @@ const emptyForm = { full_name: '', username: '', password: '', mobile: '', email
 const presets = [
   { label: 'Registration Staff', permissions: ['dashboard', 'resellers', 'register_reseller', 'pins'] },
   { label: 'POS Cashier (Restricted)', permissions: ['pos'] },
-  { label: 'POS Payment Approver', permissions: ['pos_approve'] },
+  { label: 'Operations Approver / Manager', permissions: ['inventory', 'reports', 'pos_approve'] },
   { label: 'Sales Staff', permissions: ['dashboard', 'resellers', 'orders', 'pos'] },
   { label: 'Inventory Staff', permissions: ['dashboard', 'inventory'] },
   { label: 'Custom Access', permissions: [] },

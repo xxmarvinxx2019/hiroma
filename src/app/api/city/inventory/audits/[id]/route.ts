@@ -21,6 +21,10 @@ function actor(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
   return { id: user.actor_id || user.id, name: user.actor_name || user.full_name || user.username }
 }
 
+function isAuthorizedApprover(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
+  return user.is_staff !== true || user.permissions?.includes('pos_approve') === true
+}
+
 async function sessionForOwner(id: string, ownerId: string) {
   return prisma.inventoryAuditSession.findFirst({
     where: { id, owner_id: ownerId },
@@ -57,7 +61,7 @@ export async function GET(_req: NextRequest, context: AuditRouteContext) {
       },
       can_count: canLocalAccountCount(user.is_staff === true, starter?.staff_type),
       is_area_manager_audit: areaManagerAudit,
-      can_approve: canLocalOwnerReview({ isStaff: user.is_staff === true, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: actor(user).id }),
+      can_approve: canLocalOwnerReview({ isAuthorizedApprover: isAuthorizedApprover(user), status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: actor(user).id }),
     })
   } catch (error) {
     console.error('[INVENTORY AUDIT DETAIL GET]', error)
@@ -147,12 +151,16 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
     }
 
     if (action === 'approve') {
-      if (user.is_staff === true) return NextResponse.json({ error: 'Only the City Distributor or Branch owner can approve inventory adjustments.' }, { status: 403 })
+      if (!isAuthorizedApprover(user)) return NextResponse.json({ error: 'Only the City Distributor, Branch owner, or assigned Operations Approver can approve inventory adjustments.' }, { status: 403 })
       if (session.status !== 'submitted') return NextResponse.json({ error: 'Only submitted counts can be approved.' }, { status: 409 })
       const submission = await submissionForSession(id)
-      if (!canLocalOwnerReview({ isStaff: false, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: currentActor.id })) return NextResponse.json({ error: 'You cannot approve your own submitted count. A different authorized local owner/manager must review it.' }, { status: 403 })
+      if (!canLocalOwnerReview({ isAuthorizedApprover: true, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: currentActor.id })) return NextResponse.json({ error: 'You cannot approve your own submitted count. A different authorized owner, manager, or Operations Approver must review it.' }, { status: 403 })
       if (session.items.some((item) => item.counted_quantity === null || item.variance_quantity === null)) return NextResponse.json({ error: 'This count is incomplete.' }, { status: 409 })
       const approvalNotes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) || null : null
+      const hasVariance = session.items.some((item) => item.variance_quantity !== 0)
+      if (hasVariance && (!approvalNotes || approvalNotes.length < 5)) {
+        return NextResponse.json({ error: 'Verification notes are required before approving a count with a shortage or overage.' }, { status: 400 })
+      }
 
       await prisma.$transaction(async (tx) => {
         const claimed = await tx.inventoryAuditSession.updateMany({
@@ -229,10 +237,10 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
     }
 
     if (action === 'reject') {
-      if (user.is_staff === true) return NextResponse.json({ error: 'Only the owner can reject a submitted inventory count.' }, { status: 403 })
+      if (!isAuthorizedApprover(user)) return NextResponse.json({ error: 'Only the owner, manager, or assigned Operations Approver can reject a submitted inventory count.' }, { status: 403 })
       if (session.status !== 'submitted') return NextResponse.json({ error: 'Only submitted counts can be rejected.' }, { status: 409 })
       const submission = await submissionForSession(id)
-      if (!canLocalOwnerReview({ isStaff: false, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: currentActor.id })) return NextResponse.json({ error: 'You cannot reject your own submitted count.' }, { status: 403 })
+      if (!canLocalOwnerReview({ isAuthorizedApprover: true, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: currentActor.id })) return NextResponse.json({ error: 'You cannot reject your own submitted count.' }, { status: 403 })
       const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : ''
       if (notes.length < 5) return NextResponse.json({ error: 'A rejection reason is required.' }, { status: 400 })
       await prisma.$transaction(async (tx) => {

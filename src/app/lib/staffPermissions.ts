@@ -6,7 +6,7 @@ export const STAFF_PERMISSIONS = [
   { key: 'inventory', label: 'Inventory', description: 'View and manage product inventory.' },
   { key: 'orders', label: 'Orders / Sales', description: 'Create walk-in sales and manage orders.' },
   { key: 'pos', label: 'Point of Sale', description: 'Use the assigned POS terminal, shifts, offline sales, and sync queue.' },
-  { key: 'pos_approve', label: 'POS Payment Approver', description: 'Verify or reject non-cash POS payments. Cannot approve a transaction created by the same staff account.' },
+  { key: 'pos_approve', label: 'Operations Approver', description: 'Independently verify POS non-cash payments and submitted inventory counts. Cannot approve an action created or submitted by the same account.' },
   { key: 'payment_methods', label: 'Payment Methods', description: 'View and manage payment methods.' },
   { key: 'pin_requests', label: 'PIN Requests', description: 'View and submit PIN requests.' },
 ] as const

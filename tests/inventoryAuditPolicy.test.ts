@@ -9,14 +9,15 @@ test('only local staff can count ordinary local audits', () => {
 })
 
 test('local owner can review a different actor submission', () => {
-  assert.equal(canLocalOwnerReview({ isStaff: false, status: 'submitted', submitterId: 'staff-1', starterId: 'staff-1', actorId: 'owner-1' }), true)
+  assert.equal(canLocalOwnerReview({ isAuthorizedApprover: true, status: 'submitted', submitterId: 'staff-1', starterId: 'staff-1', actorId: 'owner-1' }), true)
 })
 
-test('self approval and staff approval are rejected', () => {
-  assert.equal(canLocalOwnerReview({ isStaff: false, status: 'submitted', submitterId: 'owner-1', starterId: 'owner-1', actorId: 'owner-1' }), false)
-  assert.equal(canLocalOwnerReview({ isStaff: true, status: 'submitted', submitterId: 'staff-1', starterId: 'staff-1', actorId: 'staff-2' }), false)
+test('self approval and unauthorized staff approval are rejected', () => {
+  assert.equal(canLocalOwnerReview({ isAuthorizedApprover: true, status: 'submitted', submitterId: 'owner-1', starterId: 'owner-1', actorId: 'owner-1' }), false)
+  assert.equal(canLocalOwnerReview({ isAuthorizedApprover: false, status: 'submitted', submitterId: 'staff-1', starterId: 'staff-1', actorId: 'staff-2' }), false)
+  assert.equal(canLocalOwnerReview({ isAuthorizedApprover: true, status: 'submitted', submitterId: 'staff-1', starterId: 'staff-1', actorId: 'approver-1' }), true)
 })
 
 test('legacy sessions fall back to starter identity for self-review prevention', () => {
-  assert.equal(canLocalOwnerReview({ isStaff: false, status: 'submitted', submitterId: null, starterId: 'owner-1', actorId: 'owner-1' }), false)
+  assert.equal(canLocalOwnerReview({ isAuthorizedApprover: true, status: 'submitted', submitterId: null, starterId: 'owner-1', actorId: 'owner-1' }), false)
 })
