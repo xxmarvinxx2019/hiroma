@@ -91,6 +91,7 @@ export default function PointOfSalePage() {
   const [countedCash, setCountedCash] = useState("");
   const [inventoryCounts, setInventoryCounts] = useState<Record<string, { counted: string; damaged: string; expired: string }>>({});
   const [recountRequired, setRecountRequired] = useState(false);
+  const [recountMismatch, setRecountMismatch] = useState({ cash: false, inventory: false });
   const [closingExplanation, setClosingExplanation] = useState("");
   const [closingResult, setClosingResult] = useState<{ pendingApproval: boolean; message: string } | null>(null);
   const [customerType, setCustomerType] = useState<CustomerType>("non_member");
@@ -168,6 +169,7 @@ export default function PointOfSalePage() {
     setLoadingCloseShift(true);
     setClosingResult(null);
     setRecountRequired(false);
+    setRecountMismatch({ cash: false, inventory: false });
     setClosingExplanation("");
     setCountedCash("");
     setInventoryCounts({});
@@ -213,7 +215,13 @@ export default function PointOfSalePage() {
       });
       const result = await response.json();
       if (!response.ok) {
-        if (result.code === "SHIFT_RECOUNT_REQUIRED") setRecountRequired(true);
+        if (result.code === "SHIFT_RECOUNT_REQUIRED") {
+          setRecountRequired(true);
+          setRecountMismatch({
+            cash: result.mismatch_categories?.cash === true,
+            inventory: result.mismatch_categories?.inventory === true,
+          });
+        }
         throw new Error(result.error || "Unable to submit shift closing.");
       }
       const pendingApproval = result.pending_approval === true;
@@ -878,7 +886,11 @@ export default function PointOfSalePage() {
                     <p className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold leading-6 text-red-700">Closing is locked until this device is online and every transaction is fully synchronized. Pending on device: {queuedSales.length}; pending on server: {closingData.pending_sync_count}.</p>
                   )}
                   {error && <p className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
-                  {recountRequired && <p className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">A difference was detected. Recount the cash and all products. If a difference remains, explain what you verified before resubmitting.</p>}
+                  {recountRequired && <div className="mb-5 space-y-2">
+                    {recountMismatch.cash && <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold leading-6 text-red-800"><b>Cash count does not match.</b> Recount all physical cash in the drawer, including the opening cash. The expected amount remains hidden.</p>}
+                    {recountMismatch.inventory && <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900"><b>Physical inventory does not match.</b> Recount every product, including damaged and expired units. Expected quantities remain hidden.</p>}
+                    {!recountMismatch.cash && !recountMismatch.inventory && <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">A difference was detected. Recount the cash and physical inventory before submitting again.</p>}
+                  </div>}
 
                   <label className="block text-sm font-bold text-[#071638]">Physical cash in drawer <span className="text-red-600">*</span>
                     <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input required disabled={!online} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="Enter total physical cash" className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none disabled:opacity-50" /></div>

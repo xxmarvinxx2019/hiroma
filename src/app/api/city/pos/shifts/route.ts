@@ -93,12 +93,14 @@ export async function PATCH(req: Request) {
           const saleable = count.counted - count.damaged - count.expired
           return { item, ...count, saleable, variance: saleable - item.quantity }
         })
-        const mismatch = Math.abs(countedCash - expected) >= 0.005 || rows.some((row) => row.variance !== 0)
+        const cashMismatch = Math.abs(countedCash - expected) >= 0.005
+        const inventoryMismatch = rows.some((row) => row.variance !== 0)
+        const mismatch = cashMismatch || inventoryMismatch
         const recountConfirmed = body.recount_confirmed === true
         const explanation = typeof body.explanation === 'string' ? body.explanation.trim().slice(0, 1000) : ''
         if (mismatch && shift.closing_count_attempts < 1 && !recountConfirmed) {
           await tx.posShift.update({ where: { id: shift.id }, data: { closing_count_attempts: 1 } })
-          return { recountRequired: true as const }
+          return { recountRequired: true as const, cashMismatch, inventoryMismatch }
         }
         if (mismatch && explanation.length < 5) return { explanationRequired: true as const }
 
@@ -198,7 +200,14 @@ export async function PATCH(req: Request) {
     if ('inventoryEmpty' in result) return NextResponse.json({ error: 'This Branch has no inventory records to count. Ask the Branch manager to review the inventory setup.', code: 'SHIFT_INVENTORY_EMPTY' }, { status: 409 })
     if ('invalidInventory' in result) return NextResponse.json({ error: 'Review the physical counts. Quantities must be whole numbers, and damaged plus expired units cannot exceed the physical count.', code: 'SHIFT_INVENTORY_INVALID' }, { status: 400 })
     if ('incompleteInventory' in result) return NextResponse.json({ error: 'Every Branch product must be physically counted before submitting the shift.', code: 'SHIFT_INVENTORY_INCOMPLETE' }, { status: 400 })
-    if ('recountRequired' in result) return NextResponse.json({ error: 'A difference was detected between your physical count and the system record. Recount the cash and inventory, then submit the final count.', code: 'SHIFT_RECOUNT_REQUIRED' }, { status: 409 })
+    if ('recountRequired' in result) return NextResponse.json({
+      error: 'One or more submitted counts do not match the system record. Recount the indicated section, then submit the final count.',
+      code: 'SHIFT_RECOUNT_REQUIRED',
+      mismatch_categories: {
+        cash: result.cashMismatch,
+        inventory: result.inventoryMismatch,
+      },
+    }, { status: 409 })
     if ('explanationRequired' in result) return NextResponse.json({ error: 'A difference remains after recounting. Enter a clear explanation before submitting this shift for manager review.', code: 'SHIFT_EXPLANATION_REQUIRED' }, { status: 400 })
     if ('branchSubmitted' in result) return NextResponse.json({ shift: result.shift, audit: result.audit, pending_approval: true })
     return NextResponse.json({ shift: result })
