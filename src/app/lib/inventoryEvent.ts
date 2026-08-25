@@ -13,7 +13,7 @@ type RecordInventoryOutArgs = {
   actorId: string
   actorName: string
   eventType: string
-  referenceType: 'order' | 'registration_pin' | 'upgrade_pin'
+  referenceType: 'order' | 'registration_pin' | 'upgrade_pin' | 'pos_registration_intake'
   referenceId: string
   reason: string
   items: InventoryOutEventItem[]

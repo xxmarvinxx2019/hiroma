@@ -10,26 +10,37 @@ export type PosQueuedSale = {
   created_at: string
 }
 
+export type PosQueuedRegistration = {
+  client_intake_id: string
+  receipt_number: string
+  payload: Record<string, unknown>
+  status: 'saved_offline' | 'syncing' | 'needs_attention'
+  error?: string
+  created_at: string
+}
+
 const DB_NAME = 'hiroma-pos'
 const STORE = 'sales'
+const REGISTRATION_STORE = 'registrations'
 
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1)
+    const request = indexedDB.open(DB_NAME, 2)
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'client_transaction_id' })
+      if (!db.objectStoreNames.contains(REGISTRATION_STORE)) db.createObjectStore(REGISTRATION_STORE, { keyPath: 'client_intake_id' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error || new Error('Unable to open the offline POS queue.'))
   })
 }
 
-async function operateStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function operateStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>, storeName = STORE): Promise<T> {
   const db = await database()
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE, mode)
-    const request = action(transaction.objectStore(STORE))
+    const transaction = db.transaction(storeName, mode)
+    const request = action(transaction.objectStore(storeName))
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error || new Error('Offline POS storage failed.'))
     transaction.oncomplete = () => db.close()
@@ -39,6 +50,9 @@ async function operateStore<T>(mode: IDBTransactionMode, action: (store: IDBObje
 export const saveQueuedSale = (sale: PosQueuedSale) => operateStore('readwrite', (store) => store.put(sale))
 export const deleteQueuedSale = (id: string) => operateStore('readwrite', (store) => store.delete(id))
 export const listQueuedSales = () => operateStore<PosQueuedSale[]>('readonly', (store) => store.getAll())
+export const saveQueuedRegistration = (row: PosQueuedRegistration) => operateStore('readwrite', (store) => store.put(row), REGISTRATION_STORE)
+export const deleteQueuedRegistration = (id: string) => operateStore('readwrite', (store) => store.delete(id), REGISTRATION_STORE)
+export const listQueuedRegistrations = () => operateStore<PosQueuedRegistration[]>('readonly', (store) => store.getAll(), REGISTRATION_STORE)
 
 export type PosReceiptRange = {
   terminal_id: string

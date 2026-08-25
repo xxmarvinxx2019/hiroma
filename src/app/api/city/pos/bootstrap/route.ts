@@ -58,7 +58,7 @@ export async function POST(req: Request) {
           },
         })
 
-    const [owner, inventory, paymentMethods, openShift] = await Promise.all([
+    const [owner, inventory, paymentMethods, openShift, registrationPackages] = await Promise.all([
       prisma.user.findUnique({
         where: { id: user.id },
         select: {
@@ -113,6 +113,21 @@ export async function POST(req: Request) {
         },
         select: { id: true, opened_at: true, opening_cash: true },
       }),
+      prisma.package.findMany({
+        where: { is_active: true },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          products: {
+            select: {
+              product_id: true,
+              quantity: true,
+              product: { select: { name: true, price: true } },
+            },
+          },
+        },
+      }),
     ])
 
     await prisma.posTerminal.update({
@@ -166,6 +181,16 @@ export async function POST(req: Request) {
         pu_value: row.product.pu_value,
       })),
       payment_methods: [{ id: 'cash', type: 'cash', account_name: 'Cash' }, ...paymentMethods],
+      registration_packages: registrationPackages.map((pkg) => ({
+        id: pkg.id,
+        name: pkg.name,
+        total: pkg.products.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0),
+        products: pkg.products.map((item) => ({
+          product_id: item.product_id,
+          name: item.product.name,
+          quantity: item.quantity,
+        })),
+      })),
       offline_policy: {
         requires_active_shift: true,
         payment_methods: ['cash'],

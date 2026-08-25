@@ -53,6 +53,9 @@ function CityRegisterResellerPageInner() {
   const [pinData, setPinData] = useState<VerifiedPin | null>(null)
   const [pinError, setPinError] = useState('')
   const [pinLoading, setPinLoading] = useState(false)
+  const [posIntakeId, setPosIntakeId] = useState('')
+  const [posIntakeReceipt, setPosIntakeReceipt] = useState('')
+  const [posIntakeError, setPosIntakeError] = useState('')
 
   // Step 2 — Location (PSGC)
   const [regions, setRegions] = useState<{ code: string; name: string }[]>([])
@@ -344,6 +347,52 @@ function CityRegisterResellerPageInner() {
     setSmsStatus(null)
   }, [])
 
+  // A released POS intake pre-fills the applicant record. PIN verification,
+  // sponsor placement, and final review remain deliberate encoder actions.
+  useEffect(() => {
+    const intakeId = searchParams.get('pos_intake')
+    if (!intakeId) return
+    fetch(`/api/city/pos/registration-encoding?id=${encodeURIComponent(intakeId)}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Unable to load the POS registration handoff.')
+        const registration = result.registration
+        const applicant = registration.applicant_snapshot || {}
+        const address = registration.applicant_address || {}
+        setPosIntakeId(registration.id)
+        setPosIntakeReceipt(registration.receipt_number)
+        setForm((current) => ({
+          ...current,
+          full_name: applicant.full_name || current.full_name,
+          first_name: applicant.first_name || current.first_name,
+          middle_name: applicant.middle_name || current.middle_name,
+          last_name: applicant.last_name || current.last_name,
+          suffix: applicant.suffix || current.suffix,
+          no_middle_name: applicant.no_middle_name === true,
+          email: applicant.email || current.email,
+          mobile: applicant.mobile || current.mobile,
+          birthday: applicant.birthday || current.birthday,
+          birthplace: applicant.birthplace || current.birthplace,
+          identity_document_type: applicant.identity_document_type || current.identity_document_type,
+          identity_document_number: applicant.identity_document_reference || applicant.identity_document_number || current.identity_document_number,
+        }))
+        setReferralInput(registration.referrer_username || '')
+        setLocation({
+          region_code: address.region_code || '',
+          region_name: address.region_name || '',
+          province_code: address.province_code || '',
+          province_name: address.province_name || '',
+          city_muni_code: address.city_muni_code || '',
+          city_muni_name: address.city_muni_name || '',
+          barangay_code: address.barangay_code || '',
+          barangay_name: address.barangay_name || '',
+          street: address.street || address.street_address || '',
+          zip_code: address.zip_code || '',
+        })
+      })
+      .catch((reason) => setPosIntakeError(reason instanceof Error ? reason.message : 'Unable to load POS registration handoff.'))
+  }, [searchParams])
+
   // Step 1 — Verify PIN
   // Auto-fill and verify PIN from URL param
   useEffect(() => {
@@ -603,6 +652,7 @@ function CityRegisterResellerPageInner() {
         referrer_username: referralData?.username,
         actual_parent_node_id: selectedSlot.parent_node_id,
         actual_position: selectedSlot.position,
+        pos_intake_id: posIntakeId || null,
       }),
     })
     const data = await res.json()
@@ -650,6 +700,12 @@ function CityRegisterResellerPageInner() {
 
   return (
     <div className="max-w-2xl mx-auto">
+      {posIntakeReceipt && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+          <strong>POS handoff {posIntakeReceipt}</strong> — payment and package release are already recorded. Review the pre-filled data, assign the PIN and placement, then create the account. Inventory will not be deducted again.
+        </div>
+      )}
+      {posIntakeError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{posIntakeError}</div>}
       {/* Header */}
       <div className="mb-6">
         <button
