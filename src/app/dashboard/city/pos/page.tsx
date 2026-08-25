@@ -36,6 +36,7 @@ export default function PointOfSalePage() {
     }).then(async (response) => {
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Unable to initialize POS.')
+      setError('')
       setData(result)
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to initialize POS.'))
     return () => {
