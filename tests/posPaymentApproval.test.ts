@@ -38,6 +38,15 @@ test('offline POS checkout is cash-only in both the client and server', () => {
   assert.match(bootstrap, /payment_methods: \['cash'\]/)
 })
 
+test('POS visibly identifies the authenticated cashier', () => {
+  const page = read('src/app/dashboard/city/pos/page.tsx')
+  const bootstrap = read('src/app/api/city/pos/bootstrap/route.ts')
+  assert.match(bootstrap, /full_name: user\.actor_name \|\| user\.full_name/)
+  assert.match(bootstrap, /username: user\.actor_username \|\| user\.username/)
+  assert.match(page, /Logged-in cashier/)
+  assert.match(page, /cashier_name: data\.cashier\.full_name/)
+})
+
 test('approver cannot review their own payment and rejection restores reserved stock', () => {
   const approvals = read('src/app/api/city/pos/approvals/route.ts')
   assert.match(approvals, /transaction\.cashier_id === actorId/)

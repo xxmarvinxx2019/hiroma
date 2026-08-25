@@ -138,6 +138,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
+      cashier: {
+        id: actorId,
+        full_name: user.actor_name || user.full_name,
+        username: user.actor_username || user.username,
+        staff_type: user.staff_type || (user.is_staff ? 'staff' : 'location_owner'),
+      },
       terminal: {
         id: terminal.id,
         name: terminal.name,

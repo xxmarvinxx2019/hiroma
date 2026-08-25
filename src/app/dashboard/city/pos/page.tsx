@@ -5,6 +5,12 @@ import PosInstallControl from "@/app/components/pos/PosInstallControl";
 import { deleteQueuedSale, listQueuedSales, permanentReceiptNumber, PosQueuedSale, PosReceiptRange, saveQueuedSale } from "@/app/lib/posOfflineQueue";
 
 type Bootstrap = {
+  cashier: {
+    id: string;
+    full_name: string;
+    username: string;
+    staff_type: string;
+  };
   terminal: { id: string; name: string; receipt_code: string };
   receipt_location_code: string;
   receipt_range: PosReceiptRange;
@@ -334,7 +340,7 @@ export default function PointOfSalePage() {
         receipt_number: receiptNumber,
         created_at: localCreatedAt,
         customer_name: customerName || "Walk-in Customer",
-        cashier_name: "Current cashier",
+        cashier_name: data.cashier.full_name,
         payment_method: "Cash",
         total,
         amount_received: received,
@@ -422,6 +428,18 @@ export default function PointOfSalePage() {
             <div>
               <h1 className="text-2xl font-bold">{data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || "Loading terminal…"}</h1>
               <p className="mt-1 text-sm text-white/65">Dedicated cashier workspace · installable web POS · controlled offline queue</p>
+              {data?.cashier && (
+                <div className="mt-4 flex w-fit items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2" aria-label={`Logged-in cashier: ${data.cashier.full_name}`}>
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#d4af45] text-sm font-black text-[#071638]" aria-hidden="true">
+                    {data.cashier.full_name.trim().charAt(0).toUpperCase() || "C"}
+                  </span>
+                  <span>
+                    <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">Logged-in cashier</span>
+                    <b className="block text-sm text-white">{data.cashier.full_name}</b>
+                    <span className="block text-xs text-white/60">@{data.cashier.username}</span>
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex flex-col items-start gap-2 sm:items-end">
               <span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? "● Online" : "○ Offline"}</span>
@@ -446,7 +464,8 @@ export default function PointOfSalePage() {
           <article className="rounded-2xl border bg-white p-5">
             <p className="text-xs font-bold uppercase text-gray-500">Shift</p>
             <p className="mt-2 text-lg font-bold text-[#071638]">{data?.open_shift ? "Open" : "Not opened"}</p>
-            <p className="mt-1 text-sm text-gray-500">Final close requires successful sync</p>
+            <p className="mt-1 text-sm text-gray-500">{data?.cashier ? `Cashier: ${data.cashier.full_name}` : "Loading cashier identity…"}</p>
+            <p className="mt-1 text-xs text-gray-400">Final close requires successful sync</p>
           </article>
         </section>
 
