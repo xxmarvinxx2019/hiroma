@@ -477,9 +477,15 @@ export default function PointOfSalePage() {
                 {data?.open_shift ? "This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift." : "Enter the physical cash currently inside the drawer before accepting the first transaction."}
               </p>
             </div>
-            <button disabled={!data || Boolean(data.open_shift)} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
-              {data?.open_shift ? "Shift Open" : "Open Shift"}
-            </button>
+            {data?.open_shift ? (
+              <a href="/dashboard/city/pos/history" className="inline-flex items-center justify-center rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#10285e]">
+                Close Shift →
+              </a>
+            ) : (
+              <button disabled={!data} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
+                Open Shift
+              </button>
+            )}
           </div>
         </section>
 
