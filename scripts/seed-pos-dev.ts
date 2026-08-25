@@ -63,6 +63,22 @@ await prisma.staffProfile.upsert({
   create: { user_id: cashier.id, owner_id: city.id, permissions: ['pos'], is_active: true, staff_type: 'custom' },
 })
 
+await prisma.user.upsert({
+  where: { username: 'posmember' },
+  update: { status: 'active', created_by: city.id },
+  create: {
+    member_id: 'POS-MEMBER-0001',
+    username: 'posmember',
+    full_name: 'Hiroma POS Test Member',
+    mobile: '09000000002',
+    email: 'pos-member@localhost.test',
+    password_hash: passwordHash,
+    role: 'reseller',
+    status: 'active',
+    created_by: city.id,
+  },
+})
+
 let product = await prisma.product.findFirst({ where: { name: 'Hiroma Poseidon 200ml' } })
 product = product
   ? await prisma.product.update({ where: { id: product.id }, data: { is_active: true, price: 249, reseller_price: 183, branch_price: 163, city_price: 163, cost_price: 150, pu_value: 1 } })
