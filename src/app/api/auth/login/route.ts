@@ -187,6 +187,7 @@ export async function POST(req: NextRequest) {
     const firstCityStaffRoute = () => {
       if (permissions?.includes('dashboard')) return '/dashboard/city'
       if (permissions?.includes('pos')) return '/dashboard/city/pos'
+      if (permissions?.includes('pos_approve')) return '/dashboard/city/pos/approvals'
       const routes: Array<[string, string]> = [
         ['resellers', '/dashboard/city/resellers'], ['pins', '/dashboard/city/pins'],
         ['inventory', '/dashboard/city/inventory'], ['orders', '/dashboard/city/orders'],

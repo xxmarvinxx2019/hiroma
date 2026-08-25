@@ -82,6 +82,8 @@ model User {
   pos_shifts_closed              PosShift[]           @relation("PosShiftClosedBy")
   pos_transactions               PosTransaction[]     @relation("PosTransactionOwner")
   pos_transactions_created       PosTransaction[]     @relation("PosTransactionCashier")
+  pos_transactions_reviewed      PosTransaction[]     @relation("PosTransactionReviewer")
+  pos_transactions_as_member     PosTransaction[]     @relation("PosTransactionMember")
 
   @@map("users")
 }
@@ -995,24 +997,24 @@ model OrderItem {
 }
 
 model PosTerminal {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  owner_id            String
-  installation_id     String                  @unique @db.VarChar(120)
-  name                String                  @db.VarChar(120)
-  receipt_code        String                  @unique @db.VarChar(7)
-  receipt_sequence_next Int                   @default(1)
-  platform            String?                 @db.VarChar(80)
-  is_active           Boolean                 @default(true)
-  last_catalog_at     DateTime?               @db.Timestamptz(6)
-  last_inventory_at   DateTime?               @db.Timestamptz(6)
-  last_synced_at      DateTime?               @db.Timestamptz(6)
-  created_at          DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime                @updatedAt @db.Timestamptz(6)
-  owner               User                    @relation("PosTerminalOwner", fields: [owner_id], references: [id], onDelete: Restrict)
-  shifts              PosShift[]
-  transactions        PosTransaction[]
-  sync_events         PosSyncEvent[]
-  inventory_allowance PosInventoryAllowance[]
+  id                    String                  @id @default(uuid()) @db.Uuid
+  owner_id              String
+  installation_id       String                  @unique @db.VarChar(120)
+  name                  String                  @db.VarChar(120)
+  receipt_code          String                  @unique @db.VarChar(7)
+  receipt_sequence_next Int                     @default(1)
+  platform              String?                 @db.VarChar(80)
+  is_active             Boolean                 @default(true)
+  last_catalog_at       DateTime?               @db.Timestamptz(6)
+  last_inventory_at     DateTime?               @db.Timestamptz(6)
+  last_synced_at        DateTime?               @db.Timestamptz(6)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @updatedAt @db.Timestamptz(6)
+  owner                 User                    @relation("PosTerminalOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  shifts                PosShift[]
+  transactions          PosTransaction[]
+  sync_events           PosSyncEvent[]
+  inventory_allowance   PosInventoryAllowance[]
 
   @@unique([owner_id, name])
   @@index([owner_id, is_active])
@@ -1058,6 +1060,7 @@ model PosTransaction {
   terminal_id              String               @db.Uuid
   shift_id                 String?              @db.Uuid
   cashier_id               String
+  payment_method_id        String?
   transaction_type         PosTransactionType
   status                   PosTransactionStatus @default(pending_sync)
   member_id                String?
@@ -1076,20 +1079,27 @@ model PosTransaction {
   local_created_at         DateTime             @db.Timestamptz(6)
   server_received_at       DateTime?            @db.Timestamptz(6)
   finalized_at             DateTime?            @db.Timestamptz(6)
+  reviewed_by_id           String?
+  reviewed_at              DateTime?            @db.Timestamptz(6)
+  review_notes             String?              @db.VarChar(500)
   created_at               DateTime             @default(now()) @db.Timestamptz(6)
   updated_at               DateTime             @updatedAt @db.Timestamptz(6)
   owner                    User                 @relation("PosTransactionOwner", fields: [owner_id], references: [id], onDelete: Restrict)
   terminal                 PosTerminal          @relation(fields: [terminal_id], references: [id], onDelete: Restrict)
   shift                    PosShift?            @relation(fields: [shift_id], references: [id], onDelete: Restrict)
   cashier                  User                 @relation("PosTransactionCashier", fields: [cashier_id], references: [id], onDelete: Restrict)
+  reviewer                 User?                @relation("PosTransactionReviewer", fields: [reviewed_by_id], references: [id], onDelete: Restrict)
+  member                   User?                @relation("PosTransactionMember", fields: [member_id], references: [id], onDelete: Restrict)
   order                    Order?               @relation(fields: [order_id], references: [id], onDelete: Restrict)
   items                    PosTransactionItem[]
   sync_events              PosSyncEvent[]
 
+  @@unique([payment_method_id, payment_reference])
+  @@unique([terminal_id, receipt_sequence])
   @@index([owner_id, status, local_created_at])
   @@index([terminal_id, status])
   @@index([shift_id])
-  @@unique([terminal_id, receipt_sequence])
+  @@index([owner_id, status, reviewed_at])
   @@map("pos_transactions")
 }
 

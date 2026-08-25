@@ -44,6 +44,7 @@ type CustomerType = "member" | "non_member";
 type Receipt = {
   client_transaction_id: string;
   receipt_number: string;
+  payment_status?: "paid" | "pending_verification" | "rejected";
   created_at: string;
   customer_name: string;
   cashier_name: string;
@@ -688,11 +689,13 @@ export default function PointOfSalePage() {
                     onClick={completeSale}
                     className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {submittingSale ? "Completing safely…" : online ? "Complete Sale" : "Save Offline Sale"}
+                    {submittingSale ? "Saving safely…" : online ? (isCash ? "Complete Sale" : "Submit for Verification") : "Save Offline Sale"}
                   </button>
                   <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">
                     {online
-                      ? "Online checkout revalidates the shift, official price, payment, and stock before saving exactly once."
+                      ? isCash
+                        ? "Cash checkout is finalized immediately after official price, shift, and stock validation."
+                        : "Non-cash payment is reserved and sent to a different authorized approver. Do not release the products until it is verified."
                       : "Offline checkout currently supports non-member cash sales. Its permanent receipt number remains unchanged after synchronization."}
                   </p>
                 </div>
@@ -729,10 +732,11 @@ export default function PointOfSalePage() {
               <div className="text-center">
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p>
                 <h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">
-                  Payment received
+                  {receipt.payment_status === "pending_verification" ? "Payment awaiting verification" : "Payment received"}
                 </h2>
                 <p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p>
                 {receipt.sync_status === "saved_offline" && <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800">Recorded offline · awaiting synchronization</p>}
+                {receipt.payment_status === "pending_verification" && <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">Pending independent verification. This is not yet a paid receipt; do not release products until an authorized approver confirms the payment.</p>}
               </div>
               <div className="mt-5 border-y py-4 text-sm">
                 <div className="flex justify-between gap-4">
@@ -806,7 +810,7 @@ export default function PointOfSalePage() {
               </div>
               <div className="mt-6 grid grid-cols-2 gap-2">
                 <button onClick={() => window.print()} className="rounded-xl border px-4 py-3 text-sm font-bold">
-                  Print receipt
+                  {receipt.payment_status === "pending_verification" ? "Print pending slip" : "Print receipt"}
                 </button>
                 <button onClick={() => setReceipt(null)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">
                   New sale

@@ -69,6 +69,7 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
     client_transaction_id: transaction.client_transaction_id,
     order_id: transaction.order.id,
     receipt_number: transaction.receipt_number,
+    payment_status: transaction.status === 'finalized' ? 'paid' : transaction.status === 'rejected' ? 'rejected' : 'pending_verification',
     created_at: transaction.finalized_at || transaction.order.created_at,
     customer_name: transaction.customer_name_snapshot || 'Walk-in Customer',
     customer_type: transaction.transaction_type === 'member_sale' ? 'member' : 'non_member',
@@ -120,13 +121,14 @@ export async function GET() {
       where: {
         shift_id: shift.id,
         cashier_id: actorId,
-        status: { in: ['approved', 'finalized'] },
+        status: { in: ['synced_pending_review', 'rejected', 'approved', 'finalized'] },
       },
       orderBy: { finalized_at: 'desc' },
       select: {
         id: true,
         client_transaction_id: true,
         receipt_number: true,
+        status: true,
         transaction_type: true,
         customer_name_snapshot: true,
         payment_method_snapshot: true,
@@ -135,6 +137,7 @@ export async function GET() {
         amount_received_snapshot: true,
         change_snapshot: true,
         finalized_at: true,
+        server_received_at: true,
         order: { select: { id: true, order_number: true } },
         items: {
           select: {
@@ -150,9 +153,7 @@ export async function GET() {
       where: {
         shift_id: shift.id,
         cashier_id: actorId,
-        status: {
-          in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'],
-        },
+        status: { in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'] },
       },
     })
     const groups = new Map<
@@ -298,6 +299,7 @@ export async function POST(req: NextRequest) {
         if (customerType === 'member' && !member) throw new Error('POS_MEMBER_INVALID')
 
         let paymentMethodSnapshot = 'cash'
+        let paymentMethodId: string | null = null
         if (paymentSelection !== 'cash') {
           const method = await tx.paymentMethod.findFirst({
             where: {
@@ -314,8 +316,15 @@ export async function POST(req: NextRequest) {
           })
           if (!method) throw new Error('POS_PAYMENT_INVALID')
           if (!paymentReference) throw new Error('POS_PAYMENT_REFERENCE_REQUIRED')
+          paymentMethodId = paymentSelection
+          const duplicateReference = await tx.posTransaction.findFirst({
+            where: { owner_id: user.id, payment_method_id: paymentMethodId, payment_reference: paymentReference },
+            select: { id: true },
+          })
+          if (duplicateReference) throw new Error('POS_PAYMENT_REFERENCE_DUPLICATE')
           paymentMethodSnapshot = `${method.type.toUpperCase()} · ${method.account_name} · ${method.account_number}${method.bank_name ? ` · ${method.bank_name}` : ''}`.slice(0, 120)
         }
+        const requiresApproval = paymentSelection !== 'cash'
 
         const owner = await tx.user.findUnique({
           where: { id: user.id },
@@ -386,14 +395,14 @@ export async function POST(req: NextRequest) {
             buyer_id: member?.id || user.id,
             seller_id: user.id,
             order_type: 'offline',
-            status: 'delivered',
+            status: requiresApproval ? 'processing' : 'delivered',
             total_amount: total,
-            delivered_at: new Date(),
+            delivered_at: requiresApproval ? null : new Date(),
             is_non_member_sale: customerType === 'non_member',
             customer_name: member?.full_name || customerName || 'Walk-in Customer',
             payment_method: paymentMethodSnapshot,
-            payment_status: 'paid',
-            paid_at: new Date(),
+            payment_status: requiresApproval ? 'pending_verification' : 'paid',
+            paid_at: requiresApproval ? null : new Date(),
             payment_reference: paymentSelection === 'cash' ? `Cash received: ${effectiveReceived.toFixed(2)}; Change: ${change.toFixed(2)}` : paymentReference,
             notes,
             items: {
@@ -418,8 +427,9 @@ export async function POST(req: NextRequest) {
             terminal_id: terminalId,
             shift_id: shiftId,
             cashier_id: actorId,
+            payment_method_id: paymentMethodId,
             transaction_type: customerType === 'member' ? 'member_sale' : 'non_member_sale',
-            status: 'finalized',
+            status: requiresApproval ? 'synced_pending_review' : 'finalized',
             member_id: member?.id || null,
             customer_name_snapshot: member?.full_name || customerName || 'Walk-in Customer',
             payment_method_snapshot: paymentMethodSnapshot,
@@ -432,7 +442,7 @@ export async function POST(req: NextRequest) {
             notes,
             local_created_at: localCreatedAt,
             server_received_at: new Date(),
-            finalized_at: new Date(),
+            finalized_at: requiresApproval ? null : new Date(),
             items: {
               create: orderItems.map((item) => ({
                 product_id: item.product_id,
@@ -451,7 +461,7 @@ export async function POST(req: NextRequest) {
           select: { id: true },
         })
 
-        await recordInventoryOutEvents(tx, {
+        if (!requiresApproval) await recordInventoryOutEvents(tx, {
           ownerId: user.id,
           actorId,
           actorName: user.actor_name || user.full_name || user.username,
@@ -472,7 +482,7 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        if (member) {
+        if (member && !requiresApproval) {
           for (const item of orderItems) {
             await tx.inventory.upsert({
               where: {
@@ -496,7 +506,7 @@ export async function POST(req: NextRequest) {
           data: {
             terminal_id: terminalId,
             pos_transaction_id: posTransaction.id,
-            event_type: 'online_finalize',
+            event_type: requiresApproval ? 'online_pending_payment_review' : 'online_finalize',
             outcome: 'success',
             details: {
               client_transaction_id: clientTransactionId,
@@ -508,7 +518,7 @@ export async function POST(req: NextRequest) {
           where: { id: terminalId },
           data: { last_inventory_at: new Date(), last_synced_at: new Date() },
         })
-        return { orderId: order.id }
+        return { orderId: order.id, pendingReview: requiresApproval }
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -517,7 +527,7 @@ export async function POST(req: NextRequest) {
     )
 
     let rewardsPending = false
-    if (customerType === 'member') {
+    if (customerType === 'member' && !result.pendingReview) {
       try {
         await processDeliveredProductBinaryOrder(result.orderId)
       } catch (error) {
@@ -533,9 +543,9 @@ export async function POST(req: NextRequest) {
       user_id: actorId,
       user_name: user.actor_name || user.full_name || user.username,
       user_role: user.is_staff ? 'staff' : user.role,
-      activity_type: 'pos_sale_finalized',
+      activity_type: result.pendingReview ? 'pos_payment_submitted' : 'pos_sale_finalized',
       category: 'order',
-      description: `POS sale ${receipt.receipt_number} finalized.`,
+      description: result.pendingReview ? `POS payment ${receipt.receipt_number} submitted for independent verification.` : `POS sale ${receipt.receipt_number} finalized.`,
       metadata: {
         client_transaction_id: clientTransactionId,
         order_id: receipt.order_id,
@@ -544,7 +554,7 @@ export async function POST(req: NextRequest) {
       },
       ...client,
     })
-    return NextResponse.json({ receipt, replayed: false, rewards_pending: rewardsPending }, { status: 201 })
+    return NextResponse.json({ receipt, replayed: false, rewards_pending: rewardsPending, payment_pending: result.pendingReview }, { status: 201 })
   } catch (error) {
     console.error('[POS FINALIZE]', error)
     const code = error instanceof Error ? error.message : ''
@@ -570,6 +580,7 @@ export async function POST(req: NextRequest) {
       POS_MEMBER_INVALID: ['The selected member is inactive or no longer valid. Verify the member again.', 409],
       POS_PAYMENT_INVALID: ['The selected payment method is no longer available.', 409],
       POS_PAYMENT_REFERENCE_REQUIRED: ['Enter the payment reference before completing this non-cash sale.', 400],
+      POS_PAYMENT_REFERENCE_DUPLICATE: ['That payment reference was already used for this receiving account. Verify the reference before trying again.', 409],
       POS_PRODUCT_INVALID: ['One or more products are no longer available.', 409],
       POS_PRICE_INVALID: ['An official product price is invalid. Ask an administrator to review the catalog.', 409],
       POS_PAYMENT_SHORT: ['The received amount is lower than the official order total.', 400],

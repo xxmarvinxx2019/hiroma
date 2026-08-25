@@ -44,6 +44,7 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
   if (pathname.startsWith('/dashboard/city/pins') || pathname.startsWith('/api/city/pins')) return 'pins'
   if (pathname.startsWith('/dashboard/city/inventory') || pathname.startsWith('/api/city/inventory')) return 'inventory'
   if (pathname.startsWith('/dashboard/city/orders') || pathname.startsWith('/api/city/orders') || pathname.startsWith('/api/orders/')) return 'orders'
+  if (pathname.startsWith('/dashboard/city/pos/approvals') || pathname.startsWith('/api/city/pos/approvals')) return 'pos_approve'
   if (pathname.startsWith('/dashboard/city/pos') || pathname.startsWith('/api/city/pos')) return 'pos'
   if (pathname.startsWith('/dashboard/city/reports') || pathname.startsWith('/api/city/reports')) return 'orders'
   if (pathname.startsWith('/dashboard/city/payment-methods') || pathname.startsWith('/api/payment-methods')) return 'payment_methods'

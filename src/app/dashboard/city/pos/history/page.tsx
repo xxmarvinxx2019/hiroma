@@ -27,12 +27,14 @@ type History = {
   transactions: Array<{
     id: string;
     receipt_number: string;
+    status: string;
     transaction_type: string;
     customer_name_snapshot: string;
     payment_method_snapshot: string;
     payment_reference: string | null;
     total: number;
-    finalized_at: string;
+    finalized_at: string | null;
+    server_received_at: string;
     items: Array<{
       product_name_snapshot: string;
       quantity: number;
@@ -181,7 +183,7 @@ export default function PosShiftHistoryPage() {
                             {row.receipt_number} · {row.customer_name_snapshot}
                           </b>
                           <p className="mt-1 text-xs text-gray-500">
-                            {new Date(row.finalized_at).toLocaleString("en-PH")} · {row.transaction_type.replaceAll("_", " ")}
+                            {new Date(row.finalized_at || row.server_received_at).toLocaleString("en-PH")} · {row.transaction_type.replaceAll("_", " ")}
                           </p>
                         </div>
                         <b className="text-lg text-[#071638]">{peso(row.total)}</b>
@@ -190,6 +192,7 @@ export default function PosShiftHistoryPage() {
                       <div className="mt-3 rounded-lg bg-[#f7f8fb] p-3 text-xs">
                         <b>{row.payment_method_snapshot}</b>
                         {row.payment_reference ? <span className="ml-2 text-gray-500">Ref: {row.payment_reference}</span> : null}
+                        <span className={`ml-2 rounded-full px-2 py-1 font-bold ${row.status === "finalized" ? "bg-green-100 text-green-700" : row.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{row.status === "finalized" ? "Paid" : row.status === "rejected" ? "Rejected" : "Pending verification"}</span>
                       </div>
                     </article>
                   ))
