@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteAuthCookie, getCurrentUser, verifyPassword, hashPassword } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── PATCH change password ──
 export async function PATCH(req: NextRequest) {
@@ -25,10 +26,13 @@ export async function PATCH(req: NextRequest) {
         { status: 400 }
       )
     }
+    if (new_password === current_password) {
+      return NextResponse.json({ error: 'Choose a new password that is different from your temporary password.' }, { status: 400 })
+    }
 
     const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { password_hash: true },
+      select: { password_hash: true, password_change_required: true },
     })
 
     if (!dbUser) {
@@ -44,9 +48,32 @@ export async function PATCH(req: NextRequest) {
     }
 
     const newHash = await hashPassword(new_password)
+    const changedAt = new Date()
     await prisma.user.update({
       where: { id: user.id },
-      data:  { password_hash: newHash, password_changed_at: new Date() },
+      data:  {
+        password_hash: newHash,
+        password_changed_at: changedAt,
+        password_change_required: false,
+        password_is_temporary: false,
+        password_retention_stage: 0,
+        password_prompt_due_at: null,
+        temporary_password_retained_at: null,
+      },
+    })
+    const client = getClientInfo(req)
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.full_name,
+      user_role: user.role,
+      member_id: formatMemberId(user.id, user.role),
+      activity_type: dbUser.password_change_required ? 'temporary_password_changed' : 'password_changed',
+      category: 'auth',
+      description: `${user.full_name} changed their account password`,
+      metadata: { was_temporary: dbUser.password_change_required, changed_at: changedAt.toISOString() },
+      ...client,
+      risk_level: 'medium',
+      status: 'completed',
     })
     await deleteAuthCookie()
 

@@ -1,52 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-
-const STATS_PERIODS = ['today', 'yesterday', 'this_week', 'this_month', 'this_year', 'all_time', 'custom'] as const
-type StatsPeriod = (typeof STATS_PERIODS)[number]
-const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
-
-function manilaBoundary(year: number, month: number, day: number) {
-  return new Date(Date.UTC(year, month, day) - MANILA_OFFSET_MS)
-}
-
-function resolveStatsPeriod(request: NextRequest) {
-  const requested = request.nextUrl.searchParams.get('period')
-  const period: StatsPeriod = STATS_PERIODS.includes(requested as StatsPeriod)
-    ? requested as StatsPeriod
-    : 'all_time'
-  const labels: Record<StatsPeriod, string> = {
-    today: 'Today', yesterday: 'Yesterday', this_week: 'This Week',
-    this_month: 'This Month', this_year: 'This Year', all_time: 'All Time', custom: 'Custom Range',
-  }
-  if (period === 'all_time') return { period, label: labels[period], start: null, end: null }
-
-  const now = new Date(Date.now() + MANILA_OFFSET_MS)
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth()
-  const day = now.getUTCDate()
-  if (period === 'custom') {
-    const startValue = request.nextUrl.searchParams.get('start')
-    const endValue = request.nextUrl.searchParams.get('end')
-    const parseDate = (value: string | null) => {
-      const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-      return match ? manilaBoundary(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
-    }
-    const start = parseDate(startValue)
-    const endDay = parseDate(endValue)
-    if (!start || !endDay || endDay < start) return { period: 'all_time' as const, label: 'All Time', start: null, end: null }
-    return { period, label: labels[period], start, end: new Date(endDay.getTime() + 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'today') return { period, label: labels[period], start: manilaBoundary(year, month, day), end: manilaBoundary(year, month, day + 1) }
-  if (period === 'yesterday') return { period, label: labels[period], start: manilaBoundary(year, month, day - 1), end: manilaBoundary(year, month, day) }
-  if (period === 'this_week') {
-    const mondayOffset = (now.getUTCDay() + 6) % 7
-    const start = manilaBoundary(year, month, day - mondayOffset)
-    return { period, label: labels[period], start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
-  }
-  if (period === 'this_month') return { period, label: labels[period], start: manilaBoundary(year, month, 1), end: manilaBoundary(year, month + 1, 1) }
-  return { period, label: labels[period], start: manilaBoundary(year, 0, 1), end: manilaBoundary(year + 1, 0, 1) }
-}
+import { resolveCityReportPeriod } from '@/app/lib/city-report-period'
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,7 +14,7 @@ export async function GET(req: NextRequest) {
       select: { dist_level: true },
     })
     const isBranch = profile?.dist_level === 'branch'
-    const selectedPeriod = resolveStatsPeriod(req)
+    const selectedPeriod = resolveCityReportPeriod(req.nextUrl.searchParams, 'all_time')
     const dateFilter = selectedPeriod.start && selectedPeriod.end
       ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
       : undefined
@@ -87,11 +42,14 @@ export async function GET(req: NextRequest) {
       newResellersThisMonth,
       unusedPins,
       usedPins,
+      cancelledPins,
+      expiredPins,
       totalPinsRequested,
       totalOrders,
       pendingOrders,
       inventory,
       recentResellers,
+      acquisitionMovements,
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'reseller', created_by: user.id } }),
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, status: 'active' } }),
@@ -100,12 +58,19 @@ export async function GET(req: NextRequest) {
       prisma.user.count({ where: { role: 'reseller', created_by: user.id, created_at: { gte: monthStart } } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused' } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'used'   } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'cancelled' } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'expired' } }),
       prisma.pin.count({ where: { city_dist_id: user.id } }),
       prisma.order.count({ where: { buyer_id: user.id } }),
       prisma.order.count({ where: { buyer_id: user.id, status: 'pending' } }),
       prisma.inventory.findMany({
         where:  { owner_id: user.id },
-        select: { quantity: true, low_stock_threshold: true, product: { select: { name: true } } },
+        select: {
+          product_id: true,
+          quantity: true,
+          low_stock_threshold: true,
+          product: { select: { name: true, cost_price: true, city_price: true, branch_price: true } },
+        },
       }),
       prisma.user.findMany({
         where:   { role: 'reseller', created_by: user.id },
@@ -116,10 +81,40 @@ export async function GET(req: NextRequest) {
           reseller_profile: { select: { package: { select: { name: true } } } },
         },
       }),
+      prisma.inventoryMovement.findMany({
+        where: {
+          recipient_id: user.id,
+          OR: [
+            { order_id: { not: null } },
+            { received_at: { not: null } },
+          ],
+        },
+        select: {
+          product_id: true,
+          quantity: true,
+          accepted_quantity: true,
+          order_id: true,
+          unit_price: true,
+        },
+      }),
     ])
 
     const lowStockItems = inventory.filter(i => i.quantity <= i.low_stock_threshold).length
     const totalStock    = inventory.reduce((s, i) => s + i.quantity, 0)
+    const acquisitionByProduct = new Map<string, { units: number; cost: number }>()
+    for (const movement of acquisitionMovements) {
+      const receivedUnits = movement.order_id ? movement.quantity : (movement.accepted_quantity ?? 0)
+      if (receivedUnits <= 0) continue
+      const current = acquisitionByProduct.get(movement.product_id) || { units: 0, cost: 0 }
+      current.units += receivedUnits
+      current.cost += receivedUnits * Number(movement.unit_price)
+      acquisitionByProduct.set(movement.product_id, current)
+    }
+    const historicalUnitCost = (productId: string, product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) => {
+      const snapshot = acquisitionByProduct.get(productId)
+      return snapshot && snapshot.units > 0 ? snapshot.cost / snapshot.units : inventoryCost(product)
+    }
+    const totalInventoryCost = inventory.reduce((sum, item) => sum + item.quantity * historicalUnitCost(item.product_id, item.product), 0)
 
     // ── Today's walk-in order sales ──
     const todayWalkInItemsPromise = prisma.orderItem.findMany({
@@ -133,7 +128,13 @@ export async function GET(req: NextRequest) {
           ],
         },
       },
-      select: { quantity: true, subtotal: true },
+      select: {
+        quantity: true,
+        subtotal: true,
+        unit_acquisition_cost: true,
+        product: { select: { cost_price: true, city_price: true, branch_price: true } },
+        order: { select: { is_non_member_sale: true, buyer: { select: { role: true } } } },
+      },
     })
     const yesterdayWalkInItemsPromise = prisma.orderItem.findMany({
       where:  {
@@ -151,6 +152,24 @@ export async function GET(req: NextRequest) {
     // ── Today's PINs used (reseller registrations today) ──
     const pinsUsedTodayPromise = prisma.pin.count({
       where: { city_dist_id: user.id, status: 'used', used_at: { gte: today, lt: tomorrow } },
+    })
+    const pinsUsedInPeriodPromise = prisma.pin.count({
+      where: {
+        city_dist_id: user.id,
+        status: 'used',
+        ...(dateFilter ? { used_at: dateFilter } : {}),
+      },
+    })
+
+    // Keep registration profit separate from delivered product-sales revenue.
+    // Combining the two would mix revenue with profit, but the Overview still
+    // needs to surface both amounts for the current business day.
+    const recentRegistrationProfitPromise = prisma.registrationFinancial.findMany({
+      where: { city_dist_id: user.id, created_at: { gte: yesterday, lt: tomorrow } },
+      select: { created_at: true, registration_profit: true },
+    }).catch((error) => {
+      console.warn('[CITY STATS] Daily registration profit unavailable.', error)
+      return []
     })
 
     // ── All-time product order sales ──
@@ -171,7 +190,7 @@ export async function GET(req: NextRequest) {
         items: {
           select: {
             quantity: true, subtotal: true, unit_acquisition_cost: true,
-            product: { select: { cost_price: true, city_price: true, branch_price: true, name: true } },
+            product: { select: { id: true, cost_price: true, city_price: true, branch_price: true, name: true } },
           },
         },
       },
@@ -186,6 +205,8 @@ export async function GET(req: NextRequest) {
         reseller_value: true,
         pin_allocation: true,
         registration_profit: true,
+        package_name_snapshot: true,
+        package_units_snapshot: true,
       },
     }).catch((error) => {
       console.warn('[CITY STATS] Registration ledger unavailable; using legacy PIN calculations.', error)
@@ -196,12 +217,16 @@ export async function GET(req: NextRequest) {
       todayWalkInItems,
       yesterdayWalkInItems,
       pinsUsedToday,
+      pinsUsedInPeriod,
+      recentRegistrationProfits,
       deliveredOrders,
       registrationSnapshots,
     ] = await Promise.all([
       todayWalkInItemsPromise,
       yesterdayWalkInItemsPromise,
       pinsUsedTodayPromise,
+      pinsUsedInPeriodPromise,
+      recentRegistrationProfitPromise,
       deliveredOrdersPromise,
       registrationSnapshotsPromise,
     ])
@@ -209,6 +234,24 @@ export async function GET(req: NextRequest) {
     const salesRevenueToday     = todayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
     const salesRevenueYesterday = yesterdayWalkInItems.reduce((s, i) => s + Number(i.subtotal || 0), 0)
     const unitsSoldToday        = todayWalkInItems.reduce((s, i) => s + i.quantity, 0)
+    let resellerOrderProfitToday = 0
+    let nonMemberProfitToday = 0
+    for (const item of todayWalkInItems) {
+      const unitCost = item.unit_acquisition_cost == null
+        ? inventoryCost(item.product)
+        : Number(item.unit_acquisition_cost)
+      const profit = Number(item.subtotal || 0) - unitCost * item.quantity
+      if (item.order.is_non_member_sale || item.order.buyer.role !== 'reseller') nonMemberProfitToday += profit
+      else resellerOrderProfitToday += profit
+    }
+    let registrationProfitToday = 0
+    let registrationProfitYesterday = 0
+    for (const row of recentRegistrationProfits) {
+      const profit = Number(row.registration_profit || 0)
+      if (row.created_at >= today) registrationProfitToday += profit
+      else registrationProfitYesterday += profit
+    }
+    const cityGrossProfitToday = resellerOrderProfitToday + nonMemberProfitToday + registrationProfitToday
     const orderRevenue   = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number(i.subtotal), 0), 0)
     const orderCost      = deliveredOrders.reduce(
       (s, o) => s + o.items.reduce(
@@ -221,6 +264,10 @@ export async function GET(req: NextRequest) {
     )
     const orderUnitsSold = deliveredOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)
     const orderProfit = orderRevenue - orderCost
+    const orderCostFallbackRows = deliveredOrders.reduce(
+      (count, order) => count + order.items.filter((item) => item.unit_acquisition_cost == null).length,
+      0
+    )
 
     // Keep product orders separate from package registrations. A product order is
     // revenue for the City Distributor; a package registration also contains a
@@ -249,13 +296,16 @@ export async function GET(req: NextRequest) {
     resellerProductOrders.profit = resellerProductOrders.revenue - resellerProductOrders.cost
     walkInProductOrders.profit = walkInProductOrders.revenue - walkInProductOrders.cost
     // ── Product movement (top products sold) ──
-    const productMovement: Record<string, { name: string; qty: number; revenue: number }> = {}
+    const productMovement: Record<string, { product_id: string; name: string; qty: number; revenue: number; cost: number }> = {}
     for (const order of deliveredOrders) {
       for (const item of order.items) {
-        const name = item.product.name
-        if (!productMovement[name]) productMovement[name] = { name, qty: 0, revenue: 0 }
-        productMovement[name].qty     += item.quantity
-        productMovement[name].revenue += Number(item.subtotal)
+        const productId = item.product.id
+        if (!productMovement[productId]) productMovement[productId] = { product_id: productId, name: item.product.name, qty: 0, revenue: 0, cost: 0 }
+        productMovement[productId].qty     += item.quantity
+        productMovement[productId].revenue += Number(item.subtotal)
+        productMovement[productId].cost += (item.unit_acquisition_cost == null
+          ? inventoryCost(item.product)
+          : Number(item.unit_acquisition_cost)) * item.quantity
       }
     }
     const topProducts = Object.values(productMovement).sort((a, b) => b.qty - a.qty).slice(0, 10)
@@ -268,6 +318,8 @@ export async function GET(req: NextRequest) {
       reseller_value: Number(row.reseller_value),
       pin_allocation: Number(row.pin_allocation),
       registration_profit: Number(row.registration_profit),
+      package_name_snapshot: row.package_name_snapshot,
+      package_units_snapshot: row.package_units_snapshot,
     }))
     let ledgerFormulaMismatches = registrationRows.filter((row) =>
       Math.abs(row.registration_profit - (row.reseller_value - row.product_acquisition_cost)) > 0.009
@@ -284,6 +336,7 @@ export async function GET(req: NextRequest) {
           reseller_profile: { select: { user_id: true } },
           package: {
             select: {
+              name: true,
               products: {
                 select: {
                   quantity: true,
@@ -328,6 +381,8 @@ export async function GET(req: NextRequest) {
           reseller_value: resellerValue,
           pin_allocation: Math.max(0, customerPayment - resellerValue),
           registration_profit: resellerValue - productAcquisitionCost,
+          package_name_snapshot: pin.package.name,
+          package_units_snapshot: null,
         })
       }
     }
@@ -342,27 +397,48 @@ export async function GET(req: NextRequest) {
     })
     const registrationPackageMap = new Map(registrationPackages.map((pkg) => [pkg.id, pkg]))
 
-    // Package breakdown
-    const packageBreakdown: Record<string, { name: string; count: number; revenue: number }> = {}
+    // Package breakdown. Monetary values come from immutable registration snapshots.
+    // Unit counts use the immutable snapshot when present; legacy rows are explicitly
+    // counted and fall back to the package's current composition.
+    const packageBreakdown: Record<string, {
+      package_id: string; name: string; count: number; units: number
+      customer_payment: number; revenue: number; pin_allocation: number
+      cost: number; profit: number
+    }> = {}
     let packageRevenue = 0
     let packageCost = 0
     let packagePinRemittance = 0
     let packageCustomerPayments = 0
     let packageUnitsSold = 0
+    let packageUnitFallbackRows = 0
     for (const registration of registrationRows) {
       const pkg = registrationPackageMap.get(registration.package_id)
-      const pname = pkg?.name || 'Package'
-      if (!packageBreakdown[pname]) packageBreakdown[pname] = { name: pname, count: 0, revenue: 0 }
-      packageBreakdown[pname].count++
-      const resellerValue = Number(registration.reseller_value)
-      packageBreakdown[pname].revenue += resellerValue
+      const packageId = registration.package_id
+      const packageName = registration.package_name_snapshot || pkg?.name || 'Package'
+      const currentPackageUnits = (pkg?.products || []).reduce((sum, item) => sum + item.quantity, 0)
+      const hasUnitSnapshot = registration.package_units_snapshot != null
+      const registrationUnits = hasUnitSnapshot ? registration.package_units_snapshot : currentPackageUnits
+      if (!hasUnitSnapshot) packageUnitFallbackRows += 1
+      if (!packageBreakdown[packageId]) {
+        packageBreakdown[packageId] = {
+          package_id: packageId, name: packageName, count: 0, units: 0,
+          customer_payment: 0, revenue: 0, pin_allocation: 0, cost: 0, profit: 0,
+        }
+      }
+      const breakdown = packageBreakdown[packageId]
+      breakdown.count += 1
+      breakdown.units += registrationUnits
+      breakdown.customer_payment += Number(registration.customer_payment)
+      breakdown.revenue += Number(registration.reseller_value)
+      breakdown.pin_allocation += Number(registration.pin_allocation)
+      breakdown.cost += Number(registration.product_acquisition_cost)
+      breakdown.profit += Number(registration.registration_profit)
       packageCustomerPayments += Number(registration.customer_payment)
-      packageRevenue += resellerValue
+      packageRevenue += Number(registration.reseller_value)
       packageCost += Number(registration.product_acquisition_cost)
       packagePinRemittance += Number(registration.pin_allocation)
-      packageUnitsSold += (pkg?.products || []).reduce((sum, item) => sum + item.quantity, 0)
+      packageUnitsSold += registrationUnits
     }
-
     // Monthly table: every row is intersected with the selected reporting range.
     const monthlyRevenue = await Promise.all(
       Array.from({ length: 6 }, async (_, index) => {
@@ -451,6 +527,8 @@ export async function GET(req: NextRequest) {
           legacy_reconstructed_rows: legacyRegistrationRows,
           unclassified_used_pins: unclassifiedUsedPins,
           ledger_formula_mismatches: ledgerFormulaMismatches,
+          order_cost_fallback_rows: orderCostFallbackRows,
+          package_unit_fallback_rows: packageUnitFallbackRows,
         },
         period: {
           value: selectedPeriod.period,
@@ -464,22 +542,31 @@ export async function GET(req: NextRequest) {
         // Today
         salesRevenueToday,
         salesRevenueYesterday,
+        registrationProfitToday,
+        registrationProfitYesterday,
+        resellerOrderProfitToday,
+        nonMemberProfitToday,
+        cityGrossProfitToday,
         unitsSoldToday,
         newResellersToday,
         newResellersYesterday,
         newResellersThisMonth,
         pinsUsedToday,
+        pinsUsedInPeriod,
         // Totals
         totalResellers,
         activeResellers,
         unusedPins,
         usedPins,
+        cancelledPins,
+        expiredPins,
         totalPinsRequested,
         totalOrders,
         pendingOrders,
         lowStockItems,
         totalInventoryItems: inventory.length,
         totalStock,
+        totalInventoryCost,
         // Revenue
         totalRevenue,
         totalCost,
@@ -516,7 +603,7 @@ export async function GET(req: NextRequest) {
           balance: Number(r.user.wallet?.balance || 0),
           package_name: r.package?.name || '—',
         })),
-        inventoryItems: inventory.map(i => ({ name: (i.product as any).name, quantity: i.quantity, low: i.low_stock_threshold })),
+        inventoryItems: inventory.map(i => ({ name: i.product.name, quantity: i.quantity, low: i.low_stock_threshold })),
       },
     })
   } catch (error) {

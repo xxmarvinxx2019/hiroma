@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getRanksForPackage, getCurrentRankForReseller } from '@/app/api/admin/ranks/route'
 import prisma from '@/app/lib/prisma'
+import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { cityOrderListScope } from '@/app/lib/orderSecurity'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
@@ -272,7 +273,7 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.$transaction(async (tx) => {
       await reserveOrderStock(tx, supplier.id, items)
-      return tx.order.create({ data: {
+      const created = await tx.order.create({ data: {
         buyer_id:          user.id,
         seller_id:         supplier.id,
         order_type,
@@ -289,6 +290,25 @@ export async function POST(req: NextRequest) {
         id: true, status: true, total_amount: true, created_at: true,
         seller: { select: { full_name: true, username: true } },
       } })
+      const supplierActionUrl = supplier.level === 'Admin'
+        ? '/dashboard/admin/orders'
+        : supplier.level === 'Regional Distributor'
+          ? '/dashboard/regional/orders'
+          : '/dashboard/provincial/orders'
+      const recipients = supplier.level === 'Admin'
+        ? await tx.user.findMany({ where: { role: 'admin' }, select: { id: true } })
+        : [{ id: supplier.id }]
+      await tx.notification.createMany({ data: recipients.map((recipient) => ({
+        user_id: recipient.id,
+        type: 'order_pending',
+        title: 'New pending order',
+        message: `${user.full_name || user.username} placed a City Distributor order worth ₱${total_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+        amount: total_amount,
+        entity_type: 'order',
+        entity_id: created.id,
+        action_url: supplierActionUrl,
+      })) })
+      return created
     })
     createAuditLog({
   user_id:       user.actor_id || user.id,
@@ -638,6 +658,19 @@ export async function PATCH(req: NextRequest) {
 
       if (status === 'delivered') {
         await finalizeReservedStock(tx, order.seller_id, order.items)
+        await recordInventoryOutEvents(tx, {
+          ownerId: order.seller_id,
+          actorId: user.id,
+          actorName: user.full_name || user.username || 'City Distributor',
+          eventType: order.is_non_member_sale ? 'non_member_srp_sale' : 'reseller_repeat_order',
+          referenceType: 'order',
+          referenceId: order.id,
+          reason: order.is_non_member_sale
+            ? `Non-member / SRP order delivered to ${order.customer_name || 'Walk-in Customer'}`
+            : `Reseller product order delivered`,
+          items: order.items.map((item) => ({ product_id: item.product_id, quantity: item.quantity, unit_cost: Number(item.unit_acquisition_cost || 0) })),
+          metadata: { order_number: order.order_number, sale_channel: order.is_non_member_sale ? 'non_member_srp' : 'reseller_repeat_order' },
+        })
         for (const item of order.items) {
           await tx.inventory.upsert({
             where: {
@@ -687,49 +720,8 @@ export async function PATCH(req: NextRequest) {
           return sum + (i.quantity * (puMap.get(i.product_id) || 0))
         }, 0)
         if (currentOrderPU > 0) {
-          // 1. Update buyer's own total_pu and rank
-          const buyerProfile = await prisma.resellerProfile.findUnique({
-            where:  { user_id: order.buyer_id },
-            select: { package_id: true },
-          })
-          if (false && buyerProfile) {
-            // Fetch buyer's current rank/total_pu via raw SQL
-            let buyerExtra = { rank: 'default', total_pu: 0 }
-            try {
-              const brows = await prisma.$queryRaw<{ rank: string; total_pu: number }[]>`
-                SELECT COALESCE(rank, 'default') as rank, COALESCE(total_pu, 0) as total_pu
-                FROM reseller_profiles WHERE user_id::text = ${order.buyer_id}
-              `
-              if (brows[0]) buyerExtra = { rank: brows[0].rank, total_pu: Number(brows[0].total_pu) }
-            } catch { /* not migrated yet */ }
-            const bp = { ...buyerProfile, ...buyerExtra }
-            const newTotalPU  = (bp.total_pu || 0) + currentOrderPU
-            const buyerPackageId = await prisma.resellerProfile.findUnique({
-              where: { user_id: order.buyer_id },
-              select: { package_id: true },
-            }).then(p => p?.package_id || '')
-            const newRank = buyerPackageId ? await getCurrentRankForReseller(buyerPackageId, newTotalPU) : null
-            const rankChanged = newRank && newRank.name !== (bp.rank || 'default')
-
-            // Use raw SQL since rank/total_pu not in Prisma client yet
-            try {
-              if (rankChanged) {
-                await prisma.$executeRaw`
-                  UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU}, rank = ${newRank!.name}
-                  WHERE user_id::text = ${order.buyer_id}
-                `
-              } else {
-                await prisma.$executeRaw`
-                  UPDATE reseller_profiles SET total_pu = total_pu + ${currentOrderPU}
-                  WHERE user_id::text = ${order.buyer_id}
-                `
-              }
-            } catch { /* columns not migrated yet */ }
-
-            // Rank up! Higher points per pair from now on — no cash reward, fixed ₱0.50/point conversion
-          }
-
-          // 2. Fire ancestor pairing
+          // This idempotent processor exclusively owns Personal PU, rank, and
+          // Product Binary pairing for delivered reseller orders.
           await processDeliveredProductBinaryOrder(order.id)
         }
       } catch (e) {

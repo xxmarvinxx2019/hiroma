@@ -68,16 +68,49 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const all = await prisma.inventory.findMany({
-      where: { owner_id: user.id },
-      select: {
-        quantity:            true,
-        low_stock_threshold: true,
-        product: {
-          select: { cost_price: true, city_price: true, branch_price: true, reseller_price: true },
+    const [all, acquisitionMovements] = await Promise.all([
+      prisma.inventory.findMany({
+        where: { owner_id: user.id },
+        select: {
+          product_id: true,
+          quantity:            true,
+          low_stock_threshold: true,
+          product: {
+            select: { cost_price: true, city_price: true, branch_price: true, reseller_price: true },
+          },
         },
-      },
-    })
+      }),
+      prisma.inventoryMovement.findMany({
+        where: {
+          recipient_id: user.id,
+          OR: [
+            { order_id: { not: null } },
+            { received_at: { not: null } },
+          ],
+        },
+        select: {
+          product_id: true,
+          quantity: true,
+          accepted_quantity: true,
+          order_id: true,
+          unit_price: true,
+        },
+      }),
+    ])
+
+    const acquisitionByProduct = new Map<string, { units: number; cost: number }>()
+    for (const movement of acquisitionMovements) {
+      const receivedUnits = movement.order_id ? movement.quantity : (movement.accepted_quantity ?? 0)
+      if (receivedUnits <= 0) continue
+      const current = acquisitionByProduct.get(movement.product_id) || { units: 0, cost: 0 }
+      current.units += receivedUnits
+      current.cost += receivedUnits * Number(movement.unit_price)
+      acquisitionByProduct.set(movement.product_id, current)
+    }
+    const historicalUnitCost = (productId: string, product: { cost_price: unknown; city_price: unknown; branch_price: unknown }) => {
+      const snapshot = acquisitionByProduct.get(productId)
+      return snapshot && snapshot.units > 0 ? snapshot.cost / snapshot.units : inventoryCost(product)
+    }
 
     const deliveredOrders = await prisma.order.findMany({
       where: { seller_id: user.id, status: 'delivered' },
@@ -116,14 +149,16 @@ export async function GET(req: NextRequest) {
       .map(([product_id, data]) => ({ product_id, ...data, profit: data.revenue - data.cost }))
       .sort((a, b) => b.units_sold - a.units_sold)
 
+    const totalCostValue = all.reduce((s, i) => s + historicalUnitCost(i.product_id, i.product) * i.quantity, 0)
+    const totalSellingValue = all.reduce((s, i) => s + Number(i.product.reseller_price) * i.quantity, 0)
     const summary = {
       total_products:      all.length,
       low_stock:           all.filter((i) => i.quantity > 0 && i.quantity <= i.low_stock_threshold).length,
       out_of_stock:        all.filter((i) => i.quantity === 0).length,
       total_units:         all.reduce((s, i) => s + i.quantity, 0),
-      total_cost_value:    all.reduce((s, i) => s + inventoryCost(i.product) * i.quantity, 0),
-      total_selling_value: all.reduce((s, i) => s + Number(i.product.reseller_price) * i.quantity, 0),
-      potential_profit:    all.reduce((s, i) => s + (Number(i.product.reseller_price) - inventoryCost(i.product)) * i.quantity, 0),
+      total_cost_value:    totalCostValue,
+      total_selling_value: totalSellingValue,
+      potential_profit:    totalSellingValue - totalCostValue,
       actual_revenue:      actualRevenue,
       actual_cost:         actualCost,
       actual_profit:       actualRevenue - actualCost,
@@ -168,14 +203,41 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Missing fields.' }, { status: 400 })
     }
 
+    const parsedThreshold = Number(low_stock_threshold)
+    if (!Number.isInteger(parsedThreshold) || parsedThreshold < 0) {
+      return NextResponse.json({ error: 'Threshold must be a non-negative whole number.' }, { status: 400 })
+    }
+
     const item = await prisma.inventory.findFirst({
       where: { id: inventory_id, owner_id: user.id },
+      include: { product: { select: { name: true } } },
     })
     if (!item) return NextResponse.json({ error: 'Item not found.' }, { status: 404 })
 
-    const updated = await prisma.inventory.update({
-      where: { id: inventory_id },
-      data:  { low_stock_threshold: Math.max(0, parseInt(low_stock_threshold)) },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.inventory.update({
+        where: { id: inventory_id },
+        data: { low_stock_threshold: parsedThreshold },
+      })
+      if (item.low_stock_threshold !== parsedThreshold) {
+        await tx.inventoryAuditEvent.create({
+          data: {
+            owner_id: user.id,
+            product_id: item.product_id,
+            event_type: 'low_stock_threshold_changed',
+            quantity_delta: 0,
+            quantity_before: item.quantity,
+            quantity_after: item.quantity,
+            actor_id: user.actor_id || user.id,
+            actor_name_snapshot: user.actor_name || user.full_name || user.username,
+            reference_type: 'inventory_threshold',
+            reference_id: item.id,
+            reason: `${item.product.name}: low-stock threshold changed from ${item.low_stock_threshold} to ${parsedThreshold}.`,
+            metadata: { previous_threshold: item.low_stock_threshold, new_threshold: parsedThreshold },
+          },
+        })
+      }
+      return result
     })
 
     return NextResponse.json({ success: true, item: updated })

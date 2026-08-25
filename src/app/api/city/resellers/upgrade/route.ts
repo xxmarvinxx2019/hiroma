@@ -4,6 +4,7 @@ import prisma from "@/app/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { settleBinaryCommission } from "@/app/lib/binaryCommission";
 import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
+import { recordInventoryOutEvents } from "@/app/lib/inventoryEvent";
 
 // ============================================================
 // PATCH — upgrade reseller package
@@ -20,11 +21,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { reseller_id, new_pin_id } = await req.json();
+    const { reseller_id, new_pin_id, target_package_id } = await req.json();
 
-    if (!reseller_id || !new_pin_id) {
+    if (!reseller_id || !new_pin_id || !target_package_id) {
       return NextResponse.json(
-        { error: "reseller_id and new_pin_id are required." },
+        { error: "reseller_id, new_pin_id, and target_package_id are required." },
         { status: 400 },
       );
     }
@@ -66,6 +67,7 @@ export async function PATCH(req: NextRequest) {
       where: { id: new_pin_id },
       select: {
         id: true,
+        pin_code: true,
         status: true,
         city_dist_id: true,
         package_id: true,
@@ -111,6 +113,11 @@ export async function PATCH(req: NextRequest) {
     if (pin.upgrade_from_package_id !== resellerProfile.package_id)
       return NextResponse.json(
         { error: "This Upgrade PIN does not match the current package." },
+        { status: 400 },
+      );
+    if (pin.package_id !== target_package_id)
+      return NextResponse.json(
+        { error: "This Upgrade PIN does not match the selected target package." },
         { status: 400 },
       );
     if (
@@ -185,6 +192,12 @@ export async function PATCH(req: NextRequest) {
       select: { parent_id: true, position: true },
     });
 
+    const [ownerProfile, upgradeProducts] = await Promise.all([
+      prisma.distributorProfile.findUnique({ where: { user_id: user.id }, select: { dist_level: true } }),
+      prisma.product.findMany({ where: { id: { in: extraProducts.map((item) => item.product_id) } }, select: { id: true, city_price: true, branch_price: true, cost_price: true } }),
+    ]);
+    const upgradeProductMap = new Map(upgradeProducts.map((product) => [product.id, product]));
+
     await prisma.$transaction(async (tx) => {
       const now = await claimUnusedPin(tx, pin.id, reseller_id);
       const financial = await tx.upgradeFinancial.create({
@@ -254,6 +267,24 @@ export async function PATCH(req: NextRequest) {
           },
           data: { quantity: { decrement: item.quantity } },
         });
+
+      await recordInventoryOutEvents(tx, {
+        ownerId: user.id,
+        actorId: user.id,
+        actorName: user.full_name || user.username || "City Distributor",
+        eventType: "upgrade_package_release",
+        referenceType: "upgrade_pin",
+        referenceId: pin.id,
+        reason: `${resellerProfile.package!.name} → ${pin.package!.name} incremental products released`,
+        items: extraProducts.map((item) => {
+          const product = upgradeProductMap.get(item.product_id);
+          const unitCost = ownerProfile?.dist_level === "branch"
+            ? Number(product?.branch_price) || Number(product?.cost_price || 0)
+            : Number(product?.city_price) || Number(product?.cost_price || 0);
+          return { ...item, unit_cost: unitCost };
+        }),
+        metadata: { pin_code: pin.pin_code, reseller_id, from_package_id: resellerProfile.package_id, to_package_id: pin.package_id },
+      });
 
       if (resellerNode?.parent_id && resellerNode.position && diffPts > 0) {
         await settleBinaryCommission(tx, {

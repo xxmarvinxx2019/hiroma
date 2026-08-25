@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { PRODUCT_BINARY_BASE_POINTS, PRODUCT_BINARY_DEFAULT_THRESHOLDS, PRODUCT_BINARY_RANK_POINTS } from '@/app/lib/productBinaryQuarter'
 
 // ── GET all packages ──
 export async function GET(req: NextRequest) {
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     const {
       name, price, direct_referral_bonus, pairing_bonus_value,
-      point_php_value, point_reset_days, daily_product_pairing_cap,
+      point_php_value, daily_product_pairing_cap,
       product_binary_cap_enabled,
       direct_referral_cap_enabled, daily_referral_cap, products,
       binary_pair_cap_enabled, daily_binary_pair_cap,
@@ -130,7 +131,7 @@ export async function POST(req: NextRequest) {
       newPkg = await tx.package.create({
         data: {
           name: name.trim(), price, direct_referral_bonus, pairing_bonus_value,
-          point_php_value, point_reset_days: point_reset_days || 30, is_active: true,
+          point_php_value: PRODUCT_BINARY_BASE_POINTS, point_reset_days: 90, is_active: true,
         },
       })
 
@@ -141,6 +142,15 @@ export async function POST(req: NextRequest) {
             .map((p: any) => ({ package_id: newPkg.id, product_id: p.product_id, quantity: p.quantity || 1 })),
         })
       }
+      await tx.rank.createMany({
+        data: PRODUCT_BINARY_RANK_POINTS.map((pairIncome, index) => ({
+          package_id: newPkg.id,
+          name: `Rank ${index + 1}`,
+          sequence: index + 1,
+          required_pu: PRODUCT_BINARY_DEFAULT_THRESHOLDS[index],
+          pair_income: pairIncome,
+        })),
+      })
     })
 
     // Update package-level caps via raw SQL after transaction
@@ -176,7 +186,7 @@ export async function PUT(req: NextRequest) {
 
     const {
       name, price, direct_referral_bonus, pairing_bonus_value,
-      point_php_value, point_reset_days, daily_product_pairing_cap,
+      point_php_value, daily_product_pairing_cap,
       product_binary_cap_enabled,
       direct_referral_cap_enabled, daily_referral_cap, products,
       binary_pair_cap_enabled, daily_binary_pair_cap,
@@ -193,7 +203,7 @@ export async function PUT(req: NextRequest) {
         where: { id },
         data: {
           name: name.trim(), price, direct_referral_bonus, pairing_bonus_value,
-          point_php_value, point_reset_days: point_reset_days || 30,
+          point_php_value: PRODUCT_BINARY_BASE_POINTS, point_reset_days: 90,
         },
       })
 

@@ -1,4 +1,6 @@
 export const PERFORMANCE_PERIODS = [
+  'today',
+  'yesterday',
   'this_week',
   'last_week',
   'this_month',
@@ -6,11 +8,14 @@ export const PERFORMANCE_PERIODS = [
   'this_quarter',
   'this_year',
   'all_time',
+  'custom',
 ] as const
 
 export type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
 
 export const PERFORMANCE_PERIOD_LABELS: Record<PerformancePeriod, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
   this_week: 'This Week',
   last_week: 'Last Week',
   this_month: 'This Month',
@@ -18,6 +23,7 @@ export const PERFORMANCE_PERIOD_LABELS: Record<PerformancePeriod, string> = {
   this_quarter: 'This Quarter',
   this_year: 'This Year',
   all_time: 'All Time',
+  custom: 'Custom Range',
 }
 
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -28,7 +34,9 @@ function manilaBoundary(year: number, month: number, day: number) {
 
 export function resolvePerformancePeriod(
   requestedPeriod: string | null,
-  now = new Date()
+  now = new Date(),
+  customFrom?: string | null,
+  customTo?: string | null,
 ) {
   const period: PerformancePeriod = PERFORMANCE_PERIODS.includes(requestedPeriod as PerformancePeriod)
     ? requestedPeriod as PerformancePeriod
@@ -45,7 +53,22 @@ export function resolvePerformancePeriod(
   let start: Date
   let end: Date
 
-  if (period === 'this_week' || period === 'last_week') {
+  if (period === 'custom') {
+    const validDate = /^\d{4}-\d{2}-\d{2}$/
+    if (!customFrom || !customTo || !validDate.test(customFrom) || !validDate.test(customTo) || customFrom > customTo) {
+      const todayStart = manilaBoundary(year, month, day)
+      return { period: 'today' as const, label: 'Today', start: todayStart, end: new Date(todayStart.getTime() + 86_400_000) }
+    }
+    const [fromYear, fromMonth, fromDay] = customFrom.split('-').map(Number)
+    const [toYear, toMonth, toDay] = customTo.split('-').map(Number)
+    start = manilaBoundary(fromYear, fromMonth - 1, fromDay)
+    end = manilaBoundary(toYear, toMonth - 1, toDay + 1)
+    return { period, label: `${customFrom} to ${customTo}`, start, end }
+  } else if (period === 'today' || period === 'yesterday') {
+    const todayStart = manilaBoundary(year, month, day)
+    start = period === 'today' ? todayStart : new Date(todayStart.getTime() - 86_400_000)
+    end = new Date(start.getTime() + 86_400_000)
+  } else if (period === 'this_week' || period === 'last_week') {
     const mondayOffset = (manilaNow.getUTCDay() + 6) % 7
     const thisMonday = manilaBoundary(year, month, day - mondayOffset)
     if (period === 'this_week') {

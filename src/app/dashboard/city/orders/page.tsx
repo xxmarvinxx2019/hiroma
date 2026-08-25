@@ -75,7 +75,7 @@ const STATUS_NEXT: Record<string, string[]> = {
 }
 
 // Orders must be paid before moving to processing
-function canProcess(order: any) {
+function canProcess(order: Pick<Order, 'payment_method' | 'payment_status'>) {
   return order.payment_method === 'cash_on_pickup' || order.payment_status === 'paid'
 }
 
@@ -205,7 +205,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
               )}
             </div>
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
-              <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]"><span>Total</span><span>₱{total.toLocaleString()}</span></div>
+              <div className="flex justify-between text-base font-bold text-[#0D1B3E]"><span>Total</span><span>₱{total.toLocaleString()}</span></div>
               <div className="flex gap-1">
                 {(['online', 'offline'] as const).map((t) => (
                   <button key={t} onClick={() => setOrderType(t)}
@@ -337,9 +337,9 @@ function MemberQrScanner({
       <aside className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
         <div className="flex items-start justify-between border-b border-[#0D1B3E]/10 px-5 py-4">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#C9A84C]">Member identification</p>
-            <h2 id="member-scanner-title" className="mt-1 text-lg font-semibold text-[#0D1B3E]">Scan Digital ID QR</h2>
-            <p className="mt-1 text-xs leading-5 text-gray-400">Point the camera at the reseller&apos;s Hiroma Digital ID.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#C9A84C]">Member identification</p>
+            <h2 id="member-scanner-title" className="mt-1 text-xl font-semibold text-[#0D1B3E]">Scan Digital ID QR</h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">Point the camera at the reseller&apos;s Hiroma Digital ID.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-[#F0F2F8] hover:text-[#0D1B3E]" aria-label="Close scanner">✕</button>
         </div>
@@ -348,7 +348,7 @@ function MemberQrScanner({
           <div className="overflow-hidden rounded-2xl border border-[#C9A84C]/45 bg-[#010521] p-2 shadow-[0_14px_35px_rgba(1,5,33,.18)]">
             <div id={scannerElementId} className="min-h-[300px] overflow-hidden rounded-xl" />
           </div>
-          <div className="flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 before:h-px before:flex-1 before:bg-[#0D1B3E]/10 after:h-px after:flex-1 after:bg-[#0D1B3E]/10">
+          <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 before:h-px before:flex-1 before:bg-[#0D1B3E]/10 after:h-px after:flex-1 after:bg-[#0D1B3E]/10">
             Or enter Member ID
           </div>
           <div className="flex gap-2">
@@ -357,9 +357,9 @@ function MemberQrScanner({
               onChange={(event) => setManualMemberId(event.target.value.toUpperCase())}
               onKeyDown={(event) => { if (event.key === 'Enter') void submitManualId() }}
               placeholder="HRM-2026-000183"
-              className="min-w-0 flex-1 rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-sm font-medium uppercase text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-base font-medium uppercase text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
             />
-            <button type="button" onClick={() => void submitManualId()} className="rounded-lg bg-[#010521] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#162850]">
+            <button type="button" onClick={() => void submitManualId()} className="min-h-11 rounded-lg bg-[#010521] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#162850]">
               Find member
             </button>
           </div>
@@ -371,6 +371,7 @@ function MemberQrScanner({
 }
 
 function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [customerType, setCustomerType] = useState<'member' | 'non_member' | null>(null)
   const [resellers, setResellers]           = useState<Reseller[]>([])
   const [selectedResellerId, setResellerId] = useState('')
   const [selectedResellerName, setSelectedResellerName] = useState('')
@@ -378,7 +379,6 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
   const [showResellerDrop, setShowResellerDrop] = useState(false)
   const [products, setProducts]             = useState<{ id: string; name: string; type: string; price: number; available_quantity: number }[]>([])
   const [cart, setCart]                     = useState<{ product: { id: string; name: string; type: string; price: number; available_quantity: number }; quantity: number }[]>([])
-  const [orderType, setOrderType]           = useState<'online' | 'offline'>('offline')
   const [notes, setNotes]                   = useState('')
   const [customerName, setCustomerName]     = useState('')
   const [cashReceived, setCashReceived]     = useState('')
@@ -400,27 +400,37 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     return () => clearTimeout(timer)
   }, [resellerSearch])
 
+  // Product catalog synchronization follows the selected customer and pricing mode.
   useEffect(() => {
+    if (!customerType || (customerType === 'member' && !selectedResellerId)) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingProducts(true)
-    const priceMode = selectedResellerId ? 'reseller' : 'srp'
+    const priceMode = customerType === 'member' ? 'reseller' : 'srp'
     fetch(`/api/city/products?for_reseller=true&price_mode=${priceMode}`).then((r) => r.json()).then((d) => setProducts(d.products || [])).finally(() => setLoadingProducts(false))
     setCart([])
-  }, [selectedResellerId])
+  }, [customerType, selectedResellerId])
 
   const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
 
   const updateQty = (productId: string, qty: number) => {
+    const current = cart.find((item) => item.product.id === productId)
+    if (current && qty > current.product.available_quantity) setError(`Only ${current.product.available_quantity} unit${current.product.available_quantity === 1 ? '' : 's'} of ${current.product.name} are available.`)
+    else setError('')
     if (qty <= 0) setCart((prev) => prev.filter((c) => c.product.id !== productId))
     else setCart((prev) => prev.map((c) => {
       if (c.product.id !== productId) return c
-      return { ...c, quantity: Math.min(qty, c.product.available_quantity || 9999) }
+      return { ...c, quantity: Math.min(qty, c.product.available_quantity) }
     }))
   }
 
   const addToCart = (product: typeof products[0]) => {
+    const current = cart.find((item) => item.product.id === product.id)
+    if (product.available_quantity <= 0) { setError(`${product.name} is currently out of stock.`); return }
+    if (current && current.quantity >= product.available_quantity) { setError(`Only ${product.available_quantity} unit${product.available_quantity === 1 ? '' : 's'} of ${product.name} are available.`); return }
+    setError('')
     setCart((prev) => {
       const ex = prev.find((c) => c.product.id === product.id)
-      if (ex) return prev.map((c) => c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c)
+      if (ex) return prev.map((c) => c.product.id === product.id ? { ...c, quantity: Math.min(c.quantity + 1, product.available_quantity) } : c)
       return [...prev, { product, quantity: 1 }]
     })
   }
@@ -436,6 +446,8 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     : 0
 
   const handleSubmit = async () => {
+    if (!customerType) { setError('Choose whether the customer is a reseller/member or non-member.'); return }
+    if (customerType === 'member' && !selectedResellerId) { setError('Scan or select the reseller before creating the order.'); return }
     if (cart.length === 0)   { setError('Add at least one item.'); return }
     if (!hasSufficientPayment) {
       setError('Enter cash received equal to or greater than the order total.')
@@ -445,10 +457,9 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     const res = await fetch('/api/city/orders/reseller-orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        reseller_id: selectedResellerId || null,
-        scan_proof: selectedResellerId ? scanProof : null,
-        customer_name: customerName,
-        order_type: orderType,
+        reseller_id: customerType === 'member' ? selectedResellerId : null,
+        scan_proof: customerType === 'member' ? scanProof : null,
+        customer_name: customerType === 'non_member' ? customerName : '',
         notes,
         cash_received: cashAmount,
         items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
@@ -457,7 +468,14 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
     const data = await res.json()
     setSubmitting(false)
     if (res.ok) onSuccess()
-    else setError(data.error || 'Something went wrong.')
+    else {
+      if (data.code === 'INSUFFICIENT_STOCK' && Array.isArray(data.stock_errors)) {
+        const availability = new Map<string, number>(data.stock_errors.map((item: { product_id: string; available: number }) => [item.product_id, item.available]))
+        setProducts((current) => current.map((product) => availability.has(product.id) ? { ...product, available_quantity: availability.get(product.id)! } : product))
+        setCart((current) => current.flatMap((item) => availability.has(item.product.id) ? availability.get(item.product.id)! > 0 ? [{ ...item, product: { ...item.product, available_quantity: availability.get(item.product.id)! }, quantity: Math.min(item.quantity, availability.get(item.product.id)!) }] : [] : [item]))
+      }
+      setError(data.error || 'Unable to create the order. Please review the details and try again.')
+    }
   }
 
   const identifyScannedMember = useCallback(async (memberId: string) => {
@@ -491,26 +509,29 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="relative bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h2 className="text-sm font-semibold text-[#0D1B3E]">Create Walk-in Order</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Walk-in / in-person order — marked as delivered immediately</p>
+      <div className="relative flex h-[min(92vh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white">
+        <div className="px-5 py-4 border-b border-[#0D1B3E]/8 flex items-start justify-between gap-3 flex-shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-[#0D1B3E]">Create Walk-in Order</h2>
+            <p className="mt-0.5 text-sm text-gray-500">Walk-in / in-person order — marked as delivered immediately</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {customerType && <button type="button" onClick={() => { setCustomerType(null); setResellerId(''); setSelectedResellerName(''); setResellerSearch(''); setScanProof(''); setIsScannedMemberLocked(false); setCustomerName(''); setCart([]); setError('') }} className="min-h-11 rounded-lg border border-[#0D1B3E]/15 bg-white px-4 py-2 text-sm font-bold text-[#0D1B3E] hover:bg-[#F0F2F8]">← Change type</button>}
+            <button onClick={onClose} className="flex h-11 w-11 items-center justify-center rounded-lg text-xl text-gray-400 hover:bg-[#F0F2F8] hover:text-[#0D1B3E]" aria-label="Close walk-in order">✕</button>
+          </div>
         </div>
-        <div className="flex flex-1 min-h-0">
-          <div className="flex-1 flex flex-col border-r border-[#0D1B3E]/8 min-w-0">
+        {!customerType ? <div className="space-y-6 overflow-y-auto p-6"><div className="text-center"><p className="text-sm font-bold uppercase tracking-[.16em] text-[#C9A84C]">Step 1 of 2</p><h3 className="mt-1 text-2xl font-bold text-[#0D1B3E]">Who is buying?</h3><p className="mt-2 text-base text-gray-500">Choose first so the correct customer identification and pricing will be used.</p></div><div className="grid gap-4 sm:grid-cols-2"><button type="button" onClick={() => setCustomerType('member')} className="min-h-44 rounded-2xl border-2 border-[#0D1B3E]/10 p-6 text-left transition hover:border-[#C9A84C] hover:bg-[#fffaf0]"><span className="text-3xl">▣</span><b className="mt-3 block text-lg text-[#0D1B3E]">Reseller / Member</b><span className="mt-2 block text-sm leading-6 text-gray-600">Scan the member QR or search the nationwide reseller username. Uses reseller pricing.</span><span className="mt-4 block text-sm font-bold text-[#9a7418]">Continue as member →</span></button><button type="button" onClick={() => setCustomerType('non_member')} className="min-h-44 rounded-2xl border-2 border-[#0D1B3E]/10 p-6 text-left transition hover:border-[#0D1B3E] hover:bg-[#f7f8fc]"><span className="text-3xl">👤</span><b className="mt-3 block text-lg text-[#0D1B3E]">Non-member / SRP Customer</b><span className="mt-2 block text-sm leading-6 text-gray-600">No member account required. Customer name is optional. Uses SRP pricing.</span><span className="mt-4 block text-sm font-bold text-[#0D1B3E]">Continue as non-member →</span></button></div></div> : <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <div className="flex min-h-[280px] min-w-0 flex-1 flex-col border-b border-[#0D1B3E]/8 md:min-h-0 md:border-b-0 md:border-r">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0 space-y-2">
-              <div className="relative">
+              {customerType === 'member' && <div className="relative">
                 <div className="mb-1 flex items-center justify-between gap-3">
-                  <label className="block text-xs text-gray-400">
-                    {isScannedMemberLocked ? 'Verified reseller (locked)' : 'Reseller username or name (optional)'}
+                  <label className="block text-sm font-medium text-gray-600">
+                    {isScannedMemberLocked ? 'Verified reseller (locked)' : 'Find reseller/member nationwide'}
                   </label>
                   <button
                     type="button"
                     onClick={() => { setError(''); setShowMemberScanner(true) }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#C9A84C]/45 bg-[#fef9ee] px-2.5 py-1.5 text-[10px] font-semibold text-[#8a641b] transition-colors hover:bg-[#f8edcf]"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#C9A84C]/55 bg-[#fef9ee] px-4 py-2.5 text-sm font-bold text-[#795515] transition-colors hover:bg-[#f8edcf]"
                   >
                     <span aria-hidden="true">▣</span> {isScannedMemberLocked ? 'Rescan Member QR' : 'Scan Member QR'}
                   </button>
@@ -529,8 +550,8 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                     }}
                     onFocus={() => { if (!isScannedMemberLocked) setShowResellerDrop(true) }}
                     onBlur={() => setTimeout(() => setShowResellerDrop(false), 150)}
-                    placeholder="Leave blank for non-member / search nationwide..."
-                    className={`w-full rounded-lg border px-3 py-2 pr-9 text-sm text-[#0D1B3E] outline-none placeholder:text-gray-400 ${
+                    placeholder="Enter reseller username or name…"
+                    className={`min-h-12 w-full rounded-lg border px-4 py-3 pr-10 text-base text-[#0D1B3E] outline-none placeholder:text-gray-500 ${
                       isScannedMemberLocked
                         ? 'cursor-not-allowed border-emerald-300 bg-emerald-50 font-medium'
                         : 'border-[#0D1B3E]/15 bg-[#F0F2F8] focus:border-[#C9A84C]'
@@ -562,8 +583,8 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                             void identifyScannedMember(r.member_id)
                           }}
                           className={`px-3 py-2.5 cursor-pointer hover:bg-[#F0F2F8] transition-colors ${selectedResellerId === r.id ? 'bg-[#F0F2F8]' : ''}`}>
-                          <p className="text-xs font-medium text-[#0D1B3E]">{r.full_name}</p>
-                          <p className="text-[10px] text-gray-400">@{r.username}</p>
+                          <p className="text-sm font-semibold text-[#0D1B3E]">{r.full_name}</p>
+                          <p className="mt-0.5 text-xs text-gray-500">@{r.username}</p>
                         </div>
                       ))
                     }
@@ -572,58 +593,62 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                       r.full_name.toLowerCase().includes(resellerSearch.toLowerCase()) ||
                       r.username.toLowerCase().includes(resellerSearch.toLowerCase())
                     ).length === 0 && (
-                      <p className="text-xs text-gray-400 px-3 py-3 text-center">No reseller found</p>
+                      <p className="px-3 py-4 text-center text-sm text-gray-500">No reseller found</p>
                     )}
                   </div>
                 )}
-              </div>
-              {!selectedResellerId && (
+              </div>}
+              {customerType === 'non_member' && (
                 <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name (optional)"
-                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
+                  className="min-h-12 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-4 py-3 text-base text-[#0D1B3E] outline-none placeholder:text-gray-500 focus:border-[#C9A84C]" />
               )}
-              <p className="text-[10px] font-medium text-[#9a6f1e]">
-                Pricing: {selectedResellerId ? 'Reseller Price' : 'SRP (non-member)'}
+              <p className="text-xs font-semibold leading-5 text-[#8a641b]">
+                Customer: {customerType === 'member' ? selectedResellerId ? `Verified member · ${selectedResellerName}` : 'Member identification required' : 'Non-member'} · Pricing: {customerType === 'member' ? 'Reseller Price' : 'SRP'}
               </p>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products..."
-                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
+              {(customerType === 'non_member' || selectedResellerId) && <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products..."
+                className="min-h-12 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-4 py-3 text-base text-[#0D1B3E] outline-none placeholder:text-gray-500 focus:border-[#C9A84C]" />
+              }
             </div>
             <div className="flex-1 overflow-y-auto">
-              {loadingProducts ? <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" /></div>
-                : filtered.length === 0 ? <p className="text-center text-xs text-gray-400 py-8">No products in stock</p>
-                : filtered.map((product) => (
+              {customerType === 'member' && !selectedResellerId ? <div className="m-4 rounded-xl border border-blue-100 bg-blue-50 p-6 text-center"><b className="text-base text-[#0D1B3E]">Identify the member first</b><p className="mt-2 text-sm leading-6 text-gray-600">Scan their Digital ID QR or search their reseller username above. Products will appear after verification.</p></div> : loadingProducts ? <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" /></div>
+                : filtered.length === 0 ? <p className="py-8 text-center text-sm text-gray-500">No products in stock</p>
+                : filtered.map((product) => {
+                  const quantityInCart = cart.find((item) => item.product.id === product.id)?.quantity || 0
+                  const reachedLimit = quantityInCart >= product.available_quantity
+                  return (
                   <div key={product.id} className="flex items-center justify-between px-4 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#F0F2F8]/50 transition-colors">
                     <div>
-                      <p className="text-xs font-medium text-[#0D1B3E]">{product.name}</p>
+                      <p className="text-sm font-semibold text-[#0D1B3E]">{product.name}</p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${product.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>{product.type}</span>
-                        <span className="text-xs text-gray-400">₱{Number(product.price).toLocaleString()}</span>
-                        <span className="text-xs text-gray-300">· {product.available_quantity} in stock</span>
+                        <span className={`rounded px-2 py-1 text-xs ${product.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}>{product.type}</span>
+                        <span className="text-sm text-gray-600">₱{Number(product.price).toLocaleString()}</span>
+                        <span className="text-sm text-gray-500">· {product.available_quantity} in stock</span>
                       </div>
                     </div>
-                    <button onClick={() => addToCart(product)} className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors">+ Add</button>
+                    <button onClick={() => addToCart(product)} disabled={product.available_quantity <= 0 || reachedLimit} className="min-h-11 rounded-lg bg-[#010521] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#162850] disabled:cursor-not-allowed disabled:opacity-35">{product.available_quantity <= 0 ? 'No stock' : reachedLimit ? 'Max added' : '+ Add'}</button>
                   </div>
-                ))}
+                )})}
             </div>
           </div>
-          <div className="w-56 flex flex-col flex-shrink-0">
+          <div className="flex max-h-[48%] w-full flex-shrink-0 flex-col bg-white md:max-h-none md:w-80 lg:w-96">
             <div className="px-4 py-3 border-b border-[#0D1B3E]/8 flex-shrink-0">
-              <p className="text-xs font-semibold text-[#0D1B3E]">Order Summary</p>
+              <p className="text-base font-semibold text-[#0D1B3E]">Order Summary</p>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
-              {cart.length === 0 ? <p className="text-xs text-gray-400 text-center pt-4">No items yet</p> : (
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
+              {cart.length === 0 ? <p className="pt-5 text-center text-sm text-gray-500">No items yet</p> : (
                 cart.map((c) => (
-                  <div key={c.product.id} className="text-xs">
-                    <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
-                    <div className="flex items-center gap-1 mt-1">
+                  <div key={c.product.id} className="rounded-xl border border-[#0D1B3E]/8 bg-[#f8f9fc] p-3 text-sm">
+                    <div className="flex items-start justify-between gap-3"><p className="min-w-0 flex-1 truncate font-semibold text-[#0D1B3E]">{c.product.name}</p><span className="flex-shrink-0 font-bold text-[#0D1B3E]">₱{(c.product.price * c.quantity).toLocaleString()}</span></div>
+                    <div className="mt-2 flex items-center gap-2">
                       <button onClick={() => updateQty(c.product.id, c.quantity - 1)}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0">−</button>
+                        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#e8ebf3] text-base font-bold text-[#0D1B3E]">−</button>
                       <input type="number" min={1} max={c.product.available_quantity} value={c.quantity}
-                        onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) updateQty(c.product.id, Math.min(v, c.product.available_quantity || 9999)) }}
-                        className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5" />
+                        onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) updateQty(c.product.id, v) }}
+                        className="h-9 w-14 rounded-lg border border-[#0D1B3E]/15 bg-white text-center text-base text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
                         disabled={!!c.product.available_quantity && c.quantity >= c.product.available_quantity}
-                        className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold flex items-center justify-center flex-shrink-0 disabled:opacity-30">+</button>
-                      <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
+                        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#e8ebf3] text-base font-bold text-[#0D1B3E] disabled:opacity-30">+</button>
+                      <span className="ml-auto text-xs text-gray-500">₱{c.product.price.toLocaleString()} each</span>
                     </div>
                   </div>
                 ))
@@ -632,9 +657,9 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
             <div className="px-4 py-3 border-t border-[#0D1B3E]/8 flex-shrink-0 space-y-3">
               <div className="flex justify-between text-xs font-semibold text-[#0D1B3E]"><span>Total</span><span>₱{total.toLocaleString()}</span></div>
               <div>
-                <label className="block text-[10px] font-medium text-[#0D1B3E] mb-1">Cash received *</label>
+                <label className="mb-1.5 block text-sm font-semibold text-[#0D1B3E]">Cash received *</label>
                 <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">₱</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-gray-500">₱</span>
                   <input
                     type="number"
                     inputMode="decimal"
@@ -646,33 +671,28 @@ function CreateResellerOrderModal({ onClose, onSuccess }: { onClose: () => void;
                       setError('')
                     }}
                     placeholder="0.00"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg pl-6 pr-2 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                    className="min-h-12 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] py-3 pl-8 pr-3 text-base text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
                   />
                 </div>
                 {cashReceived.trim() !== '' && Number.isFinite(cashAmount) && (
-                  <p className={`text-[10px] mt-1 ${hasSufficientPayment ? 'text-[#1a7a4a]' : 'text-[#a03030]'}`}>
+                  <p className={`mt-1.5 text-sm font-medium ${hasSufficientPayment ? 'text-[#1a7a4a]' : 'text-[#a03030]'}`}>
                     {hasSufficientPayment
                       ? `Change: ₱${changeAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : `Insufficient by ₱${Math.max(0, total - cashAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   </p>
                 )}
               </div>
-              <div className="flex gap-1">
-                {(['online', 'offline'] as const).map((t) => (
-                  <button key={t} onClick={() => setOrderType(t)}
-                    className={`flex-1 text-xs py-1.5 rounded-lg capitalize transition-colors ${orderType === t ? 'bg-[#010521] text-white' : 'bg-[#F0F2F8] text-gray-400'}`}>{t}</button>
-                ))}
-              </div>
+              <div className="rounded-lg border border-[#0D1B3E]/10 bg-[#f8f9fc] px-3 py-2.5 text-sm text-gray-600"><span className="font-semibold text-[#0D1B3E]">Sales channel:</span> Walk-in / Offline <span className="text-xs text-gray-500">(automatic)</span></div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" rows={2}
-                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C] resize-none placeholder:text-gray-400" />
-              {error && <p className="text-xs text-[#a03030]">{error}</p>}
-              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || !hasSufficientPayment}
-                className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
+                className="w-full resize-none rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-3 text-base text-[#0D1B3E] outline-none placeholder:text-gray-500 focus:border-[#C9A84C]" />
+              {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium leading-5 text-[#a03030]">{error}</p>}
+              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || !hasSufficientPayment || (customerType === 'member' && !selectedResellerId)}
+                className="min-h-12 w-full rounded-lg bg-[#C9A84C] py-3 text-base font-bold text-white transition-colors hover:bg-[#b8963e] disabled:opacity-50">
                 {submitting ? 'Creating...' : 'Create & Deliver'}
               </button>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
       {showMemberScanner ? (
         <MemberQrScanner
@@ -707,10 +727,12 @@ export default function CityOrdersPage() {
   const [showResellerOrder, setShowResellerOrder] = useState(false)
   const [summary, setSummary]               = useState({ total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 })
 
+  // Open the requested walk-in workflow once after navigation from the dashboard.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('action') !== 'walk-in') return
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTab('reseller_orders')
     setShowResellerOrder(true)
     params.delete('action')
@@ -727,6 +749,7 @@ export default function CityOrdersPage() {
     return () => clearTimeout(t)
   }, [searchInput])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setPage(1) }, [tab, statusFilter, typeFilter, search])
 
   const fetchOrders = useCallback(() => {
@@ -747,6 +770,7 @@ export default function CityOrdersPage() {
       .finally(() => setLoading(false))
   }, [tab, statusFilter, typeFilter, page, search])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchOrders() }, [fetchOrders])
 
   // Fetch supplier on mount regardless of tab

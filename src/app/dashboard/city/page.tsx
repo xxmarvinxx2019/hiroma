@@ -5,27 +5,36 @@ import Link from 'next/link'
 
 interface Stats {
   period: { value: CityStatsPeriod; label: string; start: string | null; end: string | null }
-  financialIntegrity: { ledger_rows: number; legacy_reconstructed_rows: number; unclassified_used_pins: number; ledger_formula_mismatches: number }
+  financialIntegrity: { ledger_rows: number; legacy_reconstructed_rows: number; unclassified_used_pins: number; ledger_formula_mismatches: number; order_cost_fallback_rows: number; package_unit_fallback_rows: number }
   accountType: string
   isStaff: boolean
   staffPermissions: string[]
   salesRevenueToday: number
   salesRevenueYesterday: number
+  registrationProfitToday: number
+  registrationProfitYesterday: number
+  resellerOrderProfitToday: number
+  nonMemberProfitToday: number
+  cityGrossProfitToday: number
   unitsSoldToday: number
   newResellersToday: number
   newResellersYesterday: number
   newResellersThisMonth: number
   pinsUsedToday: number
+  pinsUsedInPeriod: number
   totalResellers: number
   activeResellers: number
   unusedPins: number
   usedPins: number
+  cancelledPins: number
+  expiredPins: number
   totalPinsRequested: number
   totalOrders: number
   pendingOrders: number
   lowStockItems: number
   totalInventoryItems: number
   totalStock: number
+  totalInventoryCost: number
   totalRevenue: number
   totalCost: number
   totalProfit: number
@@ -47,8 +56,8 @@ interface Stats {
   combinedProductCost: number
   combinedProductProfit: number
   totalCustomerCashCollected: number
-  topProducts: { name: string; qty: number; revenue: number }[]
-  packageBreakdown: { name: string; count: number; revenue: number }[]
+  topProducts: { product_id: string; name: string; qty: number; revenue: number; cost: number }[]
+  packageBreakdown: { package_id: string; name: string; count: number; units: number; customer_payment: number; revenue: number; pin_allocation: number; cost: number; profit: number }[]
   monthlyRevenue: { month: string; revenue: number; resellers: number }[]
   recentResellers: {
     id: string; full_name: string; username: string; created_at: string
@@ -63,7 +72,10 @@ interface Stats {
   inventoryItems: { name: string; quantity: number; low: number }[]
 }
 
-const fmt  = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmt = (n: number) => {
+  const value = Number(n)
+  return `₱${(Number.isFinite(value) ? value : 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 const fmtS = (n: number) => {
   if (n >= 1000000) return `₱${(n/1000000).toFixed(2)}M`
   if (n >= 1000)    return `₱${(n/1000).toFixed(1)}K`
@@ -81,30 +93,37 @@ function StatCard({ label, value, sub, color, icon, badge }: {
   label: string; value: string | number; sub?: string
   color?: string; icon?: string; badge?: string
 }) {
+  const cardColor = color || '#0D1B3E'
+  const foreground = '#FFFFFF'
+  const overlay = '#FFFFFF24'
+  const supportingTextShadow = '0 1px 2px rgba(0, 0, 0, 0.48)'
+  const valueTextShadow = '0 2px 3px rgba(0, 0, 0, 0.46)'
+
   return (
-    <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
-      style={{ borderTop: `2px solid ${color || '#0D1B3E'}` }}>
+    <div className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+      style={{ borderColor: cardColor, backgroundColor: cardColor, color: foreground }}>
       <div className="flex items-start justify-between mb-3">
-        {icon && <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: (color || '#0D1B3E') + '15' }}>{icon}</div>}
-        {badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: (color || '#0D1B3E') + '15', color: color || '#0D1B3E' }}>{badge}</span>}
+        {icon && <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: overlay }}>{icon}</div>}
+        {badge && <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: overlay, color: foreground }}>{badge}</span>}
       </div>
-      <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-xl font-bold" style={{ color: color || '#0D1B3E' }}>{value}</p>
-      {sub && <p className="text-[10px] text-gray-400 mt-1">{sub}</p>}
+      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: foreground, opacity: 0.96, textShadow: supportingTextShadow }}>{label}</p>
+      <p className="text-2xl font-extrabold tracking-tight" style={{ color: foreground, textShadow: valueTextShadow }}>{value}</p>
+      {sub && <p className="text-xs font-medium leading-relaxed mt-1" style={{ color: foreground, opacity: 0.94, textShadow: supportingTextShadow }}>{sub}</p>}
     </div>
   )
 }
-
 type ReportTab = 'overview' | 'sales' | 'products' | 'packages' | 'pins' | 'inventory'
-type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
+type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 
 export default function CityDashboardPage() {
   const [stats, setStats]     = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab]         = useState<ReportTab>('overview')
-  const [period, setPeriod]   = useState<CityStatsPeriod>('all_time')
+  const [period, setPeriod]   = useState<CityStatsPeriod>('today')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [showSalesBreakdown, setShowSalesBreakdown] = useState(false)
+  const [showCostBreakdown, setShowCostBreakdown] = useState(false)
 
 useEffect(() => {
     const query = new URLSearchParams({ period: period === 'custom' && (!customStart || !customEnd) ? 'all_time' : period })
@@ -113,7 +132,7 @@ useEffect(() => {
       query.set('end', customEnd)
     }
     setLoading(true)
-    fetch(`/api/city/stats?${query.toString()}`)
+    fetch(`/api/city/stats?${query.toString()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setStats(d.stats))
       .finally(() => setLoading(false))
@@ -140,6 +159,7 @@ useEffect(() => {
   if (!stats) return <p className="text-center text-gray-400 py-20">Failed to load dashboard.</p>
 
   const today = new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const accountLabel = stats.accountType === 'branch' ? 'Branch' : 'City Distributor'
 
   return (
     <div className="w-full space-y-5">
@@ -188,14 +208,15 @@ useEffect(() => {
       {/* ══ OVERVIEW ══ */}
       <div className="bg-white border border-[#0D1B3E]/8 rounded-xl px-4 py-3 flex flex-col lg:flex-row lg:items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold text-[#0D1B3E]">Sales reporting period</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Applies to Sales, Products, and Packages. Inventory and available PIN stock stay live.</p>
+          <p className="text-xs font-bold text-[#0D1B3E]">{tab === 'inventory' ? 'Live inventory snapshot' : 'Sales reporting period'}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">{tab === 'inventory' ? 'Shows current on-hand stock, thresholds, and inventory cost value. A date filter does not apply to live stock.' : 'Applies to Sales, Products, Packages, and PIN usage activity. Inventory and available PIN stock stay live.'}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select value={period} onChange={(event) => selectPeriod(event.target.value as CityStatsPeriod)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-3 py-2 text-xs font-semibold text-[#0D1B3E] outline-none">
+        {tab !== 'inventory' && <div className="flex flex-wrap items-center gap-2">
+          <select value={period} onChange={(event) => selectPeriod(event.target.value as CityStatsPeriod)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-3 py-2 text-sm font-semibold text-[#0D1B3E] outline-none">
             <option value="today">Daily — Today</option>
             <option value="yesterday">Yesterday</option>
             <option value="this_week">Weekly — This Week</option>
+            <option value="last_week">Weekly — Last Week</option>
             <option value="this_month">Monthly — This Month</option>
             <option value="this_year">Yearly — This Year</option>
             <option value="all_time">All Time</option>
@@ -207,36 +228,146 @@ useEffect(() => {
             <input aria-label="Custom end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.target.value)} className="bg-[#f8f9fc] border border-[#0D1B3E]/10 rounded-lg px-2 py-2 text-xs text-[#0D1B3E]" />
           </>}
           <span className="text-[11px] font-semibold text-[#1a7a4a] whitespace-nowrap">{stats.period.label}</span>
-        </div>
+        </div>}
       </div>
-      {(stats.financialIntegrity.legacy_reconstructed_rows > 0 || stats.financialIntegrity.unclassified_used_pins > 0 || stats.financialIntegrity.ledger_formula_mismatches > 0) ? (
+      {(stats.financialIntegrity.legacy_reconstructed_rows > 0 || stats.financialIntegrity.unclassified_used_pins > 0 || stats.financialIntegrity.ledger_formula_mismatches > 0 || stats.financialIntegrity.order_cost_fallback_rows > 0) && (
         <div className="rounded-xl border border-[#e8b3b3] bg-[#fff3f3] px-4 py-3 text-xs text-[#9d3030]">
           <p className="font-bold">Financial integrity attention required</p>
-          <p className="mt-1">Ledger rows: {stats.financialIntegrity.ledger_rows}. Legacy registration rows reconstructed: {stats.financialIntegrity.legacy_reconstructed_rows}. Unclassified used PINs excluded from registration profit: {stats.financialIntegrity.unclassified_used_pins}. Formula mismatches: {stats.financialIntegrity.ledger_formula_mismatches}.</p>
+          <p className="mt-1">Ledger rows: {stats.financialIntegrity.ledger_rows}. Legacy registration rows reconstructed: {stats.financialIntegrity.legacy_reconstructed_rows}. Unclassified used PINs excluded from registration profit: {stats.financialIntegrity.unclassified_used_pins}. Formula mismatches: {stats.financialIntegrity.ledger_formula_mismatches}. Legacy order items using current catalog cost fallback: {stats.financialIntegrity.order_cost_fallback_rows}.</p>
           <p className="mt-1">Totals remain transparent, but each legacy/reconstructed row should be audited and backfilled before relying on it as an immutable historical financial record.</p>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-[#b9e3c8] bg-[#f1fbf4] px-4 py-3 text-xs text-[#187443]">
-          <span className="font-bold">Financial integrity check passed.</span> Every included registration has one ledger record and its stored profit matches product value less City product cost.
         </div>
       )}
       {tab === 'overview' && (
         <>
-          {/* Today's KPIs */}
+          {/* Selected-period KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Today's Sales"       value={fmt(stats.salesRevenueToday)}  color="#1a7a4a" icon="💰" sub={`vs Yesterday: ${fmt(stats.salesRevenueYesterday)}`} />
-            <StatCard label="Units Sold Today"    value={stats.unitsSoldToday}            color="#2563eb" icon="📦" sub="Walk-in orders" />
-            <StatCard label="New Resellers Today" value={stats.newResellersToday}         color="#C9A84C" icon="👥" sub={`vs Yesterday: ${stats.newResellersYesterday}`} badge={stats.newResellersToday > 0 ? 'New!' : undefined} />
-            <StatCard label="PINs Used Today"     value={stats.pinsUsedToday}             color="#8b5cf6" icon="🔑" sub="Registrations today" />
+            <StatCard label={`${stats.period.label} Repeat + SRP Product Sales`} value={fmt(stats.orderRevenue)} color="#1a7a4a" icon="💰" sub="Revenue before product cost" />
+            <StatCard label={`${stats.period.label} Registration Product Sales`} value={fmt(stats.packageRevenue)} color="#8b5cf6" icon="📈" sub="Registration product value · PIN allocation excluded" />
+            <StatCard label={`${stats.period.label} Product Order Units Sold`} value={stats.orderUnitsSold} color="#2563eb" icon="📦" sub="Delivered product orders" />
+            <StatCard label={`${stats.period.label} New Resellers`} value={stats.registrationCount} color="#9A6F1E" icon="👥" sub="Completed registrations" badge={stats.registrationCount > 0 ? 'New!' : undefined} />
           </div>
 
           {/* Running totals */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Resellers"    value={stats.totalResellers.toLocaleString()} color="#0D1B3E" icon="👤" sub={`+${stats.newResellersThisMonth} this month`} />
             <StatCard label="Available PINs"     value={stats.unusedPins}                       color="#1a7a4a" icon="🔓" sub={`${stats.usedPins} used · ${stats.totalPinsRequested} total`} />
-            <StatCard label="Pending Orders"     value={stats.pendingOrders}                    color="#f59e0b" icon="🕐" sub={`${stats.totalOrders} total orders`} badge={stats.pendingOrders > 0 ? 'Action needed' : undefined} />
-            <StatCard label="Low Stock Items"    value={stats.lowStockItems}                    color="#e05252" icon="⚠️" sub={`${stats.totalStock} units in stock`} badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
+            <StatCard label="Pending Orders"     value={stats.pendingOrders}                    color={stats.pendingOrders > 0 ? '#B45309' : '#0D1B3E'} icon="🕐" sub={`${stats.totalOrders} total orders`} badge={stats.pendingOrders > 0 ? 'Action needed' : undefined} />
+            <StatCard label="Low Stock Items"    value={stats.lowStockItems}                    color={stats.lowStockItems > 0 ? '#e05252' : '#1a7a4a'} icon="⚠️" sub={`${stats.totalStock} units in stock`} badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
           </div>
+
+          <section className="rounded-2xl border border-[#1a7a4a]/30 bg-white overflow-hidden">
+            <div className="px-5 py-4 bg-[#e2f5e9] border-b border-[#1a7a4a]/15">
+              <p className="text-xs font-bold uppercase tracking-wide text-[#187443]">{stats.period.label} {accountLabel} Financial Summary</p>
+              <p className="text-xs leading-relaxed text-[#53627e] mt-1">Sales across reseller repeat orders, non-member/SRP sales, and new reseller registrations. Prepaid PIN allocation is excluded from distributor sales.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-[#f8faf9]">
+              <button type="button" onClick={() => setShowSalesBreakdown(true)} className="rounded-xl border border-[#2563eb]/20 bg-white p-5 text-left hover:bg-[#eff6ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb] transition-colors group" aria-label={`View ${stats.period.label.toLowerCase()} total sales breakdown`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Total sales</p>
+                  <span className="text-xs font-semibold text-[#2563eb] group-hover:underline">View breakdown →</span>
+                </div>
+                <p className="text-2xl font-bold text-[#2563eb] mt-2">{fmt(stats.totalRevenue)}</p>
+                <p className="text-xs leading-relaxed text-gray-500 mt-1">Before product cost deductions</p>
+              </button>
+
+              <button type="button" onClick={() => setShowCostBreakdown(true)} className="rounded-xl border border-[#e05252]/20 bg-white p-5 text-left hover:bg-[#fff3f3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e05252] transition-colors group" aria-label={`View ${stats.period.label.toLowerCase()} total product cost breakdown`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Total product cost</p>
+                  <span className="text-xs font-semibold text-[#e05252] group-hover:underline">View breakdown →</span>
+                </div>
+                <p className="text-2xl font-bold text-[#e05252] mt-2">{fmt(stats.totalCost)}</p>
+                <p className="text-xs leading-relaxed text-gray-500 mt-1">Historical acquisition cost</p>
+              </button>
+
+              <div className="rounded-xl border border-[#1a7a4a]/25 bg-[#e2f5e9] p-5">
+                <p className="text-xs uppercase tracking-wide font-semibold text-[#187443]">{accountLabel} gross profit</p>
+                <p className="text-3xl font-bold text-[#08703c] mt-1">{fmt(stats.totalProfit)}</p>
+                <p className="text-xs leading-relaxed text-[#187443] mt-1">Sales − product cost; before operating expenses or refunds</p>
+              </div>
+            </div>
+
+            <div className="px-4 pb-4 bg-white">
+              <p className="text-xs font-bold uppercase tracking-wide text-[#0D1B3E] mb-2">Gross Profit Breakdown</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 rounded-xl border border-[#0D1B3E]/8 overflow-hidden divide-y sm:divide-y-0 sm:divide-x divide-[#0D1B3E]/8 bg-[#fbfcfd]">
+                <div className="p-4"><p className="text-xs uppercase tracking-wide text-gray-500">Reseller repeat-order profit</p><p className="text-lg font-bold text-[#2563eb] mt-1">{fmt(stats.resellerProductOrders.profit)}</p></div>
+                <div className="p-4"><p className="text-xs uppercase tracking-wide text-gray-500">Non-member / SRP profit</p><p className="text-lg font-bold text-[#9a6f1e] mt-1">{fmt(stats.walkInProductOrders.profit)}</p></div>
+                <div className="p-4"><p className="text-xs uppercase tracking-wide text-gray-500">New reseller registration profit</p><p className="text-lg font-bold text-[#8b5cf6] mt-1">{fmt(stats.registrationProductProfit)}</p></div>
+              </div>
+            </div>
+          </section>
+
+          {showSalesBreakdown && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/55 p-3 sm:p-4" onMouseDown={() => setShowSalesBreakdown(false)}>
+              <div role="dialog" aria-modal="true" aria-labelledby="sales-breakdown-title" className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] rounded-xl sm:rounded-2xl bg-white shadow-2xl overflow-y-auto" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="flex items-start justify-between gap-4 border-b border-[#0D1B3E]/8 px-5 py-4">
+                  <div>
+                    <h2 id="sales-breakdown-title" className="text-base font-bold text-[#0D1B3E]">Where {fmt(stats.totalRevenue)} total sales came from</h2>
+                    <p className="text-xs text-gray-400 mt-1">{stats.period.label} · {accountLabel}</p>
+                  </div>
+                  <button type="button" onClick={() => setShowSalesBreakdown(false)} className="h-10 w-10 shrink-0 rounded-lg text-lg text-gray-400 hover:bg-gray-100 hover:text-[#0D1B3E]" aria-label="Close total sales breakdown">✕</button>
+                </div>
+                <div className="p-4 sm:p-5 space-y-3">
+                  {[
+                    { label: 'Reseller repeat-order sales', value: stats.resellerProductOrders.revenue, detail: `${stats.resellerProductOrders.units.toLocaleString()} units sold to existing resellers` },
+                    { label: 'Non-member / SRP sales', value: stats.walkInProductOrders.revenue, detail: `${stats.walkInProductOrders.units.toLocaleString()} units sold at non-member/SRP pricing` },
+                    { label: 'New reseller registration product sales', value: stats.packageRevenue, detail: `${stats.registrationCount.toLocaleString()} new registrations · prepaid PIN allocation excluded` },
+                  ].map((channel) => (
+                    <div key={channel.label} className="rounded-xl border border-[#0D1B3E]/8 px-4 py-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <p className="text-sm font-semibold text-[#0D1B3E]">{channel.label}</p>
+                        <p className="text-sm font-bold text-[#2563eb]">{fmt(channel.value)}</p>
+                      </div>
+                      <p className="text-xs leading-relaxed text-gray-500 mt-1">{channel.detail}</p>
+                    </div>
+                  ))}
+                  <div className="rounded-xl bg-[#eff6ff] px-4 py-3">
+                    <p className="text-xs uppercase tracking-wide text-[#2563eb] font-semibold">Formula</p>
+                    <p className="text-sm leading-relaxed text-[#0D1B3E] mt-1">
+                      {fmt(stats.resellerProductOrders.revenue)} + {fmt(stats.walkInProductOrders.revenue)} + {fmt(stats.packageRevenue)} = <span className="font-bold text-[#2563eb]">{fmt(stats.totalRevenue)}</span>
+                    </p>
+                  </div>
+                  <p className="text-xs leading-relaxed text-gray-500">Total sales is before product-cost deductions. The prepaid PIN allocation collected during registration is excluded because it is not distributor sales income.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showCostBreakdown && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/55 p-3 sm:p-4" onMouseDown={() => setShowCostBreakdown(false)}>
+              <div role="dialog" aria-modal="true" aria-labelledby="cost-breakdown-title" className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] rounded-xl sm:rounded-2xl bg-white shadow-2xl overflow-y-auto" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="flex items-start justify-between gap-4 border-b border-[#0D1B3E]/8 px-5 py-4">
+                  <div>
+                    <h2 id="cost-breakdown-title" className="text-base font-bold text-[#0D1B3E]">Where {fmt(stats.totalCost)} total product cost came from</h2>
+                    <p className="text-xs text-gray-400 mt-1">{stats.period.label} · {accountLabel}</p>
+                  </div>
+                  <button type="button" onClick={() => setShowCostBreakdown(false)} className="h-10 w-10 shrink-0 rounded-lg text-lg text-gray-400 hover:bg-gray-100 hover:text-[#0D1B3E]" aria-label="Close total product cost breakdown">✕</button>
+                </div>
+                <div className="p-4 sm:p-5 space-y-3">
+                  {[
+                    { label: 'Reseller repeat-order product cost', value: stats.resellerProductOrders.cost, detail: `${stats.resellerProductOrders.units.toLocaleString()} units valued at their historical acquisition cost` },
+                    { label: 'Non-member / SRP product cost', value: stats.walkInProductOrders.cost, detail: `${stats.walkInProductOrders.units.toLocaleString()} units valued at their historical acquisition cost` },
+                    { label: 'New reseller registration product cost', value: stats.packageCost, detail: `${stats.registrationCount.toLocaleString()} registrations using the cost captured when each registration was completed` },
+                  ].map((channel) => (
+                    <div key={channel.label} className="rounded-xl border border-[#0D1B3E]/8 px-4 py-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <p className="text-sm font-semibold text-[#0D1B3E]">{channel.label}</p>
+                        <p className="text-sm font-bold text-[#e05252]">{fmt(channel.value)}</p>
+                      </div>
+                      <p className="text-xs leading-relaxed text-gray-500 mt-1">{channel.detail}</p>
+                    </div>
+                  ))}
+                  <div className="rounded-xl bg-[#fff3f3] px-4 py-3">
+                    <p className="text-xs uppercase tracking-wide text-[#e05252] font-semibold">Formula</p>
+                    <p className="text-sm leading-relaxed text-[#0D1B3E] mt-1">
+                      {fmt(stats.resellerProductOrders.cost)} + {fmt(stats.walkInProductOrders.cost)} + {fmt(stats.packageCost)} = <span className="font-bold text-[#e05252]">{fmt(stats.totalCost)}</span>
+                    </p>
+                  </div>
+                  <p className="text-xs leading-relaxed text-gray-500">Product cost uses the historical acquisition cost stored with each transaction. Later Admin price changes do not rewrite completed transaction costs.</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Monthly chart + Recent resellers + Recent orders */}
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
@@ -281,7 +412,7 @@ useEffect(() => {
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
+                    <p className="text-sm font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
                     <p className="text-[10px] text-gray-400">@{r.username} · {r.reseller_profile?.package?.name || '—'}</p>
                   </div>
                   <p className="text-[10px] text-gray-400 flex-shrink-0">
@@ -311,7 +442,7 @@ useEffect(() => {
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
+                    <p className="text-sm font-semibold text-[#0D1B3E] truncate">{r.full_name}</p>
                     <p className="text-[10px] text-gray-400">@{r.username} · {r.package_name}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -337,7 +468,7 @@ useEffect(() => {
                     {STATUS_ICONS[o.status]}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-[#0D1B3E] truncate">{o.buyer.full_name}</p>
+                    <p className="text-sm font-semibold text-[#0D1B3E] truncate">{o.buyer.full_name}</p>
                     <p className="text-[10px] text-gray-400">{o.order_number || o.id.slice(0,8)}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -349,87 +480,82 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Revenue breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { label: 'Walk-in Sales Revenue', value: stats.orderRevenue,   cost: stats.orderCost,   units: stats.orderUnitsSold,   icon: '🛒', color: '#2563eb' },
-              { label: 'Registration Product Sales', value: stats.packageRevenue, cost: stats.packageCost, units: stats.packageUnitsSold, icon: '🎁', color: '#C9A84C', extra: `Prepaid PIN allocation: ${fmt(stats.packagePinRemittance)}` },
-              { label: 'Total Profit',          value: stats.totalProfit,    cost: stats.totalCost,   units: stats.totalUnitsSold,   icon: '📈', color: '#1a7a4a' },
-            ].map(s => (
-              <div key={s.label} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `2px solid ${s.color}` }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xl">{s.icon}</span>
-                  <p className="text-sm font-bold text-[#0D1B3E]">{s.label}</p>
-                </div>
-                <p className="text-2xl font-bold mb-3" style={{ color: s.color }}>{fmt(s.value)}</p>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between"><span className="text-gray-400">Cost</span><span className="text-[#e05252] font-medium">{fmt(s.cost)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Units</span><span className="font-medium text-[#0D1B3E]">{s.units.toLocaleString()}</span></div>
-                  {'extra' in s && s.extra && <div className="text-[10px] text-[#9a6f1e] pt-1">{s.extra}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
         </>
       )}
 
       {/* ══ SALES REPORT ══ */}
       {tab === 'sales' && (
         <>
-          <div className="bg-[#fffaf0] border border-[#e8c66a]/60 rounded-2xl px-5 py-4">
-            <p className="text-sm font-bold text-[#0D1B3E]">City Distributor income summary</p>
-            <p className="text-xs text-[#80611f] mt-1">{stats.period.label}: only three income channels are counted: reseller repeat orders, non-member/SRP sales, and new reseller registrations.</p>
-            <p className="text-[11px] text-[#80611f] mt-1">Prices and costs are recorded as historical transaction snapshots. Changes in Admin price settings apply only to future orders and registrations.</p>
+          <div className="bg-[#fffaf0] border border-[#e8c66a]/60 rounded-2xl px-5 py-5">
+            <p className="text-base font-extrabold text-[#0D1B3E]">{accountLabel} income summary</p>
+            <p className="text-sm font-semibold leading-6 text-[#72551b] mt-1.5">{stats.period.label}: only three income channels are counted: reseller repeat orders, non-member/SRP sales, and new reseller registrations.</p>
+            <p className="text-sm font-medium leading-6 text-[#72551b] mt-1">Prices and costs are recorded as historical transaction snapshots. Changes in Admin price settings apply only to future orders and registrations.</p>
           </div>
 
           <section>
-            <p className="text-base font-bold text-[#0D1B3E] mb-1">Where the City Distributor earns</p>
-            <p className="text-xs text-gray-400 mb-3">Every card shows the sales amount, product cost, and the profit generated by that channel.</p>
+            <p className="text-base font-bold text-[#0D1B3E] mb-1">Where the {accountLabel} earns</p>
+            <p className="text-sm font-semibold text-[#53627e] mb-4">Every card shows the sales amount, product cost, and the profit generated by that channel.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
-                { title: '1. Reseller Repeat Orders', revenue: stats.resellerProductOrders.revenue, cost: stats.resellerProductOrders.cost, profit: stats.resellerProductOrders.profit, units: stats.resellerProductOrders.units, color: '#2563eb', description: 'Products sold to existing reseller accounts at reseller price.' },
-                { title: '2. Non-member / SRP Sales', revenue: stats.walkInProductOrders.revenue, cost: stats.walkInProductOrders.cost, profit: stats.walkInProductOrders.profit, units: stats.walkInProductOrders.units, color: '#C9A84C', description: 'Walk-in or non-member products sold at SRP price.' },
-                { title: '3. New Reseller Registrations', revenue: stats.packageRevenue, cost: stats.packageCost, profit: stats.registrationProductProfit, units: stats.packageUnitsSold, color: '#1a7a4a', description: 'City product value inside new reseller packages. PIN allocation is excluded from City income.' },
+                { title: '1. Reseller Repeat Orders', revenue: stats.resellerProductOrders.revenue, cost: stats.resellerProductOrders.cost, profit: stats.resellerProductOrders.profit, units: stats.resellerProductOrders.units, color: '#ffffff', background: '#14264f', border: '#14264f', description: 'Products sold to existing reseller accounts at reseller price.' },
+                { title: '2. Non-member / SRP Sales', revenue: stats.walkInProductOrders.revenue, cost: stats.walkInProductOrders.cost, profit: stats.walkInProductOrders.profit, units: stats.walkInProductOrders.units, color: '#ffffff', background: '#14264f', border: '#14264f', description: 'Walk-in or non-member products sold at SRP price.' },
+                { title: '3. New Reseller Registrations', revenue: stats.packageRevenue, cost: stats.packageCost, profit: stats.registrationProductProfit, units: stats.packageUnitsSold, color: '#ffffff', background: '#14264f', border: '#14264f', description: `${accountLabel} product value inside new reseller packages. PIN allocation is excluded from ${accountLabel} income.` },
               ].map(channel => (
-                <div key={channel.title} className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5" style={{ borderTop: `3px solid ${channel.color}` }}>
-                  <p className="text-sm font-bold text-[#0D1B3E]">{channel.title}</p>
-                  <p className="text-[11px] text-gray-400 min-h-8 mt-1">{channel.description}</p>
-                  <div className="mt-4 space-y-2 text-xs">
-                    <div className="flex justify-between"><span className="text-gray-400">Sales value</span><span className="font-semibold text-[#0D1B3E]">{fmt(channel.revenue)}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-400">Product cost</span><span className="font-semibold text-[#e05252]">{fmt(channel.cost)}</span></div>
-                    <div className="pt-2 border-t border-[#0D1B3E]/8 flex justify-between"><span className="font-semibold text-[#0D1B3E]">Profit</span><span className="font-bold" style={{ color: channel.color }}>{fmt(channel.profit)}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-400">Units released</span><span className="font-semibold text-[#0D1B3E]">{channel.units.toLocaleString()}</span></div>
+                <div key={channel.title} className="rounded-2xl border p-5 shadow-md" style={{ backgroundColor: channel.background, borderColor: channel.border, textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
+                  <p className="text-base font-extrabold leading-6 text-white drop-shadow-sm">{channel.title}</p>
+                  <p className="text-sm leading-5 font-semibold text-white/90 min-h-10 mt-1.5">{channel.description}</p>
+                  <div className="mt-4 space-y-2.5 text-sm">
+                    <div className="flex justify-between gap-4"><span className="font-bold text-white/85">Sales value</span><span className="font-extrabold text-white drop-shadow-sm">{fmt(channel.revenue)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="font-bold text-white/85">Product cost</span><span className="font-extrabold text-white drop-shadow-sm">{fmt(channel.cost)}</span></div>
+                    <div className="pt-2.5 border-t border-white/25 flex justify-between gap-4"><span className="font-extrabold text-white">Profit</span><span className="font-extrabold text-white drop-shadow-sm">{fmt(channel.profit)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="font-bold text-white/85">Units released</span><span className="font-extrabold text-white">{channel.units.toLocaleString()}</span></div>
                   </div>
                 </div>
               ))}
             </div>
           </section>
 
-          <section className="bg-[#f3fbf6] border border-[#1a7a4a]/30 rounded-2xl overflow-hidden">
-            <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[#1a7a4a]/15">
-              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Reseller repeat-order profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.resellerProductOrders.profit)}</p></div>
-              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Non-member/SRP profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.walkInProductOrders.profit)}</p></div>
-              <div className="p-5"><p className="text-[10px] uppercase tracking-wide text-gray-500">Registration profit</p><p className="text-xl font-bold text-[#1a7a4a] mt-2">{fmt(stats.registrationProductProfit)}</p></div>
-              <div className="p-5 bg-[#e2f5e9]"><p className="text-[10px] uppercase tracking-wide text-[#1a7a4a] font-semibold">Total City Gross Profit</p><p className="text-2xl font-bold text-[#08703c] mt-2">{fmt(stats.combinedProductProfit)}</p><p className="text-[10px] text-[#1a7a4a] mt-1">Before operating expenses or refunds</p></div>
+          <section className="rounded-2xl border border-[#0D1B3E]/10 bg-white p-4 shadow-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              {[
+                { label: 'Reseller Repeat-Order Profit', value: stats.resellerProductOrders.profit, background: '#1e4fa8' },
+                { label: 'Non-Member / SRP Profit', value: stats.walkInProductOrders.profit, background: '#795515' },
+                { label: 'Registration Profit', value: stats.registrationProductProfit, background: '#a9363b' },
+                { label: 'Total City Gross Profit', value: stats.combinedProductProfit, background: '#14653d', subtext: 'Before operating expenses or refunds' },
+              ].map(item => (
+                <div
+                  key={item.label}
+                  className="flex min-h-32 flex-col justify-between rounded-xl p-4 shadow-md"
+                  style={{ backgroundColor: item.background, textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}
+                >
+                  <p className="min-h-10 text-sm font-extrabold uppercase leading-5 tracking-wide text-white">{item.label}</p>
+                  <div>
+                    <p className="text-2xl font-extrabold text-white drop-shadow-sm">{fmt(item.value)}</p>
+                    {item.subtext && <p className="mt-1 text-xs font-semibold leading-4 text-white/90">{item.subtext}</p>}
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="px-5 py-3 bg-white/60 text-xs text-[#53627e]"><span className="font-semibold text-[#0D1B3E]">Formula:</span> reseller repeat-order profit + non-member/SRP profit + registration profit = Total City Gross Profit.</div>
+            <div className="mt-4 rounded-xl bg-[#f5f7fb] px-4 py-3 text-sm font-medium leading-5 text-[#53627e]">
+              <span className="font-extrabold text-[#0D1B3E]">Formula:</span> reseller repeat-order profit + non-member/SRP profit + registration profit = Total City Gross Profit.
+            </div>
           </section>
 
           <details className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden group">
-            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-sm font-bold text-[#0D1B3E]">Registration cash and PIN reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
-            <div className="border-t border-[#0D1B3E]/8 px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div><p className="text-gray-400">Package cash collected</p><p className="font-bold text-[#2563eb] mt-1">{fmt(stats.packageCustomerPayments)}</p></div>
-              <div><p className="text-gray-400">City product value</p><p className="font-bold text-[#C9A84C] mt-1">{fmt(stats.packageRevenue)}</p></div>
-              <div><p className="text-gray-400">Prepaid PIN allocation</p><p className="font-bold text-[#9a6f1e] mt-1">{fmt(stats.packagePinRemittance)}</p></div>
-              <div><p className="text-gray-400">Formula</p><p className="font-medium text-[#0D1B3E] mt-1">Cash collected = City product value + PIN allocation</p></div>
+            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-base font-extrabold text-[#0D1B3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2563eb]">Registration cash and PIN reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
+            <div className="border-t border-[#0D1B3E]/8 px-5 py-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5 text-sm">
+              <div><p className="font-bold text-[#667085]">Package cash collected</p><p className="text-base font-extrabold text-[#2563eb] mt-1.5">{fmt(stats.packageCustomerPayments)}</p></div>
+              <div><p className="font-bold text-[#667085]">City product value</p><p className="text-base font-extrabold text-[#9a6f1e] mt-1.5">{fmt(stats.packageRevenue)}</p></div>
+              <div><p className="font-bold text-[#667085]">Prepaid PIN allocation</p><p className="text-base font-extrabold text-[#9a6f1e] mt-1.5">{fmt(stats.packagePinRemittance)}</p></div>
+              <div><p className="font-bold text-[#667085]">Formula</p><p className="font-bold leading-5 text-[#0D1B3E] mt-1.5">Cash collected = City product value + PIN allocation</p></div>
             </div>
           </details>
 
           <details className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden group">
-            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-sm font-bold text-[#0D1B3E]">Monthly delivered product-sales reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
+            <summary className="cursor-pointer list-none px-5 py-4 flex items-center justify-between text-base font-extrabold text-[#0D1B3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2563eb]">Monthly delivered product-sales reference <span className="text-[#9a6f1e] group-open:rotate-180 transition-transform">v</span></summary>
             <div className="border-t border-[#0D1B3E]/8">
-              <div className="grid grid-cols-3 px-5 py-2 bg-[#f8f9fc]">{['Month', 'Delivered Product Revenue', 'New Reseller Registrations'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}</div>
-              {stats.monthlyRevenue.map((m, i) => <div key={i} className="grid grid-cols-3 px-5 py-3 border-b border-[#0D1B3E]/5"><p className="text-xs font-semibold text-[#0D1B3E]">{m.month}</p><p className="text-xs font-bold text-[#1a7a4a]">{fmt(m.revenue)}</p><p className="text-xs font-semibold text-[#C9A84C]">{m.resellers}</p></div>)}
+              <div className="grid grid-cols-3 gap-4 px-5 py-3 bg-[#f8f9fc]">{['Month', 'Delivered Product Revenue', 'New Reseller Registrations'].map(h => <p key={h} className="text-sm text-[#667085] uppercase tracking-wide font-bold">{h}</p>)}</div>
+              {stats.monthlyRevenue.map((m, i) => <div key={i} className="grid grid-cols-3 gap-4 px-5 py-4 border-b border-[#0D1B3E]/5"><p className="text-sm font-semibold text-[#0D1B3E]">{m.month}</p><p className="text-sm font-extrabold text-[#1a7a4a]">{fmt(m.revenue)}</p><p className="text-sm font-bold text-[#9a6f1e]">{m.resellers}</p></div>)}
             </div>
           </details>
         </>
@@ -439,103 +565,144 @@ useEffect(() => {
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <StatCard label="Delivered Product Revenue"  value={fmt(stats.orderRevenue)}              color="#2563eb" icon="🛒" sub={`${stats.orderUnitsSold} units`} />
-            <StatCard label="Delivered Product Cost"     value={fmt(stats.orderCost)}                 color="#e05252" icon="🏷️" sub="City price cost" />
-            <StatCard label="Delivered Product Profit"   value={fmt(stats.orderProfit)} color="#1a7a4a" icon="📈" sub="Product margin, not cash collected" />
+            <StatCard label="Delivered Product Cost"     value={fmt(stats.orderCost)}                 color="#e05252" icon="🏷️" sub={stats.financialIntegrity.order_cost_fallback_rows > 0 ? `Includes ${stats.financialIntegrity.order_cost_fallback_rows} legacy catalog-cost fallback${stats.financialIntegrity.order_cost_fallback_rows === 1 ? "" : "s"}` : "Historical acquisition cost"} />
+            <StatCard label="Delivered Product Gross Profit" value={fmt(stats.orderProfit)} color="#1a7a4a" icon="📈" sub="Revenue minus product cost; before operating expenses or refunds" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-              <p className="text-sm font-bold text-[#0D1B3E]">Product Movement</p>
-              <p className="text-xs text-gray-400 mt-0.5">Based on all delivered product orders; reseller registrations are excluded.</p>
+              <p className="text-base font-extrabold text-[#0D1B3E]">Product Movement and Profit Breakdown</p>
+              <p className="text-sm font-medium text-[#667085] mt-1">Every row explains how delivered product revenue and gross profit were calculated. Reseller registrations are excluded.</p>
             </div>
-            <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
-              {['Product', 'Units Sold', 'Revenue', 'Share'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
-            </div>
-            {stats.topProducts.length === 0 ? (
-              <p className="text-center text-gray-400 text-sm py-10">No product sales yet</p>
-            ) : stats.topProducts.map((p, i) => {
-              const totalQty = stats.topProducts.reduce((s, x) => s + x.qty, 0) || 1
-              const pct = Math.round((p.qty / totalQty) * 100)
-              return (
-                <div key={i} className="grid grid-cols-4 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                      style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#9ca3af' : '#f1f5f9', color: i < 2 ? 'white' : '#9ca3af' }}>{i+1}</span>
-                    <p className="text-xs font-semibold text-[#0D1B3E] truncate">{p.name}</p>
-                  </div>
-                  <p className="text-xs font-bold text-[#0D1B3E]">{p.qty.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-[#2563eb]">{fmt(p.revenue)}</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="text-[10px] text-gray-400 w-7">{pct}%</span>
-                  </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[980px]">
+                <div className="grid grid-cols-[1.5fr_.65fr_.9fr_.9fr_.9fr_.9fr_1fr] gap-4 px-5 py-3 bg-[#f8f9fc]">
+                  {['Product', 'Units', 'Avg. Selling Price', 'Revenue', 'Product Cost', 'Gross Profit', 'Unit Sales Share'].map(h => <p key={h} className="text-xs text-[#667085] uppercase tracking-wide font-extrabold">{h}</p>)}
                 </div>
-              )
-            })}
+                {stats.topProducts.length === 0 ? (
+                  <p className="text-center text-gray-400 text-sm py-10">No product sales yet</p>
+                ) : stats.topProducts.map((p, i) => {
+                  const totalQty = stats.orderUnitsSold || 1
+                  const pct = Math.round((p.qty / totalQty) * 1000) / 10
+                  const averageSellingPrice = p.qty > 0 ? p.revenue / p.qty : 0
+                  const hasProductCost = Number.isFinite(Number(p.cost))
+                  const productCost = hasProductCost ? Number(p.cost) : stats.topProducts.length === 1 ? stats.orderCost : null
+                  const grossProfit = productCost == null ? null : p.revenue - productCost
+                  return (
+                    <div key={p.product_id} className="grid grid-cols-[1.5fr_.65fr_.9fr_.9fr_.9fr_.9fr_1fr] gap-4 px-5 py-4 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                          style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#9ca3af' : '#f1f5f9', color: i < 2 ? 'white' : '#9ca3af' }}>{i+1}</span>
+                        <p className="truncate text-sm font-bold text-[#0D1B3E]">{p.name}</p>
+                      </div>
+                      <p className="text-sm font-bold text-[#0D1B3E]">{p.qty.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-[#0D1B3E]">{fmt(averageSellingPrice)}</p>
+                      <p className="text-sm font-extrabold text-[#2563eb]">{fmt(p.revenue)}</p>
+                      <p className="text-sm font-extrabold text-[#d94343]">{productCost == null ? 'Refresh required' : fmt(productCost)}</p>
+                      <p className="text-sm font-extrabold text-[#1a7a4a]">{grossProfit == null ? 'Refresh required' : fmt(grossProfit)}</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-[#e8edf5] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="w-10 text-xs font-bold text-[#667085]">{pct}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            {stats.topProducts.length > 0 && (
+              <div className="border-t border-[#0D1B3E]/8 bg-[#f8fafc] px-5 py-3 text-sm font-semibold text-[#53627e]">
+                Formula: <span className="text-[#0D1B3E]">units × average selling price = revenue</span>; <span className="text-[#1a7a4a]">revenue − historical product cost = gross profit</span>.
+              </div>
+            )}
           </div>
         </>
       )}
 
-      {/* ══ PACKAGE USED ══ */}
+      {/* ══ REGISTRATION PACKAGES ══ */}
       {tab === 'packages' && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <StatCard label="Total PINs Used"    value={stats.usedPins}                    color="#1a7a4a" icon="✅" sub="Reseller registrations" />
-            <StatCard label="City Product Allocation"    value={fmt(stats.packageRevenue)}        color="#C9A84C" icon="🎁" sub="Excludes prepaid PIN allocation" />
-            <StatCard label="Package Units Sold" value={stats.packageUnitsSold.toLocaleString()} color="#2563eb" icon="📦" sub="Products in packages" />
+          {stats.financialIntegrity.package_unit_fallback_rows > 0 && (
+            <div className="rounded-xl border border-[#e8c66a]/70 bg-[#fffaf0] px-4 py-3 text-sm leading-5 text-[#72551b]">
+              <p className="font-extrabold">Historical package-unit note</p>
+              <p className="mt-1">{stats.financialIntegrity.package_unit_fallback_rows} registration{stats.financialIntegrity.package_unit_fallback_rows === 1 ? '' : 's'} predate the unit-snapshot field, so unit totals use the current package composition. Their customer cash, product sales, PIN allocation, historical product cost, and gross profit remain stored transaction snapshots and are not affected.</p>
+            </div>
+          )}          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            <StatCard label={`${stats.period.label} Completed Registrations`} value={stats.registrationCount.toLocaleString()} color="#0D1B3E" icon="✅" sub="One used PIN per completed reseller registration" />
+            <StatCard label="Registration Product Sales" value={fmt(stats.packageRevenue)} color="#2563eb" icon="🎁" sub={`${accountLabel} product value; prepaid PIN allocation excluded`} />
+            <StatCard label="Registration Product Cost" value={fmt(stats.packageCost)} color="#e05252" icon="🏷️" sub="Historical product acquisition cost" />
+            <StatCard label="Registration Gross Profit" value={fmt(stats.registrationProductProfit)} color="#1a7a4a" icon="📈" sub="Product sales minus product cost" />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-              <p className="text-sm font-bold text-[#0D1B3E]">Package Breakdown</p>
-              <p className="text-xs text-gray-400 mt-0.5">Packages used by resellers you registered</p>
+              <p className="text-base font-extrabold text-[#0D1B3E]">Registration Package Financial Breakdown</p>
+              <p className="text-sm font-medium text-[#667085] mt-1">Every row explains customer cash, product sales, PIN allocation, historical product cost, and gross profit for completed registrations.</p>
             </div>
-            <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
-              {['Package', 'PINs Used', 'City Product Allocation', 'Share'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
-            </div>
-            {stats.packageBreakdown.length === 0 ? (
-              <p className="text-center text-gray-400 text-sm py-10">No packages used yet</p>
-            ) : stats.packageBreakdown.map((p, i) => {
-              const total = stats.packageBreakdown.reduce((s, x) => s + x.count, 0) || 1
-              const pct = Math.round((p.count / total) * 100)
-              return (
-                <div key={i} className="grid grid-cols-4 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                      style={{ background: i === 0 ? '#C9A84C' : '#f1f5f9', color: i === 0 ? 'white' : '#9ca3af' }}>{i+1}</span>
-                    <p className="text-xs font-semibold text-[#0D1B3E]">{p.name}</p>
-                  </div>
-                  <p className="text-xs font-bold text-[#1a7a4a]">{p.count.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-[#C9A84C]">{fmt(p.revenue)}</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="text-[10px] text-gray-400 w-7">{pct}%</span>
-                  </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[1320px]">
+                <div className="grid grid-cols-[1.25fr_.7fr_.6fr_.9fr_.9fr_.85fr_.9fr_.9fr_1fr] gap-4 px-5 py-3 bg-[#f8f9fc]">
+                  {['Package', 'Registrations', 'Units', 'Customer Cash', 'Product Sales', 'PIN Allocation', 'Product Cost', 'Gross Profit', 'Registration Share'].map(h => <p key={h} className="text-xs text-[#667085] uppercase tracking-wide font-extrabold">{h}</p>)}
                 </div>
-              )
-            })}
+                {stats.packageBreakdown.length === 0 ? (
+                  <p className="text-center text-gray-400 text-sm py-10">No completed registrations in this period</p>
+                ) : stats.packageBreakdown.map((pkg, i) => {
+                  const totalRegistrations = stats.registrationCount || 1
+                  const pct = Math.round((pkg.count / totalRegistrations) * 1000) / 10
+                  return (
+                    <div key={pkg.package_id} className="grid grid-cols-[1.25fr_.7fr_.6fr_.9fr_.9fr_.85fr_.9fr_.9fr_1fr] gap-4 px-5 py-4 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                          style={{ background: i === 0 ? '#C9A84C' : i === 1 ? '#9ca3af' : '#f1f5f9', color: i < 2 ? 'white' : '#9ca3af' }}>{i + 1}</span>
+                        <p className="truncate text-sm font-bold text-[#0D1B3E]">{pkg.name}</p>
+                      </div>
+                      <p className="text-sm font-bold text-[#0D1B3E]">{pkg.count.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-[#0D1B3E]">{pkg.units.toLocaleString()}</p>
+                      <p className="text-sm font-extrabold text-[#0D1B3E]">{fmt(pkg.customer_payment)}</p>
+                      <p className="text-sm font-extrabold text-[#2563eb]">{fmt(pkg.revenue)}</p>
+                      <p className="text-sm font-extrabold text-[#9a6f1e]">{fmt(pkg.pin_allocation)}</p>
+                      <p className="text-sm font-extrabold text-[#d94343]">{fmt(pkg.cost)}</p>
+                      <p className="text-sm font-extrabold text-[#1a7a4a]">{fmt(pkg.profit)}</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-[#e8edf5] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-[#C9A84C]" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="w-10 text-xs font-bold text-[#667085]">{pct}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            {stats.packageBreakdown.length > 0 && (
+              <div className="border-t border-[#0D1B3E]/8 bg-[#f8fafc] px-5 py-3 text-sm font-semibold leading-6 text-[#53627e]">
+                <span className="text-[#0D1B3E]">Customer cash = registration product sales + prepaid PIN allocation.</span>{' '}
+                <span className="text-[#1a7a4a]">Registration gross profit = product sales − historical product cost.</span>
+              </div>
+            )}
           </div>
         </>
       )}
-
       {/* ══ PIN REPORT ══ */}
       {tab === 'pins' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total PINs Requested" value={stats.totalPinsRequested} color="#0D1B3E" icon="📋" sub="All time" />
-            <StatCard label="PINs Used"            value={stats.usedPins}           color="#1a7a4a" icon="✅" sub="Resellers registered" />
-            <StatCard label="Available PINs"       value={stats.unusedPins}         color="#2563eb" icon="🔓" sub="Ready to use" />
-            <StatCard label="Used Today"           value={stats.pinsUsedToday}      color="#C9A84C" icon="⚡" sub="Registrations today" />
+            <StatCard label="Total PINs Assigned" value={stats.totalPinsRequested} color="#0D1B3E" icon="📋" sub="All-time PINs issued by Admin" />
+            <StatCard label="Available PINs" value={stats.unusedPins} color="#2563eb" icon="🔓" sub="Live stock · ready to use" />
+            <StatCard label={`${stats.period.label} PINs Used`} value={stats.pinsUsedInPeriod} color="#1a7a4a" icon="✅" sub="Follows the selected reporting period" />
+            <StatCard label="Cancelled PINs" value={stats.cancelledPins} color="#64748b" icon="🚫" sub="All time · permanently unusable" />
           </div>
 
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 p-5">
-            <p className="text-sm font-bold text-[#0D1B3E] mb-4">PIN Usage Overview</p>
+            <div className="mb-4">
+              <p className="text-sm font-bold text-[#0D1B3E]">All-time PIN Inventory Reconciliation</p>
+              <p className="mt-1 text-xs font-medium text-[#667085]">Used + available + cancelled + expired must equal total PINs assigned.</p>
+            </div>
             <div className="space-y-4">
               {[
                 { label: 'Used',      value: stats.usedPins,   total: stats.totalPinsRequested, color: '#1a7a4a' },
                 { label: 'Available', value: stats.unusedPins, total: stats.totalPinsRequested, color: '#2563eb' },
+                { label: 'Cancelled', value: stats.cancelledPins, total: stats.totalPinsRequested, color: '#64748b' },
+                { label: 'Expired', value: stats.expiredPins, total: stats.totalPinsRequested, color: '#e05252' },
               ].map(s => {
                 const pct = stats.totalPinsRequested > 0 ? Math.round((s.value / stats.totalPinsRequested) * 100) : 0
                 return (
@@ -557,9 +724,9 @@ useEffect(() => {
 
             <div className="mt-5 pt-4 border-t border-[#0D1B3E]/5 grid grid-cols-3 gap-4 text-center">
               {[
-                { label: 'Conversion Rate', value: stats.totalPinsRequested > 0 ? `${Math.round((stats.usedPins / stats.totalPinsRequested) * 100)}%` : '0%', color: '#1a7a4a' },
-                { label: 'Total Resellers', value: stats.totalResellers.toLocaleString(), color: '#0D1B3E' },
-                { label: 'This Month',      value: `+${stats.newResellersThisMonth}`, color: '#C9A84C' },
+                { label: 'Activation Rate (Used ÷ Usable Pool)', value: (stats.usedPins + stats.unusedPins) > 0 ? `${Math.round((stats.usedPins / (stats.usedPins + stats.unusedPins)) * 100)}%` : '0%', color: '#1a7a4a' },
+                { label: 'All-time PINs Used', value: stats.usedPins.toLocaleString(), color: '#0D1B3E' },
+                { label: 'Reconciled Total', value: (stats.usedPins + stats.unusedPins + stats.cancelledPins + stats.expiredPins).toLocaleString(), color: '#C9A84C' },
               ].map(s => (
                 <div key={s.label}>
                   <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
@@ -567,6 +734,11 @@ useEffect(() => {
                 </div>
               ))}
             </div>
+            {(stats.usedPins + stats.unusedPins + stats.cancelledPins + stats.expiredPins) !== stats.totalPinsRequested && (
+              <div className="mt-4 rounded-xl border border-[#e05252]/25 bg-[#fff3f3] px-4 py-3 text-sm font-semibold text-[#a03030]">
+                PIN count mismatch detected. Assigned: {stats.totalPinsRequested.toLocaleString()}, reconciled statuses: {(stats.usedPins + stats.unusedPins + stats.cancelledPins + stats.expiredPins).toLocaleString()}.
+              </div>
+            )}
           </div>
         </>
       )}
@@ -574,32 +746,33 @@ useEffect(() => {
       {/* ══ INVENTORY ══ */}
       {tab === 'inventory' && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <StatCard label="Total Products"  value={stats.totalInventoryItems}      color="#0D1B3E" icon="📦" sub="Product types" />
-            <StatCard label="Total Stock"     value={stats.totalStock.toLocaleString()} color="#2563eb" icon="🏭" sub="Units in warehouse" />
-            <StatCard label="Low Stock Alert" value={stats.lowStockItems}             color="#e05252" icon="⚠️" sub="Below threshold" badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="Product Types" value={stats.totalInventoryItems} color="#0D1B3E" icon="📦" sub="Distinct products in inventory" />
+            <StatCard label="Units On Hand" value={stats.totalStock.toLocaleString()} color="#2563eb" icon="🏭" sub="Current physical stock" />
+            <StatCard label="Low-stock Products" value={stats.lowStockItems} color="#e05252" icon="⚠️" sub="At or below threshold" badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
+            <StatCard label="Inventory Cost Value" value={fmt(stats.totalInventoryCost)} color="#1a7a4a" icon="💰" sub={`${accountLabel} acquisition cost × on-hand units`} />
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
               <p className="text-sm font-bold text-[#0D1B3E]">Inventory Status</p>
             </div>
             <div className="grid grid-cols-4 px-5 py-2 bg-[#f8f9fc]">
-              {['Product', 'Stock', 'Threshold', 'Status'].map(h => <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>)}
+              {['Product', 'Stock', 'Threshold', 'Status'].map(h => <p key={h} className="text-sm text-[#667085] uppercase tracking-wide font-bold">{h}</p>)}
             </div>
             {stats.inventoryItems.length === 0 ? (
               <p className="text-center text-gray-400 text-sm py-10">No inventory yet</p>
             ) : stats.inventoryItems.map((item, i) => {
               const isLow = item.quantity <= item.low
-              const pct   = Math.min(100, Math.round((item.quantity / (item.low * 3 || 1)) * 100))
+              const difference = item.quantity - item.low
               return (
-                <div key={i} className="grid grid-cols-4 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
-                  <p className="text-xs font-semibold text-[#0D1B3E] truncate">{item.name}</p>
+                <div key={`${item.name}-${i}`} className="grid grid-cols-4 px-5 py-3 border-b border-[#0D1B3E]/5 hover:bg-[#f8f9fc] items-center">
+                  <p className="text-sm font-semibold text-[#0D1B3E] truncate">{item.name}</p>
                   <p className="text-xs font-bold" style={{ color: isLow ? '#e05252' : '#1a7a4a' }}>{item.quantity.toLocaleString()}</p>
                   <p className="text-xs text-gray-400">{item.low.toLocaleString()}</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-[#f1f5f9] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isLow ? '#e05252' : '#1a7a4a' }} />
-                    </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={`text-xs font-semibold ${isLow ? 'text-[#a03030]' : 'text-[#1a7a4a]'}`}>
+                      {difference > 0 ? `${difference.toLocaleString()} units above threshold` : difference === 0 ? 'At threshold' : `${Math.abs(difference).toLocaleString()} units below threshold`}
+                    </span>
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${isLow ? 'bg-[#fdecea] text-[#e05252]' : 'bg-[#e8f7ef] text-[#1a7a4a]'}`}>
                       {isLow ? 'Low' : 'OK'}
                     </span>

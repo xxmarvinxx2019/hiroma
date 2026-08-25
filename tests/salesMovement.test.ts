@@ -27,7 +27,7 @@ test("company contribution is separated from network chain turnover", () => {
   assert.match(route, /pin_allocation/);
   assert.match(route, /Network turnover counts each delivered seller-to-buyer transaction/);
   assert.match(page, /Admin product gross profit \+ PIN allocation/);
-  assert.match(page, /not unique end-customer revenue/);
+  assert.match(page, /not unique\s+end-customer revenue/);
 });
 
 test("movement details are filtered before bounded pagination", () => {
@@ -66,9 +66,9 @@ test("future analysis supports exact distributor and standardized geographic fil
 test("analysis UI separates distributor sales and purchases and explains area attribution", () => {
   assert.match(page, /Distributor Analysis/);
   assert.match(page, /Area Analysis/);
-  assert.match(page, /Filter by distributor type, then search by name, username, or registered coverage area/);
-  assert.match(page, /Sales are attributed to the seller&apos;s registered coverage area/);
-  assert.match(page, /Admin-direct sales are reported separately in Overview/);
+  assert.match(page, /Filter by distributor type, then search by name, username, or\s+registered coverage area/);
+  assert.match(page, /Actual Sales follows the seller\/outlet/);
+  assert.match(page, /Admin-direct sales are reported separately in Overview\s+because Admin has no single geographic coverage area/);
 });
 
 test("distributor analysis uses a scalable type filter and searchable area-aware combobox", () => {

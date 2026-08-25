@@ -31,6 +31,7 @@ const ROLE_ROUTES: Record<string, string> = {
 const PUBLIC_ROUTES = ['/', '/login', '/login/member', '/login/distributor', '/login/admin', '/forgot-password', '/support']
 
 function requiredStaffPermission(pathname: string, method: string): string | null {
+  if (pathname.startsWith('/dashboard/area-manager') || pathname.startsWith('/api/area-manager')) return 'area_audits'
   const adminPermission = adminStaffPermissionForPath(pathname, method)
   if (adminPermission !== null) return adminPermission
   if (pathname.startsWith('/dashboard/city/support-center') || pathname.startsWith('/dashboard/admin/support-center') || pathname.startsWith('/api/admin/support-requests') || pathname.startsWith('/api/support/tickets')) return 'support_center'
@@ -104,6 +105,9 @@ export async function middleware(req: NextRequest) {
     }
 
     if (payload.is_staff === true) {
+      if (payload.staff_type === 'area_manager' && pathname.startsWith('/dashboard/') && !pathname.startsWith('/dashboard/area-manager')) {
+        return NextResponse.redirect(new URL('/dashboard/area-manager', req.url))
+      }
       const requiredPermission = requiredStaffPermission(pathname, req.method)
       const permissions = Array.isArray(payload.permissions) ? payload.permissions : []
       const hasPermission = !requiredPermission || requiredPermission.split('|').some((permission) => permissions.includes(permission))

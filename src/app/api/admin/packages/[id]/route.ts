@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { PRODUCT_BINARY_BASE_POINTS } from '@/app/lib/productBinaryQuarter'
 
 // ── PUT update package ──
 export async function PUT(
@@ -19,8 +20,6 @@ export async function PUT(
       price,
       direct_referral_bonus,
       pairing_bonus_value,
-      point_php_value,
-      point_reset_days,
       daily_product_pairing_cap,
       product_binary_cap_enabled,
       direct_referral_cap_enabled,
@@ -40,8 +39,8 @@ export async function PUT(
           price,
           direct_referral_bonus,
           pairing_bonus_value,
-          point_php_value,
-          point_reset_days: point_reset_days || 30,
+          point_php_value: PRODUCT_BINARY_BASE_POINTS,
+          point_reset_days: 90,
         },
       })
 

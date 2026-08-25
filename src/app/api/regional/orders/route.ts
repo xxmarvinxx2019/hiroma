@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.$transaction(async (tx) => {
       await reserveOrderStock(tx, supplier.id, items)
-      return tx.order.create({ data: {
+      const created = await tx.order.create({ data: {
         buyer_id:            user.id,
         seller_id:           supplier.id,
         order_type,
@@ -180,6 +180,21 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
       })
+      const adminRecipients = await tx.user.findMany({
+        where: { role: 'admin' },
+        select: { id: true },
+      })
+      await tx.notification.createMany({ data: adminRecipients.map((admin) => ({
+        user_id: admin.id,
+        type: 'order_pending',
+        title: 'New pending order',
+        message: `${user.full_name || user.username} placed a Regional Distributor order worth ₱${total_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+        amount: total_amount,
+        entity_type: 'order',
+        entity_id: created.id,
+        action_url: '/dashboard/admin/orders',
+      })) })
+      return created
     })
     return NextResponse.json({
       success: true,

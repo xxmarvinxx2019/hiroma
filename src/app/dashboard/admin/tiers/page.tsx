@@ -157,8 +157,13 @@ export default function TierSettingsPage() {
         </div>
       </div>
 
-      {/* ── PU Reset Date (Global) ── */}
-      <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden mb-6">
+      <div className="mb-6 rounded-xl border border-[#C9A84C]/30 bg-[#fffaf0] p-5">
+        <h3 className="text-sm font-semibold text-[#0D1B3E]">Product Binary qualification resets quarterly</h3>
+        <p className="mt-1 text-xs leading-5 text-gray-500">Q1 starts January 1, Q2 April 1, Q3 July 1, and Q4 October 1 (Asia/Manila). Personal qualification PU and rank return to Base automatically; left/right Product Binary carryover remains separate.</p>
+      </div>
+
+      {/* Legacy annual reset controls retained invisibly for data compatibility. */}
+      <div className="hidden" aria-hidden="true">
         <div className="bg-[#010521] px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-white font-semibold text-sm">Product Points Reset Date</h3>
@@ -309,33 +314,15 @@ export default function TierSettingsPage() {
                   {/* Point PHP value */}
                   <div className="bg-[#F0F2F8] rounded-lg p-4">
                     <p className="text-xs text-gray-400 mb-2">Product point value</p>
-                    {editing === pkg.id ? (
-                      <div className="flex items-center gap-1">
-                        <input type="number" value={form.point_php_value || ''}
-                          onChange={(e) => setForm({ ...form, point_php_value: Number(e.target.value) })}
-                          className="flex-1 bg-white border border-[#C9A84C] rounded px-2 py-1 text-sm font-semibold text-[#0D1B3E] outline-none w-full" />
-                        <span className="text-xs text-gray-400">pts</span>
-                      </div>
-                    ) : (
-                      <p className="text-xl font-semibold text-[#C9A84C]">{Number(pkg.point_php_value).toLocaleString()}</p>
-                    )}
-                    <p className="text-xs text-gray-400 mt-1">pts per reorder</p>
+                    <p className="text-xl font-semibold text-[#C9A84C]">10</p>
+                    <p className="text-xs text-gray-400 mt-1">points = ₱5 base/pair</p>
                   </div>
 
                   {/* Point reset days */}
                   <div className="bg-[#F0F2F8] rounded-lg p-4">
                     <p className="text-xs text-gray-400 mb-2">Point reset period</p>
-                    {editing === pkg.id ? (
-                      <div className="flex items-center gap-1">
-                        <input type="number" value={form.point_reset_days || ''}
-                          onChange={(e) => setForm({ ...form, point_reset_days: Number(e.target.value) })}
-                          className="flex-1 bg-white border border-[#C9A84C] rounded px-2 py-1 text-sm font-semibold text-[#0D1B3E] outline-none w-full" />
-                        <span className="text-xs text-gray-400">days</span>
-                      </div>
-                    ) : (
-                      <p className="text-xl font-semibold text-[#0D1B3E]">{pkg.point_reset_days}</p>
-                    )}
-                    <p className="text-xs text-gray-400 mt-1">days per reset</p>
+                    <p className="text-xl font-semibold text-[#0D1B3E]">Quarterly</p>
+                    <p className="text-xs text-gray-400 mt-1">Q1 · Q2 · Q3 · Q4</p>
                   </div>
 
                   {/* Daily product pairing cap */}
@@ -364,7 +351,7 @@ export default function TierSettingsPage() {
                       { label: 'Daily referral cap',  value: '10 / day → overflow to Hiroma' },
                       { label: 'Daily pairs cap',     value: '10 / day → overflow to Hiroma' },
                       { label: 'Name cap',            value: 'Max 7 accounts per name' },
-                      { label: 'PU reset',            value: `Every ${MONTHS.find(m => m.value === puReset.pu_reset_month)?.label} ${puReset.pu_reset_day}` },
+                      { label: 'Qualification season', value: 'Quarterly · Q1/Q2/Q3/Q4' },
                     ].map((rule) => (
                       <div key={rule.label} className="bg-[#eef0f8] rounded-lg px-3 py-2">
                         <span className="text-xs text-[#0D1B3E] font-medium">{rule.label}: </span>

@@ -14,7 +14,17 @@ interface Stats {
   rank: {
     current: string; total_pu: number
     ranks: { id: string; name: string; sequence: number; required_pu: number; pair_income: number }[]
-    active_period: { start_date: string; end_date: string } | null
+    quarter: { year: number; quarter: number; label: string; start: string; endExclusive: string }
+  }
+  product_binary: {
+    leftPu: number; rightPu: number; readyPairs: number
+    left_total_pu: number; right_total_pu: number
+    leftNeeded: number; rightNeeded: number; focusSide: 'left' | 'right' | 'both'
+    pu_per_leg: number; lifetime_pairs: number
+  }
+  daily_inspiration: {
+    enabled: boolean; hidden_today: boolean
+    quote: { date: string; text: string; author: string; source?: string; category: string }
   }
   points:    { total: number; reset_at: string | null; php_value: number }
   referrals: { today: number; remaining: number; cap: number; cap_enabled: boolean }
@@ -36,6 +46,7 @@ const fmtShort = (n: number) => {
   if (n >= 1000)    return `₱${(n/1000).toFixed(1)}K`
   return fmt(n)
 }
+const titleCase = (value: string) => value.replace(/\b\w/g, (letter) => letter.toUpperCase())
 
 const COMM_LABELS: Record<string, string> = {
   direct_referral: 'Direct Referral',
@@ -52,15 +63,6 @@ const COMM_ICONS: Record<string, string> = {
   binary_pairing:  '🔗',
   sponsor_point:   '⭐',
 }
-
-const RANK_PALETTE = [
-  { bg: '#fef6e4', text: '#9a6f1e', bar: '#C9A84C', light: '#fef6e4' },
-  { bg: '#f0f2f5', text: '#6b7280', bar: '#9ca3af', light: '#f0f2f5' },
-  { bg: '#fef9ee', text: '#b7860b', bar: '#eab308', light: '#fef9ee' },
-  { bg: '#f0f7ff', text: '#2563eb', bar: '#2563eb', light: '#f0f7ff' },
-  { bg: '#e8f7ef', text: '#1a7a4a', bar: '#1a7a4a', light: '#e8f7ef' },
-]
-const BASE_COLORS = { bg: '#eef0f8', text: '#0D1B3E', bar: '#010521', light: '#eef0f8' }
 
 // ── Donut Chart ──
 function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
@@ -144,6 +146,7 @@ export default function ResellerDashboardPage() {
   const [dataSearchResults, setDataSearchResults] = useState<GlobalSearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const [dashboardLoadedAt] = useState(() => Date.now())
 
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -219,9 +222,6 @@ export default function ResellerDashboardPage() {
 
   const walletBal     = stats.wallet?.balance        || 0
   const walletEarned  = stats.wallet?.total_earned   || 0
-  const totalPoints   = stats.points?.total          || 0
-  const phpValue      = stats.points?.php_value      || 0
-  const pointsValue   = totalPoints * phpValue * 0.5
   const leftCount     = stats.tree?.left_count       || 0
   const rightCount    = stats.tree?.right_count      || 0
   const refToday      = stats.referrals?.today       || 0
@@ -238,13 +238,20 @@ export default function ResellerDashboardPage() {
   const totalPU        = stats.rank?.total_pu || 0
   const currentRankObj = ranks.find(r => r.name === stats.rank?.current) || null
   const nextRank       = currentRankObj ? ranks[ranks.indexOf(currentRankObj) + 1] || null : ranks[0] || null
-  const effectivePts   = currentRankObj ? Number(currentRankObj.pair_income) : (stats.package?.point_php_value || 5)
-  const rankColors     = currentRankObj ? (RANK_PALETTE[(currentRankObj.sequence - 1) % RANK_PALETTE.length] || RANK_PALETTE[0]) : BASE_COLORS
-  const progressPct    = !stats.rank?.active_period ? 0 : !nextRank ? 100
+  const effectivePts   = currentRankObj ? Number(currentRankObj.pair_income) : 10
+  const progressPct    = !nextRank ? 100
     : currentRankObj
     ? Math.min(100, Math.round(((totalPU - currentRankObj.required_pu) / (nextRank.required_pu - currentRankObj.required_pu)) * 100))
     : Math.min(100, Math.round((totalPU / (nextRank.required_pu || 1)) * 100))
   const puToNext = nextRank ? Math.max(0, nextRank.required_pu - totalPU) : 0
+  const quarterDaysLeft = stats.rank?.quarter?.endExclusive
+    ? Math.max(0, Math.ceil((new Date(stats.rank.quarter.endExclusive).getTime() - dashboardLoadedAt) / 86_400_000))
+    : null
+  const productBinary = stats.product_binary || {
+    leftPu: 0, rightPu: 0, readyPairs: 0, leftNeeded: 2, rightNeeded: 2,
+    left_total_pu: 0, right_total_pu: 0,
+    focusSide: 'both' as const, pu_per_leg: 2, lifetime_pairs: 0,
+  }
 
   // Donut data
   const donutData = [
@@ -328,7 +335,7 @@ export default function ResellerDashboardPage() {
               <div className={styles.earningProgress}><i style={{ width: `${Math.min(100, (refToday / Math.max(1, refCap)) * 100)}%` }} /></div>
             </article>
             <article className={styles.balanceCard}>
-              <span>▣ Total Wallet Balance</span>
+              <span>▣ Available Wallet Balance</span>
               <strong>{fmt(walletBal)}</strong>
               <Link href="/dashboard/reseller/wallet">Withdraw</Link>
               <div className={styles.walletSignal} aria-hidden="true"><i /><i /><i /></div>
@@ -502,7 +509,7 @@ export default function ResellerDashboardPage() {
 
         <section className={`${styles.testingHeroMetric} ${styles.testingWalletMetric}`}>
           <div className={styles.testingMetricIcon} aria-hidden="true">💳</div>
-          <span>Total Wallet<br />Balance</span>
+          <span>Available Wallet<br />Balance</span>
           <strong>{fmt(walletBal)}</strong>
           <Link href="/dashboard/reseller/wallet">Withdraw →</Link>
         </section>
@@ -522,7 +529,18 @@ export default function ResellerDashboardPage() {
             </span>
           )}
         </div>
-        <div className="relative z-10 flex items-center gap-3">
+        <div className="relative z-10 flex flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
+          {stats.daily_inspiration?.enabled && !stats.daily_inspiration.hidden_today && (
+            <Link href="/dashboard/reseller/daily-inspiration" className="group relative mx-auto flex max-w-lg flex-1 flex-col items-center px-4 py-2 text-center lg:px-6">
+              <span aria-hidden="true" className="absolute -top-3 text-6xl font-serif leading-none text-[#C9A84C]/30">“</span>
+              <p className="relative text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e7cb7a]">✨ Daily Inspiration</p>
+              <blockquote className="relative mt-2 text-sm font-semibold leading-5 text-white/90 transition-colors group-hover:text-white sm:text-base sm:leading-6 lg:text-[17px]">{stats.daily_inspiration.quote.text}</blockquote>
+              <p className="relative mt-2 text-[11px] text-white/50">
+                — {stats.daily_inspiration.quote.author}{stats.daily_inspiration.quote.source ? ` · ${stats.daily_inspiration.quote.source}` : ''} ·{' '}
+                <span className="group-hover:text-[#e7cb7a]">Reflect →</span>
+              </p>
+            </Link>
+          )}
           {/* Potential Earnings */}
           <div className="bg-white/8 backdrop-blur rounded-2xl px-5 py-4 border border-white/10">
             <div className="flex items-center gap-2 mb-1">
@@ -541,7 +559,7 @@ export default function ResellerDashboardPage() {
 
           {/* Wallet */}
           <div className="bg-white/8 backdrop-blur rounded-2xl px-5 py-4 border border-white/10 text-right">
-            <p className="text-white/50 text-xs mb-1">Total Wallet Balance</p>
+            <p className="text-white/50 text-xs mb-1">Available Wallet Balance</p>
             <p className="text-2xl font-bold text-white">{fmt(walletBal)}</p>
             <Link href="/dashboard/reseller/wallet"
               className="inline-block mt-2 bg-[#C9A84C] text-[#0D1B3E] text-xs px-4 py-1.5 rounded-full font-bold hover:bg-[#b8953f] transition-colors">
@@ -551,11 +569,25 @@ export default function ResellerDashboardPage() {
         </div>
       </div>
 
+      {/* Clear first-time order entry point */}
+      <div className="rounded-2xl border border-[#C9A84C]/40 bg-gradient-to-r from-[#fffaf0] to-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 rounded-xl bg-[#C9A84C]/15 flex items-center justify-center text-2xl flex-shrink-0">🛒</div>
+          <div>
+            <p className="text-base font-bold text-[#0D1B3E]">Need to order Hiroma products?</p>
+            <p className="text-sm leading-5 text-gray-600 mt-1">Choose pickup from a nearby Hiroma partner or request nationwide delivery from Hiroma Main.</p>
+          </div>
+        </div>
+        <Link href="/dashboard/reseller/orders#place-order" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#b8963e] transition-colors whitespace-nowrap">
+          Place an Order →
+        </Link>
+      </div>
+
       {/* ── Top Stat Cards ── */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${styles.statGrid}`}>
         {[
           { label: 'Total Earned',     value: fmt(walletEarned),            sub: 'Lifetime earnings', color: '#168052', foreground: '#FFFFFF', icon: '💰', href: '/dashboard/reseller/wallet' },
-          { label: 'Total Points',     value: totalPoints.toLocaleString(), sub: `≈ ${fmt(pointsValue)}`, color: '#A17820', foreground: '#FFFFFF', icon: '⭐', href: '/dashboard/reseller/points' },
+          { label: 'Available Balance', value: fmt(walletBal),              sub: 'Ready to withdraw', color: '#A17820', foreground: '#FFFFFF', icon: '💳', href: '/dashboard/reseller/wallet' },
           { label: 'Left Affiliates',  value: leftCount.toLocaleString(),   sub: 'Affiliate members', color: '#2563EB', foreground: '#FFFFFF', icon: '👥', href: '/dashboard/reseller/tree' },
           { label: 'Right Affiliates', value: rightCount.toLocaleString(),  sub: 'Affiliate members', color: '#7C3AED', foreground: '#FFFFFF', icon: '👥', href: '/dashboard/reseller/tree' },
         ].map((s) => (
@@ -585,74 +617,70 @@ export default function ResellerDashboardPage() {
       </div>
 
       {/* ── Middle Row ── */}
-      <div className={`grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-4 ${styles.middleGrid}`}>
+      <div className={`grid grid-cols-1 items-start gap-4 md:grid-cols-3 xl:grid-cols-3 ${styles.middleGrid}`}>
 
         {/* Rank Progress */}
-        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.rankPanel}`}>
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-semibold text-[#0D1B3E]">Rank Progress</p>
-            {stats.rank?.active_period && (
-              <span className="text-[10px] text-[#1a7a4a] bg-[#e8f7ef] px-2 py-0.5 rounded-full">Active</span>
-            )}
+        <div className={`${styles.panel} ${styles.rankPanel} ${styles.rankCommandCard}`}>
+          <div className={styles.rankGlow} aria-hidden="true" />
+          <div className="relative z-[1] flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e5c66f]">Quarterly Growth Mission</p>
+              <p className="mt-1 text-base font-bold text-white">Rank Advancement</p>
+            </div>
+            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-semibold text-white/80">{stats.rank?.quarter?.label || 'Current quarter'}</span>
           </div>
 
-          {/* Current rank display */}
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
-              style={{ backgroundColor: rankColors.light }}>
-              🏅
+          <div className="relative z-[1] mt-5 grid grid-cols-[104px_1fr] items-center gap-4">
+            <div className={styles.rankProgressRing} style={{ '--rank-progress': `${progressPct * 3.6}deg` } as React.CSSProperties}>
+              <div>
+                <strong>{progressPct}%</strong>
+                <span>complete</span>
+              </div>
             </div>
-            <div className="flex-1">
-              <p className="text-[10px] text-gray-400 uppercase tracking-wide">Current Rank</p>
-              <p className="text-xl font-bold" style={{ color: rankColors.text }}>
-                {currentRankObj ? currentRankObj.name : (stats.package?.name || 'Base')}
-              </p>
-              {nextRank && (
-                <p className="text-[10px] text-gray-400">
-                  Next: <span className="font-medium text-[#0D1B3E]">{nextRank.name}</span>
-                </p>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-white/45">Current Rank</p>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-2xl" aria-hidden="true">🏅</span>
+                <p className="truncate text-2xl font-extrabold text-white">{titleCase(currentRankObj ? currentRankObj.name : (stats.package?.name || 'Base'))}</p>
+              </div>
+              {nextRank ? (
+                <p className="mt-2 text-xs leading-5 text-white/65">Next milestone: <strong className="text-[#f2d57e]">{titleCase(nextRank.name)}</strong> · {puToNext} PU remaining</p>
+              ) : (
+                <p className="mt-2 text-xs font-semibold text-[#f2d57e]">Top quarterly rank achieved 🎉</p>
               )}
             </div>
-            {nextRank && (
-              <div className="text-right">
-                <p className="text-2xl font-bold text-[#0D1B3E]">{progressPct}%</p>
-                <p className="text-[10px] text-gray-400">Progress</p>
-              </div>
-            )}
           </div>
 
-          {/* Progress bar */}
-          <div className="mb-3">
-            <div className="w-full h-3 rounded-full bg-[#f1f5f9] overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${progressPct}%`, backgroundColor: rankColors.bar }} />
-            </div>
-            <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+          <div className="relative z-[1] mt-5 grid grid-cols-3 gap-2">
+            <div className={styles.rankMetric}><span>Personal PU</span><strong>{totalPU}</strong></div>
+            <div className={styles.rankMetric}><span>Days Left</span><strong>{quarterDaysLeft ?? '—'}</strong></div>
+            <div className={styles.rankMetric}><span>Pair Rate</span><strong>₱{(effectivePts * 0.5).toFixed(0)}</strong></div>
+          </div>
+
+          <div className="relative z-[1] mt-4">
+            <div className="flex items-center justify-between text-[10px] text-white/55">
               <span>{totalPU} PU earned</span>
-              {nextRank
-                ? <span>{puToNext} PU to {nextRank.name}</span>
-                : <span className="text-[#C9A84C]">Max Rank! 🎉</span>
-              }
+              <span>{nextRank ? `${nextRank.required_pu} PU goal` : 'Goal completed'}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+              <div className={styles.rankGoldProgress} style={{ width: `${progressPct}%` }} />
             </div>
           </div>
 
-          {/* Pair income */}
-          <div className="bg-[#f8f9fc] rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-gray-400">Pair Income Rate</p>
-              <p className="text-base font-bold text-[#0D1B3E]">{effectivePts} pts<span className="text-xs font-normal text-gray-400"> = ₱{(effectivePts * 0.5).toFixed(2)}/pair</span></p>
+          <div className="relative z-[1] mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1 text-xs leading-5 text-white/65">
+              {nextRank ? <><strong className="text-white">Earn {puToNext} more Personal PU</strong> to reach {titleCase(nextRank.name)}. Product quantity depends on each product&apos;s PU value.</> : <>Maintain eligible purchases for the next quarterly season.</>}
             </div>
-            {!stats.rank?.active_period && (
-              <span className="text-[10px] text-[#a03030] bg-[#fdecea] px-2 py-1 rounded-lg">No active period</span>
-            )}
+            <Link href="/dashboard/reseller/orders#place-order" className={styles.rankShopButton}>Shop to Advance →</Link>
           </div>
+
+          <Link href="/dashboard/reseller/rank-advancement" className="relative z-[1] mt-4 block border-t border-white/10 pt-3 text-center text-[11px] font-semibold text-[#e5c66f] hover:text-white">View complete rank journey and rules →</Link>
         </div>
 
         {/* Team Overview */}
-        <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.teamPanel}`}>
+        <div className={`flex flex-col bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.teamPanel}`}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Team Overview</p>
-            <Link href="/dashboard/reseller/tree" className="text-[10px] text-[#C9A84C] hover:underline">View Tree →</Link>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -683,17 +711,55 @@ export default function ResellerDashboardPage() {
             </div>
           </div>
 
-          <Link href="/dashboard/reseller/tree"
-            className="mt-4 w-full flex items-center justify-center gap-2 bg-[#010521] text-white text-xs font-medium py-2 rounded-xl hover:bg-[#0a1233] transition-colors">
-            <span>🌳</span> View Binary Tree
-          </Link>
+          <div className="mt-4 rounded-xl border border-[#dbe7ff] bg-[#f6f9ff] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-[#0D1B3E]">Product Binary PU Balance</p>
+                <p className="mt-0.5 text-[10px] text-gray-500">Verified team carryover · read-only</p>
+              </div>
+              <span className="rounded-full bg-[#0D1B3E] px-2.5 py-1 text-[10px] font-bold text-white">2 + 2 PU = 1 pair</span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-blue-100 bg-white p-2.5">
+                <span className="text-[10px] font-medium text-blue-600">TOTAL LEFT PRODUCT PU</span>
+                <p className="mt-1 text-xl font-bold text-[#0D1B3E]">{productBinary.left_total_pu} <small className="text-xs font-medium text-gray-400">PU</small></p>
+                <p className="mt-1 text-[10px] text-gray-500">{productBinary.leftPu} PU available carryover</p>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-white p-2.5">
+                <span className="text-[10px] font-medium text-amber-700">TOTAL RIGHT PRODUCT PU</span>
+                <p className="mt-1 text-xl font-bold text-[#0D1B3E]">{productBinary.right_total_pu} <small className="text-xs font-medium text-gray-400">PU</small></p>
+                <p className="mt-1 text-[10px] text-gray-500">{productBinary.rightPu} PU available carryover</p>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center justify-between border-t border-[#dbe7ff] pt-2 text-[10px] text-gray-500">
+              <span>Lifetime completed pairs</span>
+              <strong className="text-[#0D1B3E]">{productBinary.lifetime_pairs.toLocaleString()}</strong>
+            </div>
+            <div className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 text-[10px] leading-4 text-gray-500">
+              <span>Team carryover forms Product Binary pairs; your own purchase PU determines your quarterly rank.</span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Link href="/dashboard/reseller/tree"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#010521] py-3 text-xs font-semibold text-white transition-colors hover:bg-[#0a1233]">
+              <span>🌳</span> View Package Binary
+            </Link>
+            <Link href="/dashboard/reseller/tree?mode=product"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#010521] py-3 text-xs font-semibold text-white transition-colors hover:bg-[#0a1233]">
+              <span>🔗</span> View Product Binary
+            </Link>
+          </div>
         </div>
 
         {/* Daily Referral Cap + Quick Actions */}
         <div className={`space-y-4 ${styles.sideStack}`}>
           {/* Referral cap */}
           <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.referralPanel}`}>
-            <p className="text-sm font-semibold text-[#0D1B3E] mb-3">Daily Referral Cap</p>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-[#0D1B3E]">Daily Referral Goal</p>
+              <Link href="/dashboard/reseller/digital-id" className="text-[11px] font-semibold text-[#9a6f1e] hover:underline">Invite →</Link>
+            </div>
             <div className="flex items-center gap-4">
               <CircularProgress value={refCapEnabled ? refToday : 0} max={refCap} label={refCapEnabled ? 'Per Day' : 'No Cap'} />
               <div className="flex-1">
@@ -702,6 +768,7 @@ export default function ResellerDashboardPage() {
                 <p className="text-[10px] text-gray-300 mt-1">
                   {refCapEnabled && refRemaining === 0 ? 'Cap reached. Resets tomorrow.' : `${refToday} credited today`}
                 </p>
+                <p className="mt-2 text-xs font-semibold text-[#168052]">Up to {fmt(potentialEarnings)} potential earnings</p>
               </div>
             </div>
           </div>
@@ -712,19 +779,19 @@ export default function ResellerDashboardPage() {
             <div className="grid grid-cols-3 gap-2">
               {[
                 { label: 'Wallet',    href: '/dashboard/reseller/wallet',    icon: '💸', color: '#C9A84C' },
-                { label: 'Orders',    href: '/dashboard/reseller/orders',    icon: '🛒', color: '#2563eb' },
+                { label: 'Place Order', href: '/dashboard/reseller/orders#place-order', icon: '🛒', color: '#2563eb' },
                 { label: 'Tree',      href: '/dashboard/reseller/tree',      icon: '🌳', color: '#1a7a4a' },
                 { label: 'Points',    href: '/dashboard/reseller/points',    icon: '⭐', color: '#9a6f1e' },
                 { label: 'Commissions', href: '/dashboard/reseller/commissions', icon: '📊', color: '#8b5cf6' },
                 { label: 'Profile',   href: '/dashboard/reseller/profile',   icon: '👤', color: '#6b7280' },
               ].map((q) => (
                 <Link key={q.href} href={q.href}
-                  className="flex flex-col items-center gap-1 p-2 rounded-xl hover:bg-[#f8f9fc] transition-colors group">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent p-2 transition-all hover:border-[#0D1B3E]/5 hover:bg-[#f8f9fc] group">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl text-xl"
                     style={{ backgroundColor: q.color + '15' }}>
                     {q.icon}
                   </div>
-                  <p className="text-[10px] text-gray-400 group-hover:text-[#0D1B3E] text-center leading-tight">{q.label}</p>
+                  <p className="text-[11px] font-medium text-gray-500 group-hover:text-[#0D1B3E] text-center leading-tight">{q.label}</p>
                 </Link>
               ))}
             </div>
@@ -813,11 +880,11 @@ const DASHBOARD_SEARCH_ITEMS = [
   { id: 'nav-dashboard', title: 'Dashboard overview', description: 'Account summary and performance', href: '/dashboard/reseller', keywords: 'home overview account performance', category: 'Page' },
   { id: 'nav-tree', title: 'Binary Tree', description: 'View your left and right affiliate network', href: '/dashboard/reseller/tree', keywords: 'genealogy left right network team downline', category: 'Page' },
   { id: 'nav-affiliates', title: 'Affiliates', description: 'View your registered affiliates', href: '/dashboard/reseller/genealogy', keywords: 'referrals members genealogy downline', category: 'Page' },
-  { id: 'nav-rank', title: 'Rank Advancement', description: 'Review PU and rank progress', href: '/dashboard/reseller/points', keywords: 'rank points pu bronze silver gold progress', category: 'Page' },
+  { id: 'nav-rank', title: 'Rank Advancement', description: 'Review your quarterly PU goal and rank progress', href: '/dashboard/reseller/rank-advancement', keywords: 'rank points pu bronze silver gold progress quarter goal', category: 'Page' },
   { id: 'nav-wallet', title: 'Wallet & Earnings', description: 'Balances and commission history', href: '/dashboard/reseller/wallet', keywords: 'wallet balance income earnings commission direct referral binary product binary', category: 'Page' },
   { id: 'nav-payouts', title: 'Payouts', description: 'Track withdrawal and payout status', href: '/dashboard/reseller/payouts', keywords: 'withdraw withdrawal released pending approved rejected cash', category: 'Page' },
   { id: 'nav-payment', title: 'Payment Method', description: 'Manage your approved payout account', href: '/dashboard/reseller/payment-methods', keywords: 'gcash bank account payment payout method', category: 'Page' },
-  { id: 'nav-orders', title: 'My Orders', description: 'Place and monitor product orders', href: '/dashboard/reseller/orders', keywords: 'orders history products pending processing delivered cancelled supplier', category: 'Page' },
+  { id: 'nav-orders', title: 'Shop / Place Order', description: 'Order products or review your order history', href: '/dashboard/reseller/orders#place-order', keywords: 'shop place order buy products history pickup delivery pending processing delivered', category: 'Page' },
   { id: 'nav-notifications', title: 'Notifications', description: 'See commissions and account updates', href: '/dashboard/reseller/notifications', keywords: 'alerts updates bell unread activity', category: 'Page' },
 ] as const
 

@@ -48,6 +48,7 @@ export default function PinsPage() {
   const [cancelling, setCancelling]   = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  const [cancelReason, setCancelReason] = useState('')
   const [distSearch, setDistSearch]   = useState('')
   const [showDistDrop, setShowDistDrop] = useState(false)
 
@@ -141,10 +142,29 @@ export default function PinsPage() {
 
   const handleBulkCancel = async () => {
     if (!selectedIds.length) return
+    const reason = cancelReason.trim()
+    if (reason.length < 3) {
+      setCancelError('Please enter a clear cancellation reason (at least 3 characters).')
+      return
+    }
     setCancelling(true)
-    await fetch('/api/admin/pins', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin_ids: selectedIds, action: 'cancel' }) })
-    setSelectedIds([]); setShowConfirm(false); setCancelling(false)
-    fetchPins()
+    setCancelError('')
+    try {
+      const response = await fetch('/api/admin/pins', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin_ids: selectedIds, reason }) })
+      const data = await response.json()
+      if (!response.ok || data.cancelled !== selectedIds.length) {
+        setCancelError(data.error || 'The selected PINs were not fully cancelled. Refresh and try again.')
+        return
+      }
+      setSelectedIds([])
+      setCancelReason('')
+      setShowConfirm(false)
+      await fetchPins()
+    } catch {
+      setCancelError('Unable to cancel PINs. Check your connection and try again.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   const exportCSV = () => {
@@ -253,7 +273,7 @@ export default function PinsPage() {
           </div>
           <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
-              <button onClick={() => setShowConfirm(true)}
+              <button onClick={() => { setCancelError(''); setCancelReason(''); setShowConfirm(true) }}
                 className="text-xs bg-[#fdecea] text-[#e05252] px-3 py-1.5 rounded-lg font-medium hover:bg-[#e05252] hover:text-white transition-colors">
                 Cancel {selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}
               </button>
@@ -489,9 +509,20 @@ export default function PinsPage() {
                 <p className="text-xs text-gray-400 mt-0.5">This action cannot be undone</p>
               </div>
             </div>
+            <div className="mb-3 rounded-xl border border-[#e05252]/15 bg-[#fff8f7] px-3 py-2">
+              <p className="text-[11px] font-semibold text-[#0D1B3E] mb-1">Selected PINs</p>
+              <p className="max-h-20 overflow-y-auto break-all font-mono text-[11px] leading-5 text-gray-600">
+                {pins.filter((pin) => selectedIds.includes(pin.id)).map((pin) => pin.pin_code).join(', ')}
+              </p>
+            </div>
+            <label className="block text-xs font-semibold text-[#0D1B3E] mb-1" htmlFor="pin-cancellation-reason">Cancellation reason</label>
+            <textarea id="pin-cancellation-reason" value={cancelReason} maxLength={500} rows={3}
+              onChange={(event) => { setCancelReason(event.target.value); setCancelError('') }}
+              placeholder="Example: PIN order was issued incorrectly"
+              className="mb-3 w-full resize-none rounded-xl border border-[#0D1B3E]/15 px-3 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#e05252] focus:ring-2 focus:ring-[#e05252]/10" />
             {cancelError && <p className="text-xs text-[#e05252] mb-3">{cancelError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => setShowConfirm(false)}
+              <button onClick={() => { setShowConfirm(false); setCancelError(''); setCancelReason('') }} disabled={cancelling}
                 className="flex-1 py-2 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
                 Keep PINs
               </button>

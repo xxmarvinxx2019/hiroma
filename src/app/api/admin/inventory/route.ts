@@ -149,8 +149,11 @@ export async function GET(req: NextRequest) {
     const owner_id          = searchParams.get('owner_id')          || ''
     const recipient_search  = searchParams.get('recipient_search')  || ''
     const recipient_role    = searchParams.get('recipient_role')    || 'all'
+    const recipient_scope   = searchParams.get('recipient_scope')   || 'all'
     const recipient_page    = Math.max(1, parseInt(searchParams.get('recipient_page') || '1'))
-    const recipient_size    = 10
+    // Keep the recipient picker compact. Search and pagination still cover
+    // every matching registered recipient without rendering a long dropdown.
+    const recipient_size    = 3
     const search       = searchParams.get('search')      || ''
     const stock_search = searchParams.get('stock_search')|| ''
     const type         = searchParams.get('type')        || 'all'
@@ -210,7 +213,14 @@ export async function GET(req: NextRequest) {
       prisma.user.count({
         where: {
           status: 'active',
-          role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+          ...(recipient_scope === 'branch'
+            ? { role: 'city', distributor_profile: { is: { dist_level: 'branch' } } }
+            : recipient_scope === 'sale'
+              ? {
+                  role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+                  NOT: { distributor_profile: { is: { dist_level: 'branch' } } },
+                }
+              : { role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] } }),
           ...(recipient_search && {
             OR: [
               { full_name: { contains: recipient_search, mode: 'insensitive' } },
@@ -223,7 +233,14 @@ export async function GET(req: NextRequest) {
       prisma.user.findMany({
         where: {
           status: 'active',
-          role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+          ...(recipient_scope === 'branch'
+            ? { role: 'city', distributor_profile: { is: { dist_level: 'branch' } } }
+            : recipient_scope === 'sale'
+              ? {
+                  role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] },
+                  NOT: { distributor_profile: { is: { dist_level: 'branch' } } },
+                }
+              : { role: { in: recipient_role !== 'all' ? [recipient_role as any] : ['regional', 'provincial', 'city', 'reseller'] } }),
           ...(recipient_search && {
             OR: [
               { full_name: { contains: recipient_search, mode: 'insensitive' } },
@@ -384,7 +401,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { owner_id, items, notes } = await req.json()
+    const { owner_id, items, notes, workflow } = await req.json()
 
     if (!owner_id || !items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'owner_id and items are required.' }, { status: 400 })
@@ -416,7 +433,18 @@ export async function POST(req: NextRequest) {
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
 
     const isBranchTransfer = owner.distributor_profile?.dist_level === 'branch'
+    if (workflow !== 'branch_transfer' && workflow !== 'distributor_sale') {
+      return NextResponse.json({ error: 'A valid stock workflow is required.' }, { status: 400 })
+    }
+    if (workflow === 'branch_transfer' && !isBranchTransfer) {
+      return NextResponse.json({ error: 'Internal transfers can only be sent to a Hiroma Branch.' }, { status: 400 })
+    }
+    if (workflow === 'distributor_sale' && isBranchTransfer) {
+      return NextResponse.json({ error: 'Hiroma Branch stock must use the internal transfer workflow.' }, { status: 400 })
+    }
     const priceLevel = isBranchTransfer ? 'branch' : owner.role
+    const transferId = isBranchTransfer ? crypto.randomUUID() : null
+    const transferReference = transferId ? `TRF-${transferId.slice(0, 8).toUpperCase()}` : null
     const priceField = PRICE_FIELD[priceLevel] || 'reseller_price'
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
@@ -476,6 +504,19 @@ export async function POST(req: NextRequest) {
 
     const order = await prisma.$transaction(async (tx) => {
       await consumeAvailableStock(tx, user.id, orderItems)
+      if (isBranchTransfer) {
+        await tx.inventoryTransfer.create({
+          data: {
+            id:               transferId!,
+            reference_number: transferReference!,
+            admin_id:         user.id,
+            recipient_id:     owner_id,
+            status:           'in_transit',
+            reference_value:  totalAmount,
+            notes:            notes?.trim() || null,
+          },
+        })
+      }
       const newOrder = isBranchTransfer
         ? null
         : await tx.order.create({
@@ -505,22 +546,28 @@ export async function POST(req: NextRequest) {
         const adminStockBefore = (adminInventory?.quantity ?? 0) + item.quantity
         const recipientStockBefore = recipientInventory?.quantity ?? 0
 
-        await tx.inventory.upsert({
-          where:  { owner_id_product_id: { owner_id, product_id: item.product_id } },
-          update: { quantity: { increment: item.quantity } },
-          create: {
-            owner_id,
-            product_id:          item.product_id,
-            quantity:            item.quantity,
-            low_stock_threshold: 10,
-          },
-        })
+        // Commercial assignments are immediately delivered. Internal Branch
+        // transfers remain in transit until the Branch records what physically
+        // arrived; only accepted units become sellable inventory at receiving.
+        if (!isBranchTransfer) {
+          await tx.inventory.upsert({
+            where:  { owner_id_product_id: { owner_id, product_id: item.product_id } },
+            update: { quantity: { increment: item.quantity } },
+            create: {
+              owner_id,
+              product_id:          item.product_id,
+              quantity:            item.quantity,
+              low_stock_threshold: 10,
+            },
+          })
+        }
 
         const product = productMap.get(item.product_id)!
         const unitCost = Number(product.cost_price)
         const referenceValue = item.subtotal
         const saleValue = isBranchTransfer ? 0 : referenceValue
         movements.push({
+          transfer_id:            transferId,
           admin_id:               user.id,
           recipient_id:           owner_id,
           product_id:             item.product_id,
@@ -535,12 +582,43 @@ export async function POST(req: NextRequest) {
           admin_stock_before:     adminStockBefore,
           admin_stock_after:      adminStockBefore - item.quantity,
           recipient_stock_before: recipientStockBefore,
-          recipient_stock_after:  recipientStockBefore + item.quantity,
+          recipient_stock_after:  isBranchTransfer ? recipientStockBefore : recipientStockBefore + item.quantity,
           notes:                  notes?.trim() || null,
         })
       }
 
       await tx.inventoryMovement.createMany({ data: movements })
+
+      const recipientDashboard = owner.role === 'regional'
+        ? 'regional'
+        : owner.role === 'provincial'
+          ? 'provincial'
+          : owner.role === 'reseller'
+            ? 'reseller'
+            : 'city'
+      await tx.notification.create({
+        data: isBranchTransfer
+          ? {
+              user_id:     owner.id,
+              type:        'inventory_transfer_in_transit',
+              title:       'Incoming stock transfer',
+              message:     `${orderItems.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()} unit(s) were dispatched by Hiroma Admin. Check the delivery and record good, damaged, or missing quantities before the stock becomes available.`,
+              amount:      totalAmount,
+              entity_type: 'inventory_transfer',
+              entity_id:   transferId,
+              action_url:  `/dashboard/city/transfers/${transferId}`,
+            }
+          : {
+              user_id:     owner.id,
+              type:        'order_stock_assigned',
+              title:       'Stock sale recorded by Hiroma Admin',
+              message:     `${orderItems.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()} unit(s) worth ₱${totalAmount.toLocaleString()} were assigned to your account. Tap to view the order receipt.`,
+              amount:      totalAmount,
+              entity_type: 'order',
+              entity_id:   newOrder!.id,
+              action_url:  `/dashboard/${recipientDashboard}/orders/${newOrder!.id}`,
+            },
+      })
       return newOrder
     })
 
@@ -549,9 +627,9 @@ export async function POST(req: NextRequest) {
         user_id:       user.id,
         user_name:     user.full_name,
         user_role:     user.role,
-        activity_type: 'branch_stock_transfer',
+        activity_type: 'branch_stock_dispatched',
         category:      'distributor',
-        description:   `Transferred stock from Admin to Hiroma Branch ${owner.full_name} without recording a sale.`,
+        description:   `Dispatched stock from Admin to Hiroma Branch ${owner.full_name}; inventory remains in transit pending Branch receiving.`,
         metadata: {
           recipient_id:    owner.id,
           recipient_name:  owner.full_name,
@@ -581,12 +659,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success:      true,
       message:      isBranchTransfer
-        ? `Stock transferred to ${owner.full_name}. No sale or Admin revenue was recorded.`
+        ? `Stock dispatched to ${owner.full_name}. It remains in transit until the Branch confirms the delivery.`
         : `Stock assigned to ${owner.full_name}. ₱${totalAmount.toLocaleString()} recorded.`,
       transaction_type: isBranchTransfer ? 'internal_transfer' : 'sale',
       order,
       total_amount: isBranchTransfer ? 0 : totalAmount,
       reference_value: totalAmount,
+      reference_number: transferReference,
     })
   } catch (error) {
     console.error('[ADMIN INVENTORY POST ERROR]', error)

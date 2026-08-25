@@ -289,7 +289,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { pin_ids } = await req.json()
+    const { pin_ids, reason } = await req.json()
 
     if (!pin_ids || !Array.isArray(pin_ids) || pin_ids.length === 0) {
       return NextResponse.json({ error: 'pin_ids array is required.' }, { status: 400 })
@@ -299,11 +299,21 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'pin_ids must contain valid PIN identifiers.' }, { status: 400 })
     }
 
+    const uniquePinIds = [...new Set(pin_ids as string[])]
+    const cancellationReason = typeof reason === 'string' ? reason.trim() : ''
+    if (cancellationReason.length < 3 || cancellationReason.length > 500) {
+      return NextResponse.json({ error: 'Cancellation reason must be between 3 and 500 characters.' }, { status: 400 })
+    }
+
     // Only unused PINs can be cancelled
     const pins = await prisma.pin.findMany({
-      where: { id: { in: pin_ids } },
+      where: { id: { in: uniquePinIds } },
       select: { id: true, status: true, pin_code: true },
     })
+
+    if (pins.length !== uniquePinIds.length) {
+      return NextResponse.json({ error: 'One or more selected PINs no longer exist. Refresh and try again.' }, { status: 409 })
+    }
 
     const alreadyUsed = pins.filter((p) => (p.status as string) !== 'unused')
     if (alreadyUsed.length > 0) {
@@ -312,9 +322,36 @@ export async function PATCH(req: NextRequest) {
       }, { status: 400 })
     }
 
-    const result = await prisma.pin.updateMany({
-      where: { id: { in: pin_ids }, status: 'unused' },
-      data: { status: 'cancelled' },
+    const now = new Date()
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.pin.updateMany({
+        where: { id: { in: uniquePinIds }, status: 'unused' },
+        data: {
+          status: 'cancelled',
+          cancelled_at: now,
+          cancelled_by: user.id,
+          cancellation_reason: cancellationReason,
+        },
+      })
+
+      if (updated.count !== uniquePinIds.length) {
+        throw new Error('PIN_CANCELLATION_CONFLICT')
+      }
+
+      return updated
+    })
+
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.full_name || user.username,
+      user_role: user.role,
+      member_id: formatMemberId(user.id, user.role),
+      activity_type: 'pin_cancelled',
+      category: 'pin',
+      description: `Permanently cancelled ${result.count} unused PIN${result.count > 1 ? 's' : ''}.`,
+      metadata: { pin_ids: uniquePinIds, pin_codes: pins.map((pin) => pin.pin_code), reason: cancellationReason },
+      risk_level: 'warning',
+      status: 'completed',
     })
 
     return NextResponse.json({
@@ -324,6 +361,9 @@ export async function PATCH(req: NextRequest) {
     })
   } catch (error) {
     console.error('[CANCEL PINS ERROR]', error)
+    if (error instanceof Error && error.message === 'PIN_CANCELLATION_CONFLICT') {
+      return NextResponse.json({ error: 'A selected PIN changed status while cancellation was being processed. Nothing was cancelled; refresh and try again.' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }

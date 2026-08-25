@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
+import { InventoryMovementLedger, InventoryPhysicalAudits } from './InventoryAuditWorkspace'
 
 interface ProductSale {
   product_id: string; name: string; type: string
@@ -21,6 +23,14 @@ interface InventoryItem {
     city_price:   number
     provincial_price: number
   }
+}
+
+interface IncomingTransfer {
+  id: string
+  reference_number: string
+  status: string
+  created_at: string
+  totals: { expected: number; accepted: number; damaged: number; missing: number }
 }
 
 const PAGE_SIZE = 15
@@ -57,7 +67,10 @@ export default function CityInventoryPage() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch]     = useState('')
   const [page, setPage]         = useState(1)
-  const [tab, setTab]           = useState<'inventory' | 'sales'>('inventory')
+  const [tab, setTab]           = useState<'inventory' | 'sales' | 'ledger' | 'audits' | 'incoming'>('inventory')
+  const [isBranch, setIsBranch] = useState(false)
+  const [incomingTransfers, setIncomingTransfers] = useState<IncomingTransfer[]>([])
+  const [pendingTransfers, setPendingTransfers] = useState(0)
   const [productSales, setProductSales] = useState<ProductSale[]>([])
   const [summary, setSummary]   = useState({
     total_products: 0, low_stock: 0, out_of_stock: 0, total_units: 0,
@@ -92,6 +105,18 @@ export default function CityInventoryPage() {
 
   useEffect(() => { fetchInventory() }, [fetchInventory])
 
+  useEffect(() => {
+    fetch('/api/inventory/transfers', { cache: 'no-store' })
+      .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) return
+        setIsBranch(true)
+        setIncomingTransfers(data.transfers || [])
+        setPendingTransfers(Number(data.pending || 0))
+      })
+      .catch(() => {})
+  }, [])
+
   const saveThreshold = async (id: string) => {
     setSaving(true)
     await fetch('/api/city/inventory', {
@@ -125,24 +150,26 @@ export default function CityInventoryPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         {[
           { label: 'Total Products',   value: summary.total_products,                      color: '#0D1B3E', icon: '📦', sub: `${summary.total_units.toLocaleString()} units in stock` },
-          { label: 'Low Stock',        value: summary.low_stock,                           color: '#f59e0b', icon: '⚠️', sub: 'Below threshold', badge: summary.low_stock > 0 ? 'Restock soon' : undefined },
-          { label: 'Out of Stock',     value: summary.out_of_stock,                        color: '#e05252', icon: '❌', sub: 'Need immediate restock', badge: summary.out_of_stock > 0 ? 'Urgent!' : undefined },
-          { label: 'Stock Value',      value: fmtS(summary.total_sell_value || summary.total_selling_value || 0), color: '#1a7a4a', icon: '💰', sub: `Cost: ${fmtS(summary.total_cost_value)}` },
+          { label: 'Low Stock',        value: summary.low_stock,                           color: '#9a6f1e', icon: '⚠️', sub: 'Below threshold', badge: summary.low_stock > 0 ? 'Restock soon' : undefined },
+          { label: 'Out of Stock',     value: summary.out_of_stock,                        color: '#b9383e', icon: '❌', sub: 'Need immediate restock', badge: summary.out_of_stock > 0 ? 'Urgent!' : undefined },
+          { label: 'Inventory Cost Value', value: fmt(summary.total_cost_value || 0), color: '#8a6218', icon: '🏷️', sub: 'Historical acquisition cost of on-hand stock' },
+          { label: 'Potential Sales Value', value: fmt(summary.total_selling_value || summary.total_sell_value || 0), color: '#2563eb', icon: '💰', sub: 'If all on-hand units sell at reseller price' },
+          { label: 'Potential Gross Profit', value: fmt(summary.potential_profit || 0), color: '#187443', icon: '💎', sub: 'Potential sales value minus inventory cost' },
         ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
-            style={{ borderTop: `2px solid ${s.color}` }}>
+          <div key={s.label} className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+            style={{ borderColor: s.color, backgroundColor: s.color, color: '#fff' }}>
             <div className="flex items-start justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: s.color + '15' }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: '#FFFFFF24' }}>
                 {s.icon}
               </div>
-              {s.badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: s.color + '15', color: s.color }}>{s.badge}</span>}
+              {s.badge && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: '#FFFFFF24', textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.badge}</span>}
             </div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{s.label}</p>
-            <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>
+            <p className="text-xs font-bold uppercase tracking-wide mb-1 text-white/95" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.label}</p>
+            <p className="text-xl font-extrabold text-white" style={{ textShadow: '0 2px 3px rgba(0,0,0,.45)' }}>{s.value}</p>
+            <p className="text-xs font-semibold leading-relaxed text-white/90 mt-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.sub}</p>
           </div>
         ))}
       </div>
@@ -152,34 +179,97 @@ export default function CityInventoryPage() {
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: 'Actual Revenue', value: fmtS(summary.actual_revenue), color: '#2563eb', icon: '📈' },
-            { label: 'Actual Cost',    value: fmtS(summary.actual_cost),    color: '#e05252', icon: '🏷️' },
-            { label: 'Actual Profit',  value: fmtS(summary.actual_profit),  color: '#1a7a4a', icon: '💎',
+            { label: 'Actual Cost',    value: fmtS(summary.actual_cost),    color: '#b9383e', icon: '🏷️' },
+            { label: 'Actual Profit',  value: fmtS(summary.actual_profit),  color: '#187443', icon: '💎',
               sub: summary.actual_revenue > 0 ? `${Math.round((summary.actual_profit / summary.actual_revenue) * 100)}% margin` : '' },
           ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 hover:shadow-sm transition-all"
-              style={{ borderTop: `2px solid ${s.color}` }}>
+            <div key={s.label} className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+              style={{ borderColor: s.color, backgroundColor: s.color, color: '#fff' }}>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-gray-400 uppercase tracking-wide">{s.label}</p>
+                <p className="text-xs font-bold text-white/95 uppercase tracking-wide" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.label}</p>
                 <span className="text-lg">{s.icon}</span>
               </div>
-              <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
-              {s.sub && <p className="text-[10px] text-gray-400 mt-1">{s.sub}</p>}
+              <p className="text-xl font-extrabold text-white" style={{ textShadow: '0 2px 3px rgba(0,0,0,.45)' }}>{s.value}</p>
+              {s.sub && <p className="text-xs font-semibold text-white/90 mt-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.sub}</p>}
             </div>
           ))}
         </div>
       )}
 
+      {/* Pending delivery callout */}
+      {isBranch && pendingTransfers > 0 && tab !== 'incoming' && (
+        <div className="flex flex-col gap-4 rounded-2xl border border-[#d7ab42]/45 bg-gradient-to-r from-[#fffaf0] to-white px-5 py-4 shadow-[0_8px_24px_rgba(13,27,62,0.06)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#0D1B3E] text-xl shadow-sm">
+              🚚
+              <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-[#e05252] px-1.5 text-[10px] font-bold text-white">
+                {pendingTransfers > 99 ? '99+' : pendingTransfers}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-bold text-[#0D1B3E]">
+                  {pendingTransfers === 1 ? '1 delivery is awaiting your review' : `${pendingTransfers} deliveries are awaiting your review`}
+                </p>
+                <span className="rounded-full bg-[#fff0cf] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#8a6112]">Action required</span>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">Check the physical items and confirm the received, damaged, or missing quantities before stock becomes available for sale.</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setTab('incoming')}
+            className="w-full shrink-0 rounded-xl bg-[#0D1B3E] px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#162850] sm:w-auto">
+            Review Incoming {pendingTransfers === 1 ? 'Transfer' : 'Transfers'}
+          </button>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
+      <div className="flex w-full gap-1 overflow-x-auto rounded-xl border border-[#0D1B3E]/8 bg-white p-1 sm:w-fit">
         <button onClick={() => setTab('inventory')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'inventory' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'inventory' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📦 Stock Levels
         </button>
         <button onClick={() => setTab('sales')}
-          className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'sales' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
-          📊 Sales Movement
+          className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'sales' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          📊 Sales Summary
         </button>
+        <button onClick={() => setTab('ledger')}
+          className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'ledger' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          📚 Movement Ledger
+        </button>
+        <button onClick={() => setTab('audits')}
+          className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'audits' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          🧾 Physical Counts
+        </button>
+        {isBranch && <button onClick={() => setTab('incoming')}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium transition-all ${tab === 'incoming' ? 'bg-[#010521] text-white' : pendingTransfers > 0 ? 'bg-[#fff8e8] text-[#8a6112] ring-1 ring-inset ring-[#d7ab42]/35 hover:bg-[#fff1cf]' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
+          <span>🚚 Incoming Transfers</span>
+          {pendingTransfers > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[9px] font-bold text-white">{pendingTransfers > 99 ? '99+' : pendingTransfers}</span>}
+        </button>}
       </div>
+
+      {tab === 'incoming' && (
+        <div className="overflow-hidden rounded-2xl border border-[#0D1B3E]/8 bg-white">
+          <div className="border-b border-[#0D1B3E]/8 px-5 py-4">
+            <h2 className="text-sm font-semibold text-[#0D1B3E]">Incoming Branch Stock Transfers</h2>
+            <p className="mt-0.5 text-xs text-gray-400">Verify physical deliveries before they become available for sale.</p>
+          </div>
+          {incomingTransfers.length === 0 ? (
+            <div className="py-16 text-center"><p className="text-3xl">🚚</p><p className="mt-2 text-sm font-medium text-[#0D1B3E]">No incoming transfers</p></div>
+          ) : (
+            <div className="divide-y divide-[#0D1B3E]/5">
+              {incomingTransfers.map((transfer) => {
+                const pending = transfer.status === 'in_transit'
+                const label = transfer.status === 'received_full' ? 'Received in Full' : transfer.status === 'received_discrepancy' ? 'With Discrepancy' : transfer.status === 'rejected' ? 'Rejected' : 'Action Required'
+                return <div key={transfer.id} className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-[#0D1B3E]">{transfer.reference_number}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${pending ? 'bg-[#fef9ee] text-[#9a6f1e]' : transfer.status === 'received_full' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : 'bg-[#fdecea] text-[#a03030]'}`}>{label}</span></div><p className="mt-1 text-xs text-gray-400">{transfer.totals.expected.toLocaleString()} expected unit(s) · Internal transfer · No sale · {new Date(transfer.created_at).toLocaleString('en-PH')}</p>{!pending && <p className="mt-1 text-[10px] text-gray-400">Good {transfer.totals.accepted} · Damaged {transfer.totals.damaged} · Missing {transfer.totals.missing}</p>}</div>
+                  <Link href={`/dashboard/city/transfers/${transfer.id}`} className={`rounded-lg px-4 py-2 text-center text-xs font-semibold ${pending ? 'bg-[#010521] text-white hover:bg-[#162850]' : 'border border-[#0D1B3E]/15 text-[#0D1B3E] hover:bg-[#F0F2F8]'}`}>{pending ? 'Review Delivery' : 'View Receipt'}</Link>
+                </div>
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── INVENTORY TAB ── */}
       {tab === 'inventory' && (
@@ -345,6 +435,9 @@ export default function CityInventoryPage() {
           })}
         </div>
       )}
+
+      {tab === 'ledger' && <InventoryMovementLedger />}
+      {tab === 'audits' && <InventoryPhysicalAudits />}
 
     </div>
   )

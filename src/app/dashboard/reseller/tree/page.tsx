@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, memo } from 'react'
 
 interface TreeNode {
   id: string; user_id: string; username: string; full_name: string
+  profile_photo: string | null
   package_name: string | null; position: string | null
   left_child: TreeNode | null; right_child: TreeNode | null
   depth: number; is_self: boolean
@@ -13,6 +14,7 @@ interface TreeNode {
   pairing_bonus_value: number; pending_pairing_balance: number
   left_points: number; right_points: number
   rank: string; total_pu: number
+  product_purchase_pu: number; latest_product_purchase_at: string | null
 }
 
 interface TreeMeta {
@@ -37,6 +39,7 @@ interface SearchResult {
 }
 
 const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const rankLabel = (name: string) => name ? `${name.charAt(0).toUpperCase()}${name.slice(1)}` : ''
 
 // ── Empty Slot ──
 function EmptySlot() {
@@ -61,10 +64,11 @@ function EmptySlot() {
 }
 
 // ── Node Card ──
-const NodeCard = memo(function NodeCard({ node, isRoot, onNavigate, onSelect }: {
+const NodeCard = memo(function NodeCard({ node, isRoot, onNavigate, onSelect, mode }: {
   node: TreeNode; isRoot?: boolean
   onNavigate?: (userId: string) => void
   onSelect?: (node: TreeNode) => void
+  mode: 'package' | 'product'
 }) {
   const posColor   = node.position === 'left' ? '#3b82f6' : node.position === 'right' ? '#f59e0b' : '#9ca3af'
   const hasEarnings = node.total_earned > 0
@@ -109,8 +113,12 @@ const NodeCard = memo(function NodeCard({ node, isRoot, onNavigate, onSelect }: 
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 15, fontWeight: 700,
         color: node.is_self ? '#0D1B3E' : '#fff',
-        flexShrink: 0,
-      }}>{initial}</div>
+        flexShrink: 0, overflow: 'hidden',
+      }}>
+        {node.profile_photo
+          ? <img src={node.profile_photo} alt={`${node.full_name} profile`} className="h-full w-full object-cover" />
+          : initial}
+      </div>
 
       {/* Name */}
       <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: node.is_self ? '#fff' : '#0D1B3E', textAlign: 'center', lineHeight: 1.2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -140,12 +148,18 @@ const NodeCard = memo(function NodeCard({ node, isRoot, onNavigate, onSelect }: 
       )}
 
       {/* L/R counts */}
-      <p style={{ margin: 0, fontSize: 9, color: node.is_self ? 'rgba(255,255,255,0.5)' : '#9ca3af' }}>
-        L{node.left_count} · R{node.right_count}
-      </p>
+      {mode === 'package' ? (
+        <p style={{ margin: 0, fontSize: 9, color: node.is_self ? 'rgba(255,255,255,0.5)' : '#9ca3af' }}>
+          L{node.left_count} · R{node.right_count}
+        </p>
+      ) : (
+        <div style={{ marginTop: 2, padding: '3px 7px', borderRadius: 8, background: node.is_self ? 'rgba(201,168,76,.18)' : '#eef6ff', color: node.is_self ? '#f3d474' : '#2563eb', fontSize: 8, fontWeight: 700 }}>
+          {node.is_self ? `${node.total_pu} Personal PU` : `${node.product_purchase_pu} Product PU`}
+        </div>
+      )}
 
       {/* Earnings pills */}
-      {(node.binary_pairing_earned > 0 || node.product_points_earned > 0) && (
+      {mode === 'package' && (node.binary_pairing_earned > 0 || node.product_points_earned > 0) && (
         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
           {node.binary_pairing_earned > 0 && (
             <div style={{ background: '#e8f7ef', color: '#1a7a4a', fontSize: 8, padding: '1px 5px', borderRadius: 8, fontWeight: 600 }}>
@@ -175,17 +189,18 @@ const NodeCard = memo(function NodeCard({ node, isRoot, onNavigate, onSelect }: 
 // ── Tree Level with clean connectors ──
 const GAP = 20 // gap between sibling subtrees
 
-function TreeLevel({ node, isRoot, onNavigate, onSelect }: {
+function TreeLevel({ node, isRoot, onNavigate, onSelect, mode }: {
   node: TreeNode; isRoot?: boolean
   onNavigate?: (userId: string) => void
   onSelect?: (node: TreeNode) => void
+  mode: 'package' | 'product'
 }) {
   const showChildren = !!node.left_child || !!node.right_child || node.depth < 2
   const LINE = '1px solid rgba(13,27,62,0.18)'
 
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-      <NodeCard node={node} isRoot={isRoot} onNavigate={onNavigate} onSelect={onSelect} />
+      <NodeCard node={node} isRoot={isRoot} onNavigate={onNavigate} onSelect={onSelect} mode={mode} />
 
       {showChildren && (
         <>
@@ -199,7 +214,7 @@ function TreeLevel({ node, isRoot, onNavigate, onSelect }: {
               {/* ┐ corner — right side goes up to meet stem */}
               <div style={{ width: '50%', height: 24, borderTop: LINE, borderRight: LINE, alignSelf: 'flex-end' }} />
               {node.left_child
-                ? <TreeLevel node={node.left_child}  onNavigate={onNavigate} onSelect={onSelect} />
+                ? <TreeLevel node={node.left_child}  onNavigate={onNavigate} onSelect={onSelect} mode={mode} />
                 : <EmptySlot />}
             </div>
 
@@ -208,7 +223,7 @@ function TreeLevel({ node, isRoot, onNavigate, onSelect }: {
               {/* └ corner — left side goes up to meet stem */}
               <div style={{ width: '50%', height: 24, borderTop: LINE, borderLeft: LINE, alignSelf: 'flex-start' }} />
               {node.right_child
-                ? <TreeLevel node={node.right_child} onNavigate={onNavigate} onSelect={onSelect} />
+                ? <TreeLevel node={node.right_child} onNavigate={onNavigate} onSelect={onSelect} mode={mode} />
                 : <EmptySlot />}
             </div>
           </div>
@@ -231,6 +246,22 @@ export default function ResellerTreePage() {
   const [searching, setSearching]           = useState(false)
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null)
   const [selectedNode, setSelectedNode]     = useState<TreeNode | null>(null)
+  const [mode, setMode] = useState<'package' | 'product'>('package')
+  const [productBinary, setProductBinary] = useState<ProductBinarySummary | null>(null)
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('mode')
+    if (requested === 'product') setMode('product')
+  }, [])
+
+  const changeMode = (nextMode: 'package' | 'product') => {
+    setMode(nextMode)
+    setSelectedNode(null)
+    const url = new URL(window.location.href)
+    if (nextMode === 'product') url.searchParams.set('mode', 'product')
+    else url.searchParams.delete('mode')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }
 
   const handleSearch = useCallback(async (q: string) => {
     if (!q.trim()) { setSearchResults([]); return }
@@ -257,6 +288,7 @@ export default function ResellerTreePage() {
         setTree(data.tree)
         setMeta(data.meta)
         setEarnings(data.my_earnings)
+        setProductBinary(data.my_product_binary || null)
       })
       .catch(() => setError('Failed to load tree.'))
       .finally(() => setLoading(false))
@@ -302,8 +334,16 @@ export default function ResellerTreePage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#0D1B3E]/8 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex rounded-xl bg-[#f1f4f9] p-1" role="group" aria-label="Binary tree viewing mode">
+          <button type="button" onClick={() => changeMode('package')} className={`min-h-10 rounded-lg px-4 text-sm font-semibold transition ${mode === 'package' ? 'bg-[#0D1B3E] text-white shadow-sm' : 'text-gray-500 hover:text-[#0D1B3E]'}`}>Package Binary</button>
+          <button type="button" onClick={() => changeMode('product')} className={`min-h-10 rounded-lg px-4 text-sm font-semibold transition ${mode === 'product' ? 'bg-[#0D1B3E] text-white shadow-sm' : 'text-gray-500 hover:text-[#0D1B3E]'}`}>Product Binary</button>
+        </div>
+        <p className="text-xs leading-5 text-gray-500">{mode === 'package' ? 'Registration placement, affiliate counts, pairing points, and Package Binary carryover.' : 'Eligible product activity, team PU carryover, completed pairs, and quarterly personal PU.'}</p>
+      </div>
+
       {/* Stat Cards */}
-      {earnings && meta && (
+      {earnings && meta && mode === 'package' && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
             { label: 'Total Earned',     value: fmt(earnings.total_earned),                                sub: `Wallet: ${fmt(earnings.wallet_balance)}`, color: '#168052', icon: '💰' },
@@ -335,6 +375,27 @@ export default function ResellerTreePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {earnings && productBinary && mode === 'product' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+            {[
+              { label: 'Total Left Product PU', value: `${productBinary.left_total_pu} PU`, sub: `${productBinary.leftPu} PU available carryover`, color: '#2563EB', icon: '◀' },
+              { label: 'Total Right Product PU', value: `${productBinary.right_total_pu} PU`, sub: `${productBinary.rightPu} PU available carryover`, color: '#B86409', icon: '▶' },
+              { label: 'Total Product Binary Earnings', value: fmt(productBinary.total_earned), sub: 'Your accumulated Product Binary income since joining', color: '#168052', icon: '💰' },
+              { label: 'Lifetime Completed Pairs', value: productBinary.lifetime_pairs.toLocaleString(), sub: 'All Product Binary pairs completed since joining', color: '#16766F', icon: '🔗' },
+              { label: 'Personal PU', value: `${earnings.total_pu} PU`, sub: productBinary.rank_progress.next_rank ? `Current: ${fmt(productBinary.rank_progress.current_pair_rate_amount)}/pair · ${productBinary.rank_progress.next_rank.remaining_pu} PU more to ${rankLabel(productBinary.rank_progress.next_rank.name)}: ${fmt(productBinary.rank_progress.next_rank.pair_rate_amount)}/pair` : `Top rank reached · Current: ${fmt(productBinary.rank_progress.current_pair_rate_amount)}/pair`, color: '#A17820', icon: '🏅' },
+            ].map((card) => (
+              <div key={card.label} className="group relative min-h-32 overflow-hidden rounded-xl border p-4 text-white transition-all duration-300 hover:-translate-y-1 hover:shadow-xl" style={{ background: `linear-gradient(145deg, rgba(255,255,255,.18), rgba(0,0,0,.15)), ${card.color}`, borderColor: 'rgba(255,255,255,.3)', borderTop: '3px solid rgba(255,255,255,.62)', boxShadow: `0 10px 26px ${card.color}38` }}>
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/30 bg-white/20 text-lg">{card.icon}</span>
+                <p className="mt-3 text-xs font-bold uppercase tracking-wide text-white/80">{card.label}</p>
+                <p className="mt-1 text-xl font-extrabold">{card.value}</p>
+                <p className="mt-1 text-[10px] leading-4 text-white/70">{card.sub}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -403,7 +464,7 @@ export default function ResellerTreePage() {
           <p className="text-center text-[#a03030] text-sm py-16">{error}</p>
         ) : tree ? (
           <div style={{ display: 'flex', justifyContent: 'center', minWidth: 'max-content', margin: '0 auto' }}>
-            <TreeLevel node={tree} isRoot onNavigate={uid => setRootUserId(uid)} onSelect={n => setSelectedNode(n)} />
+            <TreeLevel node={tree} isRoot onNavigate={uid => setRootUserId(uid)} onSelect={n => setSelectedNode(n)} mode={mode} />
           </div>
         ) : (
           <p className="text-center text-gray-400 text-sm py-16">No tree data found.</p>
@@ -420,8 +481,10 @@ export default function ResellerTreePage() {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
               <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-full bg-[#C9A84C] flex items-center justify-center text-white text-xl font-bold">
-                  {selectedNode.full_name.charAt(0).toUpperCase()}
+                <div className="w-14 h-14 overflow-hidden rounded-full bg-[#C9A84C] flex items-center justify-center text-white text-xl font-bold">
+                  {selectedNode.profile_photo
+                    ? <img src={selectedNode.profile_photo} alt={`${selectedNode.full_name} profile`} className="h-full w-full object-cover" />
+                    : selectedNode.full_name.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <p className="text-white font-semibold text-base">{selectedNode.full_name}</p>
@@ -435,6 +498,49 @@ export default function ResellerTreePage() {
               </div>
             </div>
             <div className="p-5 space-y-4">
+              {mode === 'product' ? (
+                <>
+                  {selectedNode.is_self && productBinary ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-[#dbe7ff] bg-[#f6f9ff] p-4">
+                        <p className="text-xs font-bold text-[#0D1B3E]">Your Product Binary Position</p>
+                        <p className="mt-1 text-[11px] leading-5 text-gray-500">Team carryover is separate from Personal PU used for quarterly rank qualification.</p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="rounded-lg bg-white p-3"><span className="text-[10px] text-blue-600">LEFT CARRYOVER</span><strong className="mt-1 block text-xl text-[#0D1B3E]">{productBinary.leftPu} PU</strong></div>
+                          <div className="rounded-lg bg-white p-3"><span className="text-[10px] text-amber-700">RIGHT CARRYOVER</span><strong className="mt-1 block text-xl text-[#0D1B3E]">{productBinary.rightPu} PU</strong></div>
+                        </div>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between"><span className="text-gray-400">Personal Qualification PU</span><strong className="text-[#C9A84C]">{selectedNode.total_pu} PU</strong></div>
+                        {productBinary.rank_progress.next_rank ? (
+                          <>
+                            <div className="flex justify-between gap-4"><span className="text-gray-400">Remaining to {productBinary.rank_progress.next_rank.name}</span><strong className="text-right text-[#0D1B3E]">{productBinary.rank_progress.next_rank.remaining_pu} PU</strong></div>
+                            <div className="flex justify-between gap-4"><span className="text-gray-400">Next Rank Pair Rate</span><strong className="text-right text-[#0D1B3E]">{fmt(productBinary.rank_progress.next_rank.pair_rate_amount)}/pair</strong></div>
+                          </>
+                        ) : (
+                          <div className="flex justify-between gap-4"><span className="text-gray-400">Rank Progress</span><strong className="text-right text-[#168052]">Top rank reached</strong></div>
+                        )}
+                        <div className="flex justify-between gap-4"><span className="text-gray-400">Current Pair Rate</span><strong className="text-right text-[#0D1B3E]">{fmt(productBinary.rank_progress.current_pair_rate_amount)}/pair</strong></div>
+                        <div className="flex justify-between"><span className="text-gray-400">Lifetime Completed Pairs</span><strong className="text-[#0D1B3E]">{productBinary.lifetime_pairs}</strong></div>
+                        <div className="flex justify-between gap-4 border-t pt-2"><span className="text-gray-400">Total Product Binary Earnings</span><strong className="text-right text-[#168052]">{fmt(productBinary.total_earned)}</strong></div>
+                        <p className="text-[10px] leading-4 text-gray-500">Your accumulated Product Binary income since joining.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-[#dbe7ff] bg-[#f6f9ff] p-4">
+                      <p className="text-xs font-bold text-[#0D1B3E]">Eligible Product Activity</p>
+                      <p className="mt-3 text-3xl font-extrabold text-[#2563eb]">{selectedNode.product_purchase_pu} <span className="text-sm font-semibold text-gray-400">PU</span></p>
+                      <p className="mt-1 text-[11px] leading-5 text-gray-500">Lifetime eligible product PU recorded for this downline. Private wallet, earnings, rank balance, and personal carryover are not shown.</p>
+                      {selectedNode.latest_product_purchase_at && <p className="mt-3 border-t border-[#dbe7ff] pt-2 text-[10px] text-gray-500">Latest eligible activity: {new Date(selectedNode.latest_product_purchase_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
+                    </div>
+                  )}
+                  {!selectedNode.is_self && (
+                    <button onClick={() => { setRootUserId(selectedNode.user_id); setSelectedNode(null) }} className="w-full rounded-xl bg-[#0D1B3E] py-2.5 text-sm font-medium text-white hover:bg-[#162850]">🌳 View This Branch</button>
+                  )}
+                  <button onClick={() => setSelectedNode(null)} className="w-full rounded-xl border border-[#0D1B3E]/15 py-2 text-sm text-gray-500 hover:bg-gray-50">Close</button>
+                </>
+              ) : (
+                <>
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-[#eff6ff] rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-[#3b82f6]">{selectedNode.left_count}</p>
@@ -486,6 +592,8 @@ export default function ResellerTreePage() {
                 className="w-full py-2 rounded-xl border border-[#0D1B3E]/15 text-sm text-gray-500 hover:bg-gray-50 transition-colors">
                 Close
               </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -561,4 +669,17 @@ export default function ResellerTreePage() {
 
     </div>
   )
+}
+
+interface ProductBinarySummary {
+  leftPu: number; rightPu: number; readyPairs: number
+  left_total_pu: number; right_total_pu: number
+  leftNeeded: number; rightNeeded: number; focusSide: 'left' | 'right' | 'both'
+  pu_per_leg: number; lifetime_pairs: number
+  total_earned: number
+  rank_progress: {
+    current_rank: string
+    current_pair_rate_amount: number
+    next_rank: { name: string; required_pu: number; remaining_pu: number; pair_rate_amount: number } | null
+  }
 }

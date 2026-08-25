@@ -60,8 +60,8 @@ export default function PackagesPage() {
     price:                     '',
     direct_referral_bonus:     '',
     pairing_bonus_value:       '',
-    point_php_value:           '',
-    point_reset_days:          '30',
+    point_php_value:           '10',
+    point_reset_days:          '90',
     daily_product_pairing_cap: '50',
     product_binary_cap_enabled: true,
     direct_referral_cap_enabled: true,
@@ -104,8 +104,8 @@ export default function PackagesPage() {
       price:                     '',
       direct_referral_bonus:     '',
       pairing_bonus_value:       '',
-      point_php_value:           '',
-      point_reset_days:          '30',
+      point_php_value:           '10',
+      point_reset_days:          '90',
       daily_product_pairing_cap: '50',
       product_binary_cap_enabled: true,
       direct_referral_cap_enabled: true,
@@ -389,24 +389,17 @@ export default function PackagesPage() {
                       className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
                   },
                   {
-                    label: 'Product Points Value',
-                    hint: form.point_php_value
-                      ? `1 pair (${form.point_php_value}pts) = ₱${(Number(form.point_php_value) * 0.50).toFixed(2)}`
-                      : 'Points added to upline on reorder',
+                    label: 'Product Binary Base',
+                    hint: 'Universal rule: 10 points × ₱0.50 = ₱5 per pair',
                     required: true,
-                    input: <input type="number" step="0.01" value={form.point_php_value}
-                      onChange={(e) => setForm({ ...form, point_php_value: e.target.value })}
-                      placeholder="e.g. 0.50"
-                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                    input: <input type="number" value="10" readOnly aria-label="Product Binary base points"
+                      className="w-28 bg-gray-50 border border-[#0D1B3E]/10 rounded-lg px-3 py-2 text-sm text-gray-500" />,
                   },
                   {
-                    label: 'Product Pts Reset',
-                    hint:  'Days before product points reset',
+                    label: 'Qualification Season',
+                    hint:  'Automatic calendar quarter (Q1, Q2, Q3, Q4)',
                     required: false,
-                    input: <input type="number" value={form.point_reset_days}
-                      onChange={(e) => setForm({ ...form, point_reset_days: e.target.value })}
-                      placeholder="e.g. 30"
-                      className="w-28 bg-white border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />,
+                    input: <span className="w-28 rounded-lg border border-[#0D1B3E]/10 bg-gray-50 px-3 py-2 text-center text-xs font-semibold text-gray-500">Quarterly</span>,
                   },
                   {
                     label: 'Direct Referral Daily Cap',

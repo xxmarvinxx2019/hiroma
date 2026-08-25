@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
+import { distanceKm, recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
+import { geocodeAddress } from '@/app/lib/addressGeocoding'
 
 const distributorSelect = {
   id: true, full_name: true, username: true, mobile: true, address: true, status: true,
   distributor_profile: { select: {
     coverage_area: true, dist_level: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true,
+    fulfillment_latitude: true, fulfillment_longitude: true,
   } },
 } as const
 
@@ -30,6 +32,12 @@ export async function GET(req: NextRequest) {
 
     const currentUser = await prisma.user.findUnique({ where: { id: user.id }, select: { address: true } })
     const registeredAddress = currentUser?.address || ''
+    // `hiroma` is the reserved network/root node and must never fulfill orders.
+    // Nationwide inventory and orders belong only to the operational admin login.
+    const nationwideSeller = await prisma.user.findFirst({
+      where: { username: 'hiroadmin', role: 'admin', status: 'active' },
+      select: { id: true, full_name: true, username: true, role: true },
+    })
 
     const profile = await prisma.resellerProfile.findUnique({
       where: { user_id: user.id },
@@ -41,12 +49,13 @@ export async function GET(req: NextRequest) {
         assigned_distributor: null,
         default_city_dist_id: null,
         registered_address: registeredAddress,
+        nationwide_seller: nationwideSeller,
         error: 'No active distributor is assigned to this reseller.',
-      })
+      }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
     }
 
     const rawDistributors = await prisma.user.findMany({
-      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: 'city' } } },
+      where: { role: 'city', status: 'active', distributor_profile: { is: { is_active: true, dist_level: { in: ['city', 'branch'] } } } },
       select: distributorSelect, orderBy: { full_name: 'asc' },
     })
     let outletRows: OutletRow[] = []
@@ -77,7 +86,24 @@ export async function GET(req: NextRequest) {
       barangay_name: distributor.distributor_profile?.barangay_name,
     })), profile.city_dist_id, { address, region, province, city, barangay })
     const recommendedDistributor = distributors.find(({ id }) => id === recommendation?.distributor.id) || assignedDistributor
-    return NextResponse.json({ distributors, assigned_distributor: assignedDistributor, default_city_dist_id: profile.city_dist_id, registered_address: registeredAddress, recommended_distributor: recommendedDistributor, recommendation_basis: recommendation?.basis || 'assigned_fallback' })
+    let informationalDistance: number | null = null
+    const partnerAddress = recommendedDistributor.fulfillment_address?.trim()
+    if (address && partnerAddress) {
+      try {
+        const [customerPoint, partnerPoint] = await Promise.all([
+          geocodeAddress(address),
+          geocodeAddress(partnerAddress),
+        ])
+        if (customerPoint && partnerPoint) {
+          informationalDistance = distanceKm(customerPoint, partnerPoint)
+        }
+      } catch (geocodingError) {
+        // Distance is informational only. A public geocoder outage must not
+        // change the address-based recommendation or block checkout.
+        console.warn('[FULFILLMENT DISTANCE UNAVAILABLE]', geocodingError)
+      }
+    }
+    return NextResponse.json({ distributors, assigned_distributor: assignedDistributor, default_city_dist_id: profile.city_dist_id, registered_address: registeredAddress, recommended_distributor: recommendedDistributor, recommendation_basis: recommendation?.basis || 'assigned_fallback', distance_km: informationalDistance === null ? null : Math.round(informationalDistance * 10) / 10, distance_type: informationalDistance === null ? null : 'straight_line', distance_source: informationalDistance === null ? null : 'mapped_addresses', nationwide_seller: nationwideSeller }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
   } catch (error) {
     console.error('[RESELLER CITY DISTS ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

@@ -26,6 +26,18 @@ export type DeliveryLocationInput = {
   barangay?: string
 }
 
+export type Coordinates = { latitude: number; longitude: number }
+
+export function distanceKm(from: Coordinates, to: Coordinates) {
+  const radians = (degrees: number) => degrees * Math.PI / 180
+  const earthRadiusKm = 6371
+  const latitudeDelta = radians(to.latitude - from.latitude)
+  const longitudeDelta = radians(to.longitude - from.longitude)
+  const a = Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(from.latitude)) * Math.cos(radians(to.latitude)) * Math.sin(longitudeDelta / 2) ** 2
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((part) => part.length >= 3)
 
 export function recommendFulfillmentDistributor(

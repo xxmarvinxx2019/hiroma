@@ -66,7 +66,7 @@ function requiredModulePermission(module: AdminStaffModule, method: string, acti
 
 export function adminStaffPermissionForPath(pathname: string, method = 'GET'): AdminStaffPermission | '__owner_only__' | null {
   if (pathname.startsWith('/api/auth/')) return null
-  if (pathname.startsWith('/dashboard/admin/support-staff') || pathname.startsWith('/api/admin/support-staff')) return '__owner_only__'
+  if (pathname.startsWith('/dashboard/admin/support-staff') || pathname.startsWith('/api/admin/support-staff') || pathname.startsWith('/dashboard/admin/area-managers') || pathname.startsWith('/api/admin/area-managers')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/settings') || pathname.startsWith('/api/admin/settings')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/commission-testing') || pathname.startsWith('/api/admin/commission-testing')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/report-testing') || pathname.startsWith('/api/admin/report-testing')) return '__owner_only__'
@@ -76,7 +76,7 @@ export function adminStaffPermissionForPath(pathname: string, method = 'GET'): A
     [pathname.startsWith('/dashboard/admin/support-center') || pathname.startsWith('/api/admin/support-requests') || pathname.startsWith('/api/support/tickets'), 'support_center', 'reply'],
     [pathname.startsWith('/dashboard/admin/audit-logs') || pathname.startsWith('/api/admin/audit-logs'), 'audit_logs', null],
     [pathname.startsWith('/dashboard/admin/distributors') || pathname.startsWith('/api/admin/distributors'), 'distributors', 'manage'],
-    [pathname.startsWith('/dashboard/admin/resellers') || pathname.startsWith('/api/admin/resellers') || pathname.startsWith('/dashboard/admin/top-performers') || pathname.startsWith('/api/admin/top-performers'), 'resellers', 'manage'],
+    [pathname.startsWith('/dashboard/admin/resellers') || pathname.startsWith('/api/admin/resellers') || pathname.startsWith('/dashboard/admin/top-performers') || pathname.startsWith('/api/admin/top-performers') || pathname.startsWith('/dashboard/admin/network') || pathname.startsWith('/api/admin/network'), 'resellers', 'manage'],
     [pathname.startsWith('/dashboard/admin/products') || pathname.startsWith('/api/admin/products'), 'products', 'manage'],
     [pathname.startsWith('/dashboard/admin/ranks') || pathname.startsWith('/api/admin/ranks'), 'ranks', 'manage'],
     [pathname.startsWith('/dashboard/admin/packages') || pathname.startsWith('/api/admin/packages'), 'packages', 'manage'],
