@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
-import { adminStaffPermissionForPath, firstAdminStaffRoute } from '@/app/lib/staffPermissions'
+import { adminStaffPermissionForPath, firstAdminStaffRoute, firstCityStaffRoute } from '@/app/lib/staffPermissions'
 
 // ============================================================
 // CONFIG
@@ -46,7 +46,7 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
   if (pathname.startsWith('/dashboard/city/orders') || pathname.startsWith('/api/city/orders') || pathname.startsWith('/api/orders/')) return 'orders'
   if (pathname.startsWith('/dashboard/city/pos/approvals') || pathname.startsWith('/api/city/pos/approvals')) return 'pos_approve'
   if (pathname.startsWith('/dashboard/city/pos') || pathname.startsWith('/api/city/pos')) return 'pos'
-  if (pathname.startsWith('/dashboard/city/reports') || pathname.startsWith('/api/city/reports')) return 'orders'
+  if (pathname.startsWith('/dashboard/city/reports') || pathname.startsWith('/api/city/reports')) return 'reports|orders'
   if (pathname.startsWith('/dashboard/city/payment-methods') || pathname.startsWith('/api/payment-methods')) return 'payment_methods'
   if (pathname.startsWith('/dashboard/city/pin-requests') || pathname.startsWith('/api/pin-requests')) return 'pin_requests'
   if (pathname.startsWith('/api/city/products')) return 'inventory|orders'
@@ -117,7 +117,7 @@ export async function middleware(req: NextRequest) {
         if (pathname.startsWith('/api/')) {
           return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
         }
-        const fallback = role === 'admin' ? firstAdminStaffRoute(permissions) : '/dashboard/city'
+        const fallback = role === 'admin' ? firstAdminStaffRoute(permissions) : firstCityStaffRoute(permissions)
         return NextResponse.redirect(new URL(fallback, req.url))
       }
       // Admin staff permissions are reloaded from the database by getCurrentUser
@@ -125,7 +125,7 @@ export async function middleware(req: NextRequest) {
       // prevents a stale JWT from authorizing a mutation.
       if (role !== 'admin' && !hasPermission) {
         if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
-        return NextResponse.redirect(new URL('/dashboard/city', req.url))
+        return NextResponse.redirect(new URL(firstCityStaffRoute(permissions), req.url))
       }
     }
 

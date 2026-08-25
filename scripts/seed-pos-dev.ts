@@ -59,8 +59,29 @@ const cashier = await prisma.user.upsert({
 })
 await prisma.staffProfile.upsert({
   where: { user_id: cashier.id },
-  update: { owner_id: city.id, permissions: ['pos'], is_active: true, staff_type: 'custom' },
-  create: { user_id: cashier.id, owner_id: city.id, permissions: ['pos'], is_active: true, staff_type: 'custom' },
+  update: { owner_id: city.id, permissions: ['pos', 'inventory'], is_active: true, staff_type: 'custom' },
+  create: { user_id: cashier.id, owner_id: city.id, permissions: ['pos', 'inventory'], is_active: true, staff_type: 'custom' },
+})
+
+const approverPasswordHash = await bcrypt.hash('HiromaApprover2026!', 12)
+const approver = await prisma.user.upsert({
+  where: { username: 'posapprover' },
+  update: { password_hash: approverPasswordHash, status: 'active', login_disabled: false },
+  create: {
+    member_id: 'POS-STAFF-0002',
+    username: 'posapprover',
+    full_name: 'Hiroma POS Test Approver',
+    mobile: '09000000003',
+    email: 'pos-approver@localhost.test',
+    password_hash: approverPasswordHash,
+    role: 'staff',
+    status: 'active',
+  },
+})
+await prisma.staffProfile.upsert({
+  where: { user_id: approver.id },
+  update: { owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve'], is_active: true, staff_type: 'custom' },
+  create: { user_id: approver.id, owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve'], is_active: true, staff_type: 'custom' },
 })
 
 await prisma.user.upsert({
@@ -92,9 +113,12 @@ await prisma.inventory.upsert({
 
 const payment = await prisma.paymentMethod.findFirst({ where: { user_id: city.id, type: 'gcash', account_number: '09000000000' } })
 if (!payment) await prisma.paymentMethod.create({ data: { user_id: city.id, type: 'gcash', account_name: 'Hiroma POS Test', account_number: '09000000000', status: 'approved' } })
+const bank = await prisma.paymentMethod.findFirst({ where: { user_id: city.id, type: 'bank', account_number: '0000000001' } })
+if (!bank) await prisma.paymentMethod.create({ data: { user_id: city.id, type: 'bank', account_name: 'Hiroma POS Test Bank', account_number: '0000000001', status: 'approved' } })
 
 console.log('Local POS test account ready: posbranch / HiromaPOS2026!')
 console.log('Restricted POS cashier ready: poscashier / HiromaCashier2026!')
+console.log('Operations approver ready: posapprover / HiromaApprover2026!')
 await prisma.$disconnect()
 }
 

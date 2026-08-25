@@ -7,7 +7,7 @@ import {
 import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 import { isLoginPortal, isRoleAllowedInPortal, portalAccessError } from '@/app/lib/loginPortal'
 import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
-import { firstAdminStaffRoute } from '@/app/lib/staffPermissions'
+import { firstAdminStaffRoute, firstCityStaffRoute } from '@/app/lib/staffPermissions'
 import { consumeLoginAllowance, resetLoginAccountFailures } from '@/app/lib/loginRateLimit'
 import { normalizeLoginIdentifier } from '@/app/lib/loginRateLimitPolicy'
 
@@ -184,23 +184,12 @@ export async function POST(req: NextRequest) {
       status:        'normal',
     })
 
-    const firstCityStaffRoute = () => {
-      if (permissions?.includes('dashboard')) return '/dashboard/city'
-      if (permissions?.includes('pos')) return '/dashboard/city/pos'
-      if (permissions?.includes('pos_approve')) return '/dashboard/city/pos/approvals'
-      const routes: Array<[string, string]> = [
-        ['resellers', '/dashboard/city/resellers'], ['pins', '/dashboard/city/pins'],
-        ['inventory', '/dashboard/city/inventory'], ['orders', '/dashboard/city/orders'],
-        ['payment_methods', '/dashboard/city/payment-methods'], ['pin_requests', '/dashboard/city/pin-requests'],
-      ]
-      return routes.find(([permission]) => permissions?.includes(permission))?.[1] || '/dashboard/city'
-    }
     const staffRedirect = user.role === 'staff' && staffProfile?.staff_type === 'area_manager'
       ? '/dashboard/area-manager'
       : user.role === 'staff' && owner.role === 'admin'
       ? firstAdminStaffRoute(permissions || [])
       : user.role === 'staff' && owner.role === 'city'
-      ? firstCityStaffRoute()
+      ? firstCityStaffRoute(permissions || [])
       : getDashboardRoute(owner.role as UserRole)
     return NextResponse.json({
       success: true,

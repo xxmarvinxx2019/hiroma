@@ -4,6 +4,7 @@
 import prisma from '@/app/lib/prisma'
 import { NextRequest } from 'next/server'
 import type { PrismaClient } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
 
 export type AuditCategory =
   | 'auth'
@@ -28,7 +29,7 @@ export interface AuditLogParams {
   activity_type: string
   category:      AuditCategory
   description:   string
-  metadata?:     Record<string, any>
+  metadata?:     Record<string, unknown>
   ip_address?:   string
   device?:       string
   risk_level?:   AuditRiskLevel
@@ -58,10 +59,11 @@ type AuditLogWriter = Pick<PrismaClient, '$executeRaw'>
 export async function createRequiredAuditLog(db: AuditLogWriter, params: AuditLogParams): Promise<void> {
   await db.$executeRaw`
       INSERT INTO audit_logs (
-        user_id, user_name, user_role, member_id,
+        id, user_id, user_name, user_role, member_id,
         activity_type, category, description,
         metadata, ip_address, device, risk_level, status
       ) VALUES (
+        ${randomUUID()},
         ${params.user_id || null},
         ${params.user_name || null},
         ${params.user_role || null},

@@ -7,6 +7,7 @@ export const STAFF_PERMISSIONS = [
   { key: 'orders', label: 'Orders / Sales', description: 'Create walk-in sales and manage orders.' },
   { key: 'pos', label: 'Point of Sale', description: 'Use the assigned POS terminal, shifts, offline sales, and sync queue.' },
   { key: 'pos_approve', label: 'Operations Approver', description: 'Independently verify POS non-cash payments and submitted inventory counts. Cannot approve an action created or submitted by the same account.' },
+  { key: 'reports', label: 'Reports', description: 'View branch or distributor reports and operational reconciliation records.' },
   { key: 'payment_methods', label: 'Payment Methods', description: 'View and manage payment methods.' },
   { key: 'pin_requests', label: 'PIN Requests', description: 'View and submit PIN requests.' },
 ] as const
@@ -109,4 +110,16 @@ export function firstAdminStaffRoute(permissions: readonly string[]): string {
     ['commissions', '/dashboard/admin/commissions'], ['audit_logs', '/dashboard/admin/audit-logs'],
   ]
   return routes.find(([module]) => permissions.includes(`${module}:view`))?.[1] || '/login/admin'
+}
+
+export function firstCityStaffRoute(permissions: readonly string[]): string {
+  if (permissions.includes('dashboard')) return '/dashboard/city'
+  if (permissions.includes('pos')) return '/dashboard/city/pos'
+  if (permissions.includes('pos_approve')) return '/dashboard/city/pos/approvals'
+  const routes: ReadonlyArray<[StaffPermission, string]> = [
+    ['resellers', '/dashboard/city/resellers'], ['pins', '/dashboard/city/pins'],
+    ['inventory', '/dashboard/city/inventory'], ['orders', '/dashboard/city/orders'], ['reports', '/dashboard/city/reports'],
+    ['payment_methods', '/dashboard/city/payment-methods'], ['pin_requests', '/dashboard/city/pin-requests'],
+  ]
+  return routes.find(([permission]) => permissions.includes(permission))?.[1] || '/login/distributor'
 }

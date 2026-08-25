@@ -55,7 +55,7 @@ const navPermission: Record<string, string> = {
   '/dashboard/city/pos': 'pos',
   '/dashboard/city/pos/approvals': 'pos_approve',
   '/dashboard/city/pos/history': 'pos',
-  '/dashboard/city/reports': 'orders',
+  '/dashboard/city/reports': 'reports|orders',
   '/dashboard/city/payment-methods': 'payment_methods',
   '/dashboard/city/pin-requests': 'pin_requests',
 }
@@ -115,7 +115,7 @@ function Sidebar({
               {group.section}
             </p>
             {[...group.items, ...(group.section === 'Main' && !user?.is_staff ? [staffNavItem] : [])]
-              .filter((item) => !user?.is_staff || user.permissions?.includes(navPermission[item.href]))
+              .filter((item) => !user?.is_staff || navPermission[item.href]?.split('|').some((permission) => user.permissions?.includes(permission)))
               .map((item) => (
               <Link
                 key={item.href}

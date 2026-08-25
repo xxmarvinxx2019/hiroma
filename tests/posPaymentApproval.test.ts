@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
+import { firstCityStaffRoute } from '../src/app/lib/staffPermissions'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -9,6 +10,12 @@ test('POS maker and approver permissions are separate', () => {
   const middleware = read('src/middleware.ts')
   assert.match(permissions, /key: 'pos_approve'/)
   assert.match(middleware, /pos\/approvals[\s\S]*return 'pos_approve'/)
+})
+
+test('restricted city staff are redirected to their first permitted workspace', () => {
+  assert.equal(firstCityStaffRoute(['pos', 'inventory']), '/dashboard/city/pos')
+  assert.equal(firstCityStaffRoute(['inventory', 'reports', 'pos_approve']), '/dashboard/city/pos/approvals')
+  assert.equal(firstCityStaffRoute([]), '/login/distributor')
 })
 
 test('non-cash POS sales wait for independent payment verification', () => {
