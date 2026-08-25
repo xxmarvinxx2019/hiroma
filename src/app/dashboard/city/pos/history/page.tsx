@@ -265,7 +265,7 @@ export default function PosShiftHistoryPage() {
                       <div className="mt-3 rounded-lg bg-[#f7f8fb] p-3 text-xs">
                         <b>{row.payment_method_snapshot}</b>
                         {row.payment_reference ? <span className="ml-2 text-gray-500">Ref: {row.payment_reference}</span> : null}
-                        <span className={`ml-2 rounded-full px-2 py-1 font-bold ${row.status === "finalized" ? "bg-green-100 text-green-700" : row.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{row.status === "finalized" ? "Paid" : row.status === "rejected" ? "Rejected" : "Pending verification"}</span>
+                        <span className={`ml-2 rounded-full px-2 py-1 font-bold ${row.status === "finalized" ? "bg-green-100 text-green-700" : ["rejected", "voided", "refunded"].includes(row.status) ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{row.status === "finalized" ? "Paid" : row.status === "rejected" ? "Rejected" : row.status === "voided" ? "VOIDED" : row.status === "refunded" ? "REFUNDED" : "Pending verification"}</span>
                       </div>
                     </article>
                   ))

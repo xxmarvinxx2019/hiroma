@@ -69,7 +69,7 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
     client_transaction_id: transaction.client_transaction_id,
     order_id: transaction.order.id,
     receipt_number: transaction.receipt_number,
-    payment_status: transaction.status === 'finalized' ? 'paid' : transaction.status === 'rejected' ? 'rejected' : 'pending_verification',
+    payment_status: transaction.status === 'finalized' ? 'paid' : transaction.status === 'rejected' ? 'rejected' : transaction.status === 'voided' ? 'voided' : transaction.status === 'refunded' ? 'refunded' : 'pending_verification',
     created_at: transaction.finalized_at || transaction.order.created_at,
     customer_name: transaction.customer_name_snapshot || 'Walk-in Customer',
     customer_type: transaction.transaction_type === 'member_sale' ? 'member' : 'non_member',
@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
       where: {
         shift_id: shift.id,
         cashier_id: actorId,
-        status: { in: ['synced_pending_review', 'rejected', 'approved', 'finalized'] },
+        status: { in: ['synced_pending_review', 'rejected', 'approved', 'finalized', 'voided', 'refunded'] },
       },
       orderBy: { finalized_at: 'desc' },
       select: {

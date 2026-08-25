@@ -1,5 +1,5 @@
 export const POS_TRANSACTION_TYPES = ['member_sale', 'non_member_sale', 'new_reseller_registration'] as const
-export const POS_TRANSACTION_STATUSES = ['pending_sync', 'syncing', 'synced_pending_review', 'approved', 'needs_correction', 'rejected', 'finalized'] as const
+export const POS_TRANSACTION_STATUSES = ['pending_sync', 'syncing', 'synced_pending_review', 'approved', 'needs_correction', 'rejected', 'finalized', 'voided', 'refunded'] as const
 
 export type PosTransactionStatus = (typeof POS_TRANSACTION_STATUSES)[number]
 
@@ -10,7 +10,9 @@ const transitions: Record<PosTransactionStatus, readonly PosTransactionStatus[]>
   approved: ['finalized'],
   needs_correction: ['pending_sync', 'rejected'],
   rejected: [],
-  finalized: [],
+  finalized: ['voided', 'refunded'],
+  voided: [],
+  refunded: [],
 }
 
 export function canTransitionPosTransaction(from: PosTransactionStatus, to: PosTransactionStatus): boolean {

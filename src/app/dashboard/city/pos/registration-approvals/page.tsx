@@ -51,10 +51,11 @@ export default function RegistrationApprovalsPage() {
     <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#A97912]">Independent approval</p>
     <h1 className="text-2xl font-bold text-[#071638]">Approval Center</h1>
     <p className="text-sm text-slate-500">Confirm money in the official receiving account before approving a transaction.</p>
-    <nav className="my-4 grid gap-2 rounded-2xl border bg-white p-2 sm:grid-cols-3" aria-label="Approval type">
+    <nav className="my-4 grid gap-2 rounded-2xl border bg-white p-2 sm:grid-cols-4" aria-label="Approval type">
       <Link href="/dashboard/city/pos/approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Sales Payments</Link>
       <Link href="/dashboard/city/pos/registration-approvals" className="rounded-xl bg-[#071638] px-4 py-3 text-center text-sm font-bold text-white">Registration Payments</Link>
       <Link href="/dashboard/city/pos/shift-approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Shift Closings</Link>
+      <Link href="/dashboard/city/pos/adjustments" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Void & Refunds</Link>
     </nav>
     <p className="mb-5 text-sm text-slate-500">A screenshot is supporting evidence only. Verify the exact amount in the bank or e-wallet account.</p>
     {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
