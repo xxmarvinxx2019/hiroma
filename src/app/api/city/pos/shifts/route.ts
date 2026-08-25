@@ -48,7 +48,7 @@ export async function PATCH(req: Request) {
     if (!shiftId || countedCash == null) return NextResponse.json({ error: 'Shift and counted cash are required.' }, { status: 400 })
     const actorId = user.actor_id || user.id
     const result = await prisma.$transaction(async (tx) => {
-      const shift = await tx.posShift.findFirst({ where: { id: shiftId, owner_id: user.id, status: 'open' }, select: { id: true, opening_cash: true } })
+      const shift = await tx.posShift.findFirst({ where: { id: shiftId, owner_id: user.id, opened_by_id: actorId, status: 'open' }, select: { id: true, opening_cash: true } })
       if (!shift) return null
       const pending = await tx.posTransaction.count({ where: { shift_id: shift.id, status: { in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'] } } })
       if (pending > 0) return { blocked: true as const, pending }

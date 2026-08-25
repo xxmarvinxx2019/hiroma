@@ -5,6 +5,20 @@ import Link from "next/link";
 import { listQueuedSales } from "@/app/lib/posOfflineQueue";
 
 type History = {
+  access: { can_audit: boolean; view: "mine" | "audit" };
+  selected_cashier?: { id: string; name: string; username: string };
+  selected_terminal?: { id: string; name: string; code: string };
+  audit_shifts: Array<{
+    id: string;
+    status: string;
+    opened_at: string;
+    closed_at: string | null;
+    cashier_id: string;
+    cashier_name: string;
+    terminal_name: string;
+    terminal_code: string;
+    receipt_count: number;
+  }>;
   shift: null | {
     id: string;
     status: string;
@@ -47,6 +61,9 @@ const peso = (value: number) => value.toLocaleString("en-PH", { style: "currency
 
 export default function PosShiftHistoryPage() {
   const [data, setData] = useState<History | null>(null);
+  const [view, setView] = useState<"mine" | "audit">("mine");
+  const [selectedShiftId, setSelectedShiftId] = useState("");
+  const [receiptPage, setReceiptPage] = useState(1);
   const [error, setError] = useState("");
   const [countedCash, setCountedCash] = useState("");
   const [closing, setClosing] = useState(false);
@@ -54,17 +71,21 @@ export default function PosShiftHistoryPage() {
   const [localPending, setLocalPending] = useState(0);
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/city/pos/transactions", {
+      const params = new URLSearchParams();
+      if (view === "audit") params.set("view", "audit");
+      if (view === "audit" && selectedShiftId) params.set("shift_id", selectedShiftId);
+      const response = await fetch(`/api/city/pos/transactions${params.size ? `?${params}` : ""}`, {
         cache: "no-store",
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to load shift history.");
       setData(result);
+      if (view === "audit" && !selectedShiftId && result.shift?.id) setSelectedShiftId(result.shift.id);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load shift history.");
     }
-  }, []);
+  }, [selectedShiftId, view]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
@@ -112,19 +133,51 @@ export default function PosShiftHistoryPage() {
     }
   }
 
+  const receiptsPerPage = 10;
+  const receiptPages = Math.max(1, Math.ceil((data?.transactions.length || 0) / receiptsPerPage));
+  const visibleTransactions = (data?.transactions || []).slice((receiptPage - 1) * receiptsPerPage, receiptPage * receiptsPerPage);
+
+  function changeView(next: "mine" | "audit") {
+    setView(next);
+    setSelectedShiftId("");
+    setReceiptPage(1);
+    setData(null);
+  }
+
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-col justify-between gap-3 rounded-2xl bg-[#071638] p-6 text-white sm:flex-row sm:items-center">
           <div>
             <p className="text-xs font-bold uppercase tracking-[.2em] text-[#d4af45]">Cashier workspace</p>
-            <h1 className="mt-2 text-2xl font-bold">Current Shift History</h1>
-            <p className="mt-1 text-sm text-white/65">Your receipts and recorded payment destinations for this cashier shift.</p>
+            <h1 className="mt-2 text-2xl font-bold">{view === "audit" ? "Cashier Shift Audit" : "Current Shift History"}</h1>
+            <p className="mt-1 text-sm text-white/65">{view === "audit" ? "Review one cashier and terminal shift at a time without mixing accountability." : "Your receipts and recorded payment destinations for this cashier shift."}</p>
           </div>
           <Link href="/dashboard/city/pos" className="rounded-xl bg-[#d4af45] px-4 py-3 text-center text-sm font-bold text-[#071638]">
             Return to POS
           </Link>
         </header>
+        {data?.access.can_audit ? (
+          <section className="mt-5 rounded-2xl border bg-white p-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => changeView("mine")} className={`rounded-xl px-4 py-3 text-sm font-bold ${view === "mine" ? "bg-[#071638] text-white" : "text-gray-600 hover:bg-gray-50"}`}>My Shift</button>
+              <button onClick={() => changeView("audit")} className={`rounded-xl px-4 py-3 text-sm font-bold ${view === "audit" ? "bg-[#071638] text-white" : "text-gray-600 hover:bg-gray-50"}`}>Cashier Audit</button>
+            </div>
+          </section>
+        ) : null}
+        {view === "audit" && data?.access.can_audit ? (
+          <section className="mt-4 rounded-2xl border bg-white p-5">
+            <label className="block text-xs font-bold uppercase tracking-wide text-gray-500">
+              Cashier and shift to audit
+              <select value={selectedShiftId || data.shift?.id || ""} onChange={(event) => { setSelectedShiftId(event.target.value); setReceiptPage(1); }} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm font-semibold text-[#071638] outline-none focus:border-[#d4af45]">
+                {data.audit_shifts.map((row) => (
+                  <option key={row.id} value={row.id}>{row.cashier_name} · {row.terminal_name} · {new Date(row.opened_at).toLocaleString("en-PH")} · {row.status.replaceAll("_", " ")} · {row.receipt_count} receipt{row.receipt_count === 1 ? "" : "s"}</option>
+                ))}
+              </select>
+            </label>
+            <p className="mt-2 text-xs text-gray-500">Each selection shows only that cashier&apos;s transactions for that specific terminal shift.</p>
+          </section>
+        ) : null}
         {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
         {!data?.shift ? (
           <section className="mt-5 rounded-2xl border bg-white p-10 text-center text-gray-500">No cashier shift history yet.</section>
@@ -135,6 +188,7 @@ export default function PosShiftHistoryPage() {
                 <p className="text-xs font-bold uppercase text-gray-500">Shift status</p>
                 <b className="mt-2 block text-xl capitalize text-[#071638]">{data.shift.status.replace("_", " ")}</b>
                 <p className="mt-1 text-xs text-gray-500">Opened {new Date(data.shift.opened_at).toLocaleString("en-PH")}</p>
+                {data.selected_cashier ? <p className="mt-2 text-xs font-semibold text-[#071638]">{data.selected_cashier.name} · {data.selected_terminal?.name}</p> : null}
               </article>
               <article className="rounded-2xl border bg-white p-5">
                 <p className="text-xs font-bold uppercase text-gray-500">Receipts</p>
@@ -175,7 +229,7 @@ export default function PosShiftHistoryPage() {
               </div>
               <div className="divide-y">
                 {data.transactions.length ? (
-                  data.transactions.map((row) => (
+                  visibleTransactions.map((row) => (
                     <article key={row.id} className="p-5">
                       <div className="flex flex-col justify-between gap-2 sm:flex-row">
                         <div>
@@ -200,8 +254,18 @@ export default function PosShiftHistoryPage() {
                   <p className="p-10 text-center text-sm text-gray-400">No completed sales in this shift.</p>
                 )}
               </div>
+              {data.transactions.length > receiptsPerPage ? (
+                <div className="flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row">
+                  <p className="text-xs text-gray-500">Showing {(receiptPage - 1) * receiptsPerPage + 1}–{Math.min(receiptPage * receiptsPerPage, data.transactions.length)} of {data.transactions.length} receipts</p>
+                  <div className="flex items-center gap-2">
+                    <button disabled={receiptPage === 1} onClick={() => setReceiptPage((page) => Math.max(1, page - 1))} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Previous</button>
+                    <span className="px-2 text-xs font-semibold">Page {receiptPage} of {receiptPages}</span>
+                    <button disabled={receiptPage === receiptPages} onClick={() => setReceiptPage((page) => Math.min(receiptPages, page + 1))} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Next</button>
+                  </div>
+                </div>
+              ) : null}
             </section>
-            {data.shift.status === "open" ? (
+            {view === "mine" && data.shift.status === "open" ? (
               <section className="mt-5 rounded-2xl border border-[#d4af45]/50 bg-[#fffaf0] p-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
@@ -221,7 +285,7 @@ export default function PosShiftHistoryPage() {
                   </button>
                 </div>
               </section>
-            ) : (
+            ) : data.shift.status !== "open" ? (
               <section className="mt-5 rounded-2xl border bg-white p-5">
                 <h2 className="font-bold text-[#071638]">Shift reconciliation result</h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -237,7 +301,9 @@ export default function PosShiftHistoryPage() {
                   ))}
                 </div>
               </section>
-            )}
+            ) : view === "audit" ? (
+              <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">This shift is still open. Final expected cash and variance remain hidden until the assigned cashier counts and closes the shift.</section>
+            ) : null}
           </>
         )}
       </div>

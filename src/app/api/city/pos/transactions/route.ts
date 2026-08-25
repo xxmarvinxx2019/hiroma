@@ -91,13 +91,36 @@ async function receiptFor(clientTransactionId: string, ownerId: string) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'city') return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 })
   const actorId = user.actor_id || user.id
+  const auditRequested = req.nextUrl.searchParams.get('view') === 'audit'
+  const canAudit = !user.is_staff || user.permissions?.includes('pos_approve') === true
+  if (auditRequested && !canAudit) return NextResponse.json({ error: 'You do not have permission to audit cashier shifts.' }, { status: 403 })
   try {
+    const auditShifts = canAudit
+      ? await prisma.posShift.findMany({
+          where: { owner_id: user.id },
+          orderBy: [{ opened_at: 'desc' }],
+          take: 100,
+          select: {
+            id: true,
+            status: true,
+            opened_at: true,
+            local_closed_at: true,
+            opened_by: { select: { id: true, full_name: true, username: true } },
+            terminal: { select: { id: true, name: true, receipt_code: true } },
+            _count: { select: { transactions: true } },
+          },
+        })
+      : []
+    const requestedShiftId = req.nextUrl.searchParams.get('shift_id') || ''
+    const auditedShiftId = auditRequested ? requestedShiftId || auditShifts[0]?.id || '' : ''
     const shift = await prisma.posShift.findFirst({
-      where: { owner_id: user.id, opened_by_id: actorId },
+      where: auditRequested
+        ? { id: auditedShiftId || undefined, owner_id: user.id }
+        : { owner_id: user.id, opened_by_id: actorId },
       orderBy: [{ opened_at: 'desc' }],
       select: {
         id: true,
@@ -109,6 +132,8 @@ export async function GET() {
         variance_snapshot: true,
         opened_at: true,
         local_closed_at: true,
+        opened_by: { select: { id: true, full_name: true, username: true } },
+        terminal: { select: { id: true, name: true, receipt_code: true } },
       },
     })
     if (!shift)
@@ -116,6 +141,18 @@ export async function GET() {
         shift: null,
         transactions: [],
         payment_groups: [],
+        access: { can_audit: canAudit, view: auditRequested ? 'audit' : 'mine' },
+        audit_shifts: auditShifts.map((row) => ({
+          id: row.id,
+          status: row.status,
+          opened_at: row.opened_at,
+          closed_at: row.local_closed_at,
+          cashier_id: row.opened_by.id,
+          cashier_name: row.opened_by.full_name || row.opened_by.username,
+          terminal_name: row.terminal.name,
+          terminal_code: row.terminal.receipt_code,
+          receipt_count: row._count.transactions,
+        })),
       })
     const transactions = await prisma.posTransaction.findMany({
       where: {
@@ -206,6 +243,28 @@ export async function GET() {
       pending_sync_count: pendingSyncCount,
       server_sync_complete: pendingSyncCount === 0,
       totals_hidden_until_close: !closed,
+      access: { can_audit: canAudit, view: auditRequested ? 'audit' : 'mine' },
+      selected_cashier: {
+        id: shift.opened_by.id,
+        name: shift.opened_by.full_name || shift.opened_by.username,
+        username: shift.opened_by.username,
+      },
+      selected_terminal: {
+        id: shift.terminal.id,
+        name: shift.terminal.name,
+        code: shift.terminal.receipt_code,
+      },
+      audit_shifts: auditShifts.map((row) => ({
+        id: row.id,
+        status: row.status,
+        opened_at: row.opened_at,
+        closed_at: row.local_closed_at,
+        cashier_id: row.opened_by.id,
+        cashier_name: row.opened_by.full_name || row.opened_by.username,
+        terminal_name: row.terminal.name,
+        terminal_code: row.terminal.receipt_code,
+        receipt_count: row._count.transactions,
+      })),
     })
   } catch (error) {
     console.error('[POS SHIFT HISTORY]', error)
