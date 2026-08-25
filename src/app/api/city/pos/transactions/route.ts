@@ -100,6 +100,8 @@ export async function GET(req: NextRequest) {
   // Cashiers remain scoped to the shift they personally opened.
   const auditRequested = canAudit
   try {
+    const profile = await prisma.distributorProfile.findUnique({ where: { user_id: user.id }, select: { dist_level: true } })
+    const branchClosingRequired = profile?.dist_level === 'branch'
     const auditShifts = canAudit
       ? await prisma.posShift.findMany({
           where: { owner_id: user.id },
@@ -194,6 +196,13 @@ export async function GET(req: NextRequest) {
         status: { in: ['pending_sync', 'syncing', 'synced_pending_review', 'needs_correction'] },
       },
     })
+    const closingInventory = !auditRequested && branchClosingRequired && ['open', 'needs_review'].includes(shift.status)
+      ? await prisma.inventory.findMany({
+          where: { owner_id: user.id },
+          orderBy: { product: { name: 'asc' } },
+          select: { product_id: true, product: { select: { name: true } } },
+        })
+      : []
     const groups = new Map<
       string,
       {
@@ -215,13 +224,14 @@ export async function GET(req: NextRequest) {
       groups.set(row.payment_method_snapshot, current)
     }
     const closed = shift.status !== 'open'
+    const reconciliationVisible = auditRequested || shift.status === 'finalized'
     return NextResponse.json({
       shift: {
         ...shift,
         opening_cash: Number(shift.opening_cash),
-        expected_cash: closed && shift.expected_cash_snapshot != null ? Number(shift.expected_cash_snapshot) : null,
+        expected_cash: reconciliationVisible && shift.expected_cash_snapshot != null ? Number(shift.expected_cash_snapshot) : null,
         counted_cash: shift.counted_cash != null ? Number(shift.counted_cash) : null,
-        variance: closed && shift.variance_snapshot != null ? Number(shift.variance_snapshot) : null,
+        variance: reconciliationVisible && shift.variance_snapshot != null ? Number(shift.variance_snapshot) : null,
       },
       transactions: transactions.map((row) => ({
         ...row,
@@ -244,6 +254,10 @@ export async function GET(req: NextRequest) {
       pending_sync_count: pendingSyncCount,
       server_sync_complete: pendingSyncCount === 0,
       totals_hidden_until_close: !closed,
+      branch_closing: {
+        required: branchClosingRequired,
+        inventory: closingInventory.map((row) => ({ product_id: row.product_id, product_name: row.product.name })),
+      },
       access: { can_audit: canAudit, view: auditRequested ? 'audit' : 'mine' },
       selected_cashier: {
         id: shift.opened_by.id,

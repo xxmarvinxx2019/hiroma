@@ -19,6 +19,10 @@ type History = {
     terminal_code: string;
     receipt_count: number;
   }>;
+  branch_closing: {
+    required: boolean;
+    inventory: Array<{ product_id: string; product_name: string }>;
+  };
   shift: null | {
     id: string;
     status: string;
@@ -65,7 +69,11 @@ export default function PosShiftHistoryPage() {
   const [selectedShiftId, setSelectedShiftId] = useState("");
   const [receiptPage, setReceiptPage] = useState(1);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [countedCash, setCountedCash] = useState("");
+  const [inventoryCounts, setInventoryCounts] = useState<Record<string, { counted: string; damaged: string; expired: string }>>({});
+  const [recountRequired, setRecountRequired] = useState(false);
+  const [explanation, setExplanation] = useState("");
   const [closing, setClosing] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [localPending, setLocalPending] = useState(0);
@@ -112,9 +120,10 @@ export default function PosShiftHistoryPage() {
   }, []);
 
   async function closeShift() {
-    if (!online || localPending > 0 || !data?.shift || data.shift.status !== "open" || !data.server_sync_complete || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0) return;
+    if (!online || localPending > 0 || !data?.shift || !["open", "needs_review"].includes(data.shift.status) || !data.server_sync_complete || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0) return;
     setClosing(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/city/pos/shifts", {
         method: "PATCH",
@@ -122,10 +131,24 @@ export default function PosShiftHistoryPage() {
         body: JSON.stringify({
           shift_id: data.shift.id,
           counted_cash: Number(countedCash),
+          recount_confirmed: recountRequired,
+          explanation,
+          inventory_counts: data.branch_closing.required
+            ? data.branch_closing.inventory.map((item) => ({
+                product_id: item.product_id,
+                counted_quantity: inventoryCounts[item.product_id]?.counted,
+                damaged_quantity: inventoryCounts[item.product_id]?.damaged || 0,
+                expired_quantity: inventoryCounts[item.product_id]?.expired || 0,
+              }))
+            : undefined,
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to close shift.");
+      if (!response.ok) {
+        if (result.code === "SHIFT_RECOUNT_REQUIRED") setRecountRequired(true);
+        throw new Error(result.error || "Unable to close shift.");
+      }
+      setNotice(result.pending_approval ? "Cash and inventory counts were submitted. This shift is locked and waiting for an independent manager review." : "Shift closed successfully.");
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to close shift.");
@@ -137,6 +160,11 @@ export default function PosShiftHistoryPage() {
   const receiptsPerPage = 10;
   const receiptPages = Math.max(1, Math.ceil((data?.transactions.length || 0) / receiptsPerPage));
   const visibleTransactions = (data?.transactions || []).slice((receiptPage - 1) * receiptsPerPage, receiptPage * receiptsPerPage);
+  const inventoryCountComplete = !data?.branch_closing.required || data.branch_closing.inventory.every((item) => {
+    const row = inventoryCounts[item.product_id];
+    return row && row.counted !== "" && Number.isInteger(Number(row.counted)) && Number(row.counted) >= 0;
+  });
+  const explanationComplete = !data || data.shift?.status !== "needs_review" || explanation.trim().length >= 5;
 
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
@@ -165,6 +193,7 @@ export default function PosShiftHistoryPage() {
           </section>
         ) : null}
         {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
+        {notice && <p className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-800">{notice}</p>}
         {!data?.shift ? (
           <section className="mt-5 rounded-2xl border bg-white p-10 text-center text-gray-500">No cashier shift history yet.</section>
         ) : (
@@ -251,27 +280,52 @@ export default function PosShiftHistoryPage() {
                 </div>
               ) : null}
             </section>
-            {view === "mine" && data.shift.status === "open" ? (
+            {view === "mine" && ["open", "needs_review"].includes(data.shift.status) ? (
               <section className="mt-5 rounded-2xl border border-[#d4af45]/50 bg-[#fffaf0] p-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
-                    <h2 className="font-bold text-[#071638]">Close cashier shift</h2>
-                    <p className="mt-1 text-sm text-gray-600">Count the physical cash in the drawer without seeing the expected amount. The system reveals the variance only after submission.</p>
+                    <h2 className="font-bold text-[#071638]">{data.shift.status === "needs_review" ? "Recount returned shift" : "Submit end-of-shift counts"}</h2>
+                    <p className="mt-1 text-sm text-gray-600">Count the physical cash and every Branch product without seeing the system&apos;s expected values. A manager independently reviews the committed count.</p>
                   </div>
                   <span className={`w-fit rounded-full px-3 py-1.5 text-xs font-bold ${online && data.server_sync_complete && localPending === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"}`}>{!online ? "Offline · close locked" : localPending > 0 ? `${localPending} saved on this device` : data.server_sync_complete ? "Online · fully synced" : `${data.pending_sync_count} awaiting sync`}</span>
                 </div>
                 {(!online || localPending > 0 || !data.server_sync_complete) && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold leading-5 text-red-700">Final shift closing is locked. Reconnect to the internet and synchronize every transaction first so today’s liquidation remains complete and accurate.</p>}
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                  <label className="flex-1 text-xs font-bold">
+                {recountRequired ? <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">A difference was detected. Recount the cash and physical inventory carefully. If a difference remains, explain what was checked before submitting for manager review.</p> : null}
+                <div className="mt-4">
+                  <label className="block text-xs font-bold">
                     Counted drawer cash
                     <input disabled={!online || localPending > 0 || !data.server_sync_complete} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base outline-none disabled:cursor-not-allowed disabled:bg-gray-100" />
                   </label>
-                  <button disabled={!online || localPending > 0 || !data.server_sync_complete || closing || countedCash === "" || Number(countedCash) < 0} onClick={closeShift} className="self-end rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
-                    {closing ? "Closing safely…" : "Submit Count & Close"}
+                </div>
+                {data.branch_closing.required ? (
+                  <div className="mt-5 overflow-hidden rounded-xl border bg-white">
+                    <div className="border-b p-4"><h3 className="text-sm font-bold text-[#071638]">Blind physical inventory count</h3><p className="mt-1 text-xs text-gray-500">Expected quantities are intentionally hidden. Enter the physical quantity currently present.</p></div>
+                    <div className="divide-y">
+                      {data.branch_closing.inventory.map((item) => {
+                        const count = inventoryCounts[item.product_id] || { counted: "", damaged: "", expired: "" };
+                        return <div key={item.product_id} className="grid gap-3 p-4 sm:grid-cols-[1fr_120px_110px_110px] sm:items-end">
+                          <p className="self-center text-sm font-bold text-[#071638]">{item.product_name}</p>
+                          {([['counted', 'Physical count'], ['damaged', 'Damaged'], ['expired', 'Expired']] as const).map(([field, label]) => <label key={field} className="text-xs font-bold text-gray-600">{label}<input disabled={!online || localPending > 0 || !data.server_sync_complete} type="number" min="0" step="1" value={count[field]} onChange={(event) => setInventoryCounts((current) => ({ ...current, [item.product_id]: { ...(current[item.product_id] || { counted: "", damaged: "", expired: "" }), [field]: event.target.value } }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-center text-sm outline-none focus:border-[#d4af45] disabled:bg-gray-100" /></label>)}
+                        </div>;
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+                {recountRequired || data.shift.status === "needs_review" ? <label className="mt-4 block text-xs font-bold text-gray-700">Recount explanation {recountRequired ? "(required if a difference remains)" : "(required)"}<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} placeholder="Describe the recount, missing/damaged items, cash issue, or corrective action taken." className="mt-2 w-full rounded-xl border bg-white p-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label> : null}
+                <div className="mt-5 flex flex-col items-end gap-2 border-t pt-4">
+                  {!inventoryCountComplete ? <p className="text-xs font-semibold text-amber-800">Enter a physical count for every product before submission.</p> : null}
+                  {!explanationComplete ? <p className="text-xs font-semibold text-amber-800">Enter at least 5 characters explaining the recount or unresolved difference.</p> : null}
+                  <button disabled={!online || localPending > 0 || !data.server_sync_complete || closing || countedCash === "" || Number(countedCash) < 0 || !inventoryCountComplete || !explanationComplete} onClick={closeShift} className="rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                    {closing ? "Submitting safely…" : "Submit Counts for Approval"}
                   </button>
                 </div>
               </section>
-            ) : data.shift.status !== "open" ? (
+            ) : view === "mine" && data.shift.status === "locally_closed" ? (
+              <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <h2 className="font-bold text-amber-950">Pending independent manager review</h2>
+                <p className="mt-2 text-sm leading-6 text-amber-900">Your cash and inventory counts are locked. This terminal cannot open another shift until an authorized manager reviews and finalizes this submission.</p>
+              </section>
+            ) : data.shift.status === "finalized" || view === "audit" && data.shift.status !== "open" ? (
               <section className="mt-5 rounded-2xl border bg-white p-5">
                 <h2 className="font-bold text-[#071638]">Shift reconciliation result</h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">

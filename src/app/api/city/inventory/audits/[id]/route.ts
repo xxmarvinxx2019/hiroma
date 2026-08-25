@@ -34,7 +34,7 @@ async function sessionForOwner(id: string, ownerId: string) {
 
 async function submissionForSession(id: string) {
   return prisma.inventoryAuditEvent.findFirst({
-    where: { reference_type: 'inventory_audit', reference_id: id, event_type: { in: ['physical_count_submitted', 'area_manager_surprise_count_submitted'] } },
+    where: { reference_type: 'inventory_audit', reference_id: id, event_type: { in: ['physical_count_submitted', 'area_manager_surprise_count_submitted', 'shift_closing_count_submitted'] } },
     orderBy: { created_at: 'desc' },
     select: { actor_id: true, actor_name_snapshot: true },
   })
@@ -157,7 +157,8 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
       if (!canLocalOwnerReview({ isAuthorizedApprover: true, status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: currentActor.id })) return NextResponse.json({ error: 'You cannot approve your own submitted count. A different authorized owner, manager, or Operations Approver must review it.' }, { status: 403 })
       if (session.items.some((item) => item.counted_quantity === null || item.variance_quantity === null)) return NextResponse.json({ error: 'This count is incomplete.' }, { status: 409 })
       const approvalNotes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) || null : null
-      const hasVariance = session.items.some((item) => item.variance_quantity !== 0)
+      const linkedShift = session.pos_shift_id ? await prisma.posShift.findFirst({ where: { id: session.pos_shift_id, owner_id: user.id }, select: { variance_snapshot: true } }) : null
+      const hasVariance = session.items.some((item) => item.variance_quantity !== 0) || Math.abs(Number(linkedShift?.variance_snapshot || 0)) >= 0.005
       if (hasVariance && (!approvalNotes || approvalNotes.length < 5)) {
         return NextResponse.json({ error: 'Verification notes are required before approving a count with a shortage or overage.' }, { status: 400 })
       }
@@ -206,6 +207,13 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
             },
           })
         }
+        if (session.pos_shift_id) {
+          const finalized = await tx.posShift.updateMany({
+            where: { id: session.pos_shift_id, owner_id: user.id, status: 'locally_closed' },
+            data: { status: 'finalized', active_terminal_key: null, closed_by_id: currentActor.id, server_finalized_at: new Date() },
+          })
+          if (finalized.count !== 1) throw new InventoryAuditConflictError('The linked cashier shift is no longer awaiting approval. Refresh before reviewing it again.')
+        }
       })
       return NextResponse.json({ success: true, status: 'approved' })
     }
@@ -250,6 +258,12 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
         })
         if (claimed.count !== 1) throw new InventoryAuditConflictError('This audit was already reviewed. Refresh to see its latest status.')
         await tx.inventoryAuditEvent.create({ data: { owner_id: user.id, actor_id: currentActor.id, actor_name_snapshot: currentActor.name, event_type: 'physical_count_rejected', reference_type: 'inventory_audit', reference_id: id, reason: notes, metadata: { reference_number: session.reference_number } } })
+        if (session.pos_shift_id) {
+          await tx.posShift.updateMany({
+            where: { id: session.pos_shift_id, owner_id: user.id, status: 'locally_closed' },
+            data: { status: 'needs_review', closing_explanation: notes },
+          })
+        }
       })
       return NextResponse.json({ success: true, status: 'rejected' })
     }

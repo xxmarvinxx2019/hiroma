@@ -401,6 +401,8 @@ model InventoryAuditSession {
   started_at               DateTime             @default(now()) @db.Timestamptz(6)
   created_at               DateTime             @default(now()) @db.Timestamptz(6)
   updated_at               DateTime             @updatedAt @db.Timestamptz(6)
+  pos_shift_id             String?              @unique @db.Uuid
+  pos_shift                PosShift?             @relation(fields: [pos_shift_id], references: [id], onDelete: Restrict)
   items                    InventoryAuditItem[]
 
   @@index([owner_id, status, started_at])
@@ -1043,6 +1045,9 @@ model PosShift {
   expected_cash_snapshot Decimal?                @db.Decimal(12, 2)
   counted_cash           Decimal?                @db.Decimal(12, 2)
   variance_snapshot      Decimal?                @db.Decimal(12, 2)
+  closing_count_attempts Int                     @default(0)
+  closing_explanation    String?                 @db.VarChar(1000)
+  closing_submitted_at   DateTime?               @db.Timestamptz(6)
   opened_at              DateTime                @default(now()) @db.Timestamptz(6)
   local_closed_at        DateTime?               @db.Timestamptz(6)
   server_finalized_at    DateTime?               @db.Timestamptz(6)
@@ -1054,6 +1059,7 @@ model PosShift {
   closed_by              User?                   @relation("PosShiftClosedBy", fields: [closed_by_id], references: [id], onDelete: Restrict)
   transactions           PosTransaction[]
   registration_intakes   PosRegistrationIntake[]
+  inventory_audit        InventoryAuditSession?
 
   @@index([owner_id, status])
   @@index([terminal_id, opened_at])
