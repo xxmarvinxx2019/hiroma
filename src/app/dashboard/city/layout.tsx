@@ -27,6 +27,13 @@ const navItems = [
       { label: 'PINs', href: '/dashboard/city/pins', icon: '🔑' },
       { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
       { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
+      { label: 'Point of Sale', href: '/dashboard/city/pos', icon: '🧾' },
+      { label: 'Registration Center', href: '/dashboard/city/pos/registrations', icon: '📝' },
+      { label: 'Approval Center', href: '/dashboard/city/pos/approvals', icon: '✅' },
+      { label: 'Void & Refunds', href: '/dashboard/city/pos/adjustments', icon: '↩️' },
+      { label: 'Shift History', href: '/dashboard/city/pos/history', icon: '🕘' },
+    { label: 'Sync Center', href: '/dashboard/city/pos/sync', icon: '🔄' },
+    { label: 'POS Settings', href: '/dashboard/city/pos/settings', icon: '⚙️' },
       { label: 'Reports', href: '/dashboard/city/reports', icon: '📈' },
       { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
       { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑' },
@@ -42,6 +49,28 @@ const navItems = [
 
 const staffNavItem = { label: 'Staff', href: '/dashboard/city/staff', icon: '🪪' }
 
+type PendingWorkCounts = {
+  registration_center: number
+  approval_center: number
+  void_refunds: number
+  sync_center: number
+}
+
+const emptyPendingWork: PendingWorkCounts = {
+  registration_center: 0,
+  approval_center: 0,
+  void_refunds: 0,
+  sync_center: 0,
+}
+
+const pendingCountKey: Record<string, keyof PendingWorkCounts> = {
+  '/dashboard/city/pos/registrations': 'registration_center',
+  '/dashboard/city/pos/approvals': 'approval_center',
+  '/dashboard/city/pos/adjustments': 'void_refunds',
+  '/dashboard/city/pos/sync': 'sync_center',
+  '/dashboard/city/pos/settings': 'sync_center',
+}
+
 const navPermission: Record<string, string> = {
   '/dashboard/city': 'dashboard',
   '/dashboard/city/resellers': 'resellers',
@@ -49,7 +78,15 @@ const navPermission: Record<string, string> = {
   '/dashboard/city/pins': 'pins',
   '/dashboard/city/inventory': 'inventory',
   '/dashboard/city/orders': 'orders',
-  '/dashboard/city/reports': 'orders',
+  '/dashboard/city/pos': 'pos',
+  '/dashboard/city/pos/registrations': 'pos|register_reseller',
+  '/dashboard/city/pos/approvals': 'pos_approve',
+  '/dashboard/city/pos/adjustments': 'pos|pos_approve',
+  '/dashboard/city/pos/shift-approvals': 'pos_approve',
+  '/dashboard/city/pos/history': 'pos',
+  '/dashboard/city/pos/sync': 'pos',
+  '/dashboard/city/pos/settings': 'pos',
+  '/dashboard/city/reports': 'reports|orders',
   '/dashboard/city/payment-methods': 'payment_methods',
   '/dashboard/city/pin-requests': 'pin_requests',
 }
@@ -64,6 +101,7 @@ function Sidebar({
   onClose,
   onLogout,
   pendingTransfers,
+  pendingWork,
 }: {
   user: {
     id: string
@@ -80,9 +118,17 @@ function Sidebar({
   onClose: () => void
   onLogout: () => void
   pendingTransfers: number
+  pendingWork: PendingWorkCounts
 }) {
   const isActive = (href: string) => {
     if (href === '/dashboard/city') return pathname === href
+    if (href === '/dashboard/city/pos') return pathname === href
+    if (href === '/dashboard/city/pos/registrations') {
+      return pathname.startsWith(href) || pathname.startsWith('/dashboard/city/pos/new-registration')
+    }
+    if (href === '/dashboard/city/pos/approvals') {
+      return pathname === href || pathname.startsWith('/dashboard/city/pos/registration-approvals') || pathname.startsWith('/dashboard/city/pos/shift-approvals')
+    }
     return pathname.startsWith(href)
   }
 
@@ -107,8 +153,11 @@ function Sidebar({
               {group.section}
             </p>
             {[...group.items, ...(group.section === 'Main' && !user?.is_staff ? [staffNavItem] : [])]
-              .filter((item) => !user?.is_staff || user.permissions?.includes(navPermission[item.href]))
-              .map((item) => (
+              .filter((item) => !user?.is_staff || navPermission[item.href]?.split('|').some((permission) => user.permissions?.includes(permission)))
+              .map((item) => {
+              const workKey = pendingCountKey[item.href]
+              const pendingCount = workKey ? pendingWork[workKey] : 0
+              return (
               <Link
                 key={item.href}
                 href={item.href}
@@ -130,8 +179,17 @@ function Sidebar({
                     {pendingTransfers > 99 ? '99+' : pendingTransfers}
                   </span>
                 )}
+                {pendingCount > 0 && (
+                  <span
+                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
+                    title={`${pendingCount} pending item${pendingCount === 1 ? '' : 's'} requiring attention`}
+                    aria-label={`${pendingCount} pending items requiring attention`}
+                  >
+                    {pendingCount > 99 ? '99+' : pendingCount}
+                  </span>
+                )}
               </Link>
-            ))}
+              )})}
           </div>
         ))}
       </nav>
@@ -176,6 +234,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
   const [profileMenuOpen, setProfileMenuOpen]       = useState(false)
   const [user, setUser]                               = useState<Parameters<typeof Sidebar>[0]['user']>(null)
   const [pendingTransfers, setPendingTransfers]       = useState(0)
+  const [pendingWork, setPendingWork]                 = useState<PendingWorkCounts>(emptyPendingWork)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -219,6 +278,36 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
     }
   }, [user?.id, user?.distributor_profile?.dist_level])
 
+  useEffect(() => {
+    if (!user?.id) return
+
+    let active = true
+    const loadPendingWork = () => {
+      fetch('/api/city/pos/pending-summary', { cache: 'no-store', credentials: 'include' })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (active && data?.counts) setPendingWork({ ...emptyPendingWork, ...data.counts })
+        })
+        .catch(() => undefined)
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadPendingWork()
+    }
+
+    loadPendingWork()
+    const timer = window.setInterval(loadPendingWork, 15_000)
+    window.addEventListener('focus', loadPendingWork)
+    window.addEventListener('hiroma-pos-pending-change', loadPendingWork)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', loadPendingWork)
+      window.removeEventListener('hiroma-pos-pending-change', loadPendingWork)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [user?.id])
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
@@ -227,6 +316,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
   const currentLabel =
     navItems
       .flatMap((g) => g.items)
+      .sort((a, b) => b.href.length - a.href.length)
       .find((i) =>
         i.href === '/dashboard/city' ? pathname === i.href : pathname.startsWith(i.href)
       )?.label || 'Dashboard'
@@ -257,7 +347,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} pendingTransfers={pendingTransfers} />
+        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} pendingTransfers={pendingTransfers} pendingWork={pendingWork} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -265,7 +355,7 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
         <>
           <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} pendingTransfers={pendingTransfers} />
+            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} pendingTransfers={pendingTransfers} pendingWork={pendingWork} />
           </div>
         </>
       )}
@@ -321,6 +411,13 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
                           className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
                           <span className="text-base" aria-hidden="true">&#9881;</span>
                           <span className="text-xs text-[#0D1B3E] font-medium">Settings</span>
+                        </Link>
+                      )}
+                      {user?.is_staff && (
+                        <Link href="/dashboard/city/pos/settings" onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                          <span className="text-base" aria-hidden="true">&#9881;</span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">POS Settings</span>
                         </Link>
                       )}
                     </div>

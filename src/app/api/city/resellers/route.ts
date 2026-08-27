@@ -569,6 +569,7 @@ export async function POST(req: NextRequest) {
       referrer_username,
       actual_parent_node_id,
       actual_position,
+      pos_intake_id,
     } = await req.json();
 
     if (
@@ -785,6 +786,47 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
 
+    const posIntake = pos_intake_id
+      ? await prisma.posRegistrationIntake.findFirst({
+          where: {
+            id: String(pos_intake_id),
+            owner_id: user.id,
+            package_id: pin.package_id,
+            released_at: { not: null },
+            completed_user_id: null,
+            status: { in: ["released_pending_encoding", "encoding_in_progress"] },
+          },
+          select: {
+            id: true,
+            applicant_full_name: true,
+            applicant_mobile: true,
+          },
+        })
+      : null;
+    if (pos_intake_id && !posIntake) {
+      return NextResponse.json(
+        {
+          error:
+            "This POS registration handoff is invalid, incomplete, already encoded, or belongs to another package.",
+        },
+        { status: 409 },
+      );
+    }
+    if (
+      posIntake &&
+      (normalizePersonName(posIntake.applicant_full_name) !==
+        normalizePersonName(cleanFullName) ||
+        posIntake.applicant_mobile.trim() !== mobile.trim())
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The applicant name or mobile number no longer matches the released POS registration. Review the handoff before encoding.",
+        },
+        { status: 409 },
+      );
+    }
+
     // Block if referrer is deactivated (unless it's hiroma)
     if (referrer.username !== "hiroma" && referrer.status !== "active") {
       return NextResponse.json(
@@ -887,7 +929,7 @@ export async function POST(req: NextRequest) {
           `"${pp.product.name}": need ${pp.quantity}, only ${inventoryMap.get(pp.product_id) ?? 0} in stock`,
       );
 
-    if (stockErrors.length > 0) {
+    if (!posIntake && stockErrors.length > 0) {
       return NextResponse.json(
         {
           error: `Insufficient inventory to complete registration:\n${stockErrors.join("\n")}`,
@@ -938,6 +980,44 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hashPassword(password);
 
     const registration = await prisma.$transaction(async (tx) => {
+      if (posIntake) {
+        const locked = await tx.$queryRaw<
+          Array<{ id: string; status: string; completed_user_id: string | null }>
+        >`SELECT id, status, completed_user_id
+           FROM pos_registration_intakes
+           WHERE id = ${posIntake.id}::uuid AND owner_id = ${user.id}
+           FOR UPDATE`;
+        if (
+          !locked[0] ||
+          locked[0].completed_user_id ||
+          !["released_pending_encoding", "encoding_in_progress"].includes(
+            locked[0].status,
+          )
+        ) {
+          throw new Error("POS_REGISTRATION_ALREADY_ENCODED");
+        }
+        if (locked[0].status === "released_pending_encoding") {
+          await tx.posRegistrationIntake.update({
+            where: { id: posIntake.id },
+            data: {
+              status: "encoding_in_progress",
+              encoding_started_at: new Date(),
+              encoder_id: user.actor_id || user.id,
+              pin_id: pin.id,
+            },
+          });
+          await tx.posRegistrationEvent.create({
+            data: {
+              intake_id: posIntake.id,
+              actor_id: user.actor_id || user.id,
+              from_status: "released_pending_encoding",
+              to_status: "encoding_in_progress",
+              action: "encoding_started",
+              metadata: { pin_id: pin.id },
+            },
+          });
+        }
+      }
       await assertPlacementWithinReferrerSubtree(
         tx,
         referrer.id,
@@ -1080,35 +1160,58 @@ export async function POST(req: NextRequest) {
         sourceEventId: pin.id,
       });
 
-      for (const item of packageProducts) {
-        await tx.inventory.update({
-          where: {
-            owner_id_product_id: {
-              owner_id: user.id,
-              product_id: item.product_id,
+      if (!posIntake) {
+        for (const item of packageProducts) {
+          await tx.inventory.update({
+            where: {
+              owner_id_product_id: {
+                owner_id: user.id,
+                product_id: item.product_id,
+              },
             },
+            data: { quantity: { decrement: item.quantity } },
+          });
+        }
+
+        await recordInventoryOutEvents(tx, {
+          ownerId: user.id,
+          actorId: user.id,
+          actorName: user.full_name || user.username || "City Distributor",
+          eventType: "registration_package_release",
+          referenceType: "registration_pin",
+          referenceId: pin.id,
+          reason: `${packageSnapshot.name} products released for new reseller ${created.full_name}`,
+          items: packageProducts.map((item) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_cost: isBranchRegistration
+              ? Number(item.product.branch_price) || Number(item.product.cost_price)
+              : Number(item.product.city_price) || Number(item.product.cost_price),
+          })),
+          metadata: { pin_code: pin.pin_code, reseller_id: created.id, package_id: pin.package_id },
+        });
+      } else {
+        await tx.posRegistrationIntake.update({
+          where: { id: posIntake.id },
+          data: {
+            status: "registration_completed",
+            completed_at: new Date(),
+            completed_user_id: created.id,
+            encoder_id: user.actor_id || user.id,
+            pin_id: pin.id,
           },
-          data: { quantity: { decrement: item.quantity } },
+        });
+        await tx.posRegistrationEvent.create({
+          data: {
+            intake_id: posIntake.id,
+            actor_id: user.actor_id || user.id,
+            from_status: "encoding_in_progress",
+            to_status: "registration_completed",
+            action: "registration_completed",
+            metadata: { reseller_id: created.id, pin_id: pin.id },
+          },
         });
       }
-
-      await recordInventoryOutEvents(tx, {
-        ownerId: user.id,
-        actorId: user.id,
-        actorName: user.full_name || user.username || "City Distributor",
-        eventType: "registration_package_release",
-        referenceType: "registration_pin",
-        referenceId: pin.id,
-        reason: `${packageSnapshot.name} products released for new reseller ${created.full_name}`,
-        items: packageProducts.map((item) => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_cost: isBranchRegistration
-            ? Number(item.product.branch_price) || Number(item.product.cost_price)
-            : Number(item.product.city_price) || Number(item.product.cost_price),
-        })),
-        metadata: { pin_code: pin.pin_code, reseller_id: created.id, package_id: pin.package_id },
-      });
 
       await tx.nameCapRegistry.upsert({
         where: { normalized_name: usernamePlan.identityKey },
@@ -1340,6 +1443,18 @@ export async function POST(req: NextRequest) {
         : null,
     });
   } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message === "POS_REGISTRATION_ALREADY_ENCODED"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "This POS registration was already completed or is being encoded in another session.",
+        },
+        { status: 409 },
+      );
+    }
     if (error instanceof PinAlreadyClaimedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

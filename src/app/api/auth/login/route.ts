@@ -7,7 +7,7 @@ import {
 import { createAuditLog, getClientInfo, formatMemberId } from '@/app/lib/auditLog'
 import { isLoginPortal, isRoleAllowedInPortal, portalAccessError } from '@/app/lib/loginPortal'
 import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
-import { firstAdminStaffRoute } from '@/app/lib/staffPermissions'
+import { firstAdminStaffRoute, firstCityStaffRoute } from '@/app/lib/staffPermissions'
 import { consumeLoginAllowance, resetLoginAccountFailures } from '@/app/lib/loginRateLimit'
 import { normalizeLoginIdentifier } from '@/app/lib/loginRateLimitPolicy'
 
@@ -188,6 +188,8 @@ export async function POST(req: NextRequest) {
       ? '/dashboard/area-manager'
       : user.role === 'staff' && owner.role === 'admin'
       ? firstAdminStaffRoute(permissions || [])
+      : user.role === 'staff' && owner.role === 'city'
+      ? firstCityStaffRoute(permissions || [])
       : getDashboardRoute(owner.role as UserRole)
     return NextResponse.json({
       success: true,

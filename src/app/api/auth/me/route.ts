@@ -30,6 +30,12 @@ export async function GET() {
         role: true,
         status: true,
         address: true,
+        street_address: true,
+        region_name: true,
+        province_name: true,
+        city_muni_name: true,
+        barangay_name: true,
+        zip_code: true,
         created_at: true,
         // Include reseller profile if role is reseller
         password_change_required: true,
@@ -63,7 +69,12 @@ export async function GET() {
             coverage_area: true,
             is_active: true,
             fulfillment_outlet_name: true,
+            fulfillment_outlet_address: true,
+            fulfillment_outlet_region_name: true,
+            fulfillment_outlet_province_name: true,
             fulfillment_outlet_city_muni_name: true,
+            fulfillment_outlet_barangay_name: true,
+            fulfillment_outlet_zip_code: true,
           },
         },
         // Include wallet balance
@@ -92,6 +103,31 @@ export async function GET() {
       )
     }
 
+    const distributor = user.distributor_profile
+    const physicalAddress = [
+      distributor?.fulfillment_outlet_address,
+      distributor?.fulfillment_outlet_barangay_name,
+      distributor?.fulfillment_outlet_city_muni_name,
+      distributor?.fulfillment_outlet_province_name,
+      distributor?.fulfillment_outlet_region_name,
+      distributor?.fulfillment_outlet_zip_code,
+    ].filter((part, index, values): part is string => Boolean(part?.trim()) && values.indexOf(part) === index).join(', ')
+    const registeredAddress = [
+      user.street_address,
+      user.barangay_name,
+      user.city_muni_name,
+      user.province_name,
+      user.region_name,
+      user.zip_code,
+    ].filter((part, index, values): part is string => Boolean(part?.trim()) && values.indexOf(part) === index).join(', ')
+    const hasPhysicalOutlet = Boolean(distributor?.fulfillment_outlet_address?.trim())
+    const posReceiptIdentity = {
+      name: distributor?.fulfillment_outlet_name?.trim() || user.full_name,
+      address: (hasPhysicalOutlet ? physicalAddress : registeredAddress) || user.address || distributor?.coverage_area || '',
+      address_source: hasPhysicalOutlet ? 'physical_outlet' : 'registered_address',
+      distributor_level: distributor?.dist_level || null,
+    }
+
     const passwordReviewDue = user.role === 'reseller' && isPasswordReviewDue(
       user.password_change_required,
       user.password_prompt_due_at,
@@ -99,6 +135,7 @@ export async function GET() {
     const response = NextResponse.json({
       user: {
         ...user,
+        pos_receipt_identity: posReceiptIdentity,
         password_change_required: passwordReviewDue,
         password_review_reason: getPasswordReviewReason(user.password_is_temporary, user.password_retention_stage),
         profile_photo: await getProfilePhotoDisplayUrl(user.profile_photo),

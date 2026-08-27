@@ -65,7 +65,8 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ sessions: data, can_approve: user.is_staff !== true })
+    const canApprove = user.is_staff !== true || user.permissions?.includes('pos_approve') === true
+    return NextResponse.json({ sessions: data, can_approve: canApprove })
   } catch (error) {
     console.error('[INVENTORY AUDITS GET]', error)
     return NextResponse.json({ error: 'Unable to load inventory audits.' }, { status: 500 })

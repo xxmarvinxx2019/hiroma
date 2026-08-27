@@ -9,6 +9,7 @@ import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 
 interface Product {
   id:               string
+  barcode:          string | null
   name:             string
   description:      string | null
   type:             string
@@ -43,6 +44,7 @@ export default function ProductsPage() {
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [form, setForm] = useState({
     name:             '',
+    barcode:          '',
     description:      '',
     type:             'physical',
     srp:              '',
@@ -91,7 +93,7 @@ export default function ProductsPage() {
 
   const openCreate = () => {
     setEditProduct(null)
-    setForm({ name: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', branch_price: '', reseller_price: '', image_url: '', pu_value: '0', binary_eligible: true })
+    setForm({ name: '', barcode: '', description: '', type: 'physical', srp: '', cost_price: '', regional_price: '', provincial_price: '', city_price: '', branch_price: '', reseller_price: '', image_url: '', pu_value: '0', binary_eligible: true })
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -101,6 +103,7 @@ export default function ProductsPage() {
     setEditProduct(p)
     setForm({
       name:             p.name,
+      barcode:          p.barcode || '',
       description:      p.description      || '',
       type:             p.type,
       srp:              String(p.price),
@@ -358,6 +361,18 @@ export default function ProductsPage() {
                   placeholder="e.g. Hiroma Oud 50ml"
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#C9A84C]"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Official barcode <span className="font-normal">(optional)</span></label>
+                <input
+                  value={form.barcode}
+                  onChange={(e) => setForm({ ...form, barcode: e.target.value.toUpperCase().replace(/[^A-Z0-9._-]/g, '') })}
+                  placeholder="Scan or enter the product barcode"
+                  maxLength={64}
+                  className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 font-mono text-sm uppercase outline-none focus:border-[#C9A84C]"
+                />
+                <p className="mt-1 text-[10px] text-gray-400">Must be unique. POS scanners use this value; pricing remains controlled by Admin.</p>
               </div>
 
               <div>

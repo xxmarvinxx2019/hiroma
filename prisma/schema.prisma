@@ -7,75 +7,93 @@ datasource db {
 }
 
 model User {
-  id                             String               @id @default(uuid())
-  member_id                      String               @unique
-  username                       String               @unique
-  full_name                      String
-  email                          String?
-  mobile                         String
-  profile_photo                  String?
-  password_hash                  String
-  login_disabled                 Boolean              @default(false)
-  password_change_required       Boolean              @default(false)
-  temporary_password_retained_at DateTime?
-  password_is_temporary          Boolean              @default(false)
-  password_retention_stage       Int                  @default(0)
-  password_prompt_due_at         DateTime?
-  password_changed_at            DateTime?
-  two_factor_enabled             Boolean              @default(false)
-  two_factor_pin_hash            String?
-  two_factor_failed_attempts     Int                  @default(0)
-  two_factor_locked_until        DateTime?
-  role                           Role
-  status                         UserStatus           @default(active)
-  address                        String?
-  zip_code                       String?
-  street_address                 String?
-  region_code                    String?
-  region_name                    String?
-  province_code                  String?
-  province_name                  String?
-  city_muni_code                 String?
-  city_muni_name                 String?
-  barangay_code                  String?
-  barangay_name                  String?
-  identity_document_type         String?
-  identity_document_hash         String?
-  created_at                     DateTime             @default(now())
-  created_by                     String?
-  sponsored_nodes                BinaryTreeNode[]     @relation("TreeNodeSponsor")
-  binary_tree_node               BinaryTreeNode?      @relation("TreeNodeOwner")
-  commissions_overflow           Commission[]         @relation("CommissionOverflow")
-  commissions_triggered          Commission[]         @relation("CommissionSource")
-  commissions_earned             Commission[]         @relation("CommissionEarner")
-  distributor_profile            DistributorProfile?
-  inventory                      Inventory[]
-  orders_bought                  Order[]              @relation("OrderBuyer")
-  orders_sold                    Order[]              @relation("OrderSeller")
-  payment_methods                PaymentMethod[]
-  payouts_approved               Payout[]             @relation("PayoutApprover")
-  payouts                        Payout[]             @relation("PayoutUser")
-  pins_sold                      Pin[]                @relation("PinSoldTo")
-  pins_generated                 Pin[]                @relation("PinGenerator")
-  pins_used                      Pin[]                @relation("PinUsedBy")
-  resellers_registered           ResellerProfile[]    @relation("ResellerRegisteredBy")
-  reseller_profile               ResellerProfile?
-  creator                        User?                @relation("UserCreatedBy", fields: [created_by], references: [id])
-  created_users                  User[]               @relation("UserCreatedBy")
-  wallet                         Wallet?
-  pairing_logs                   PairingLog[]
-  city_dist_pin_requests         PinRequest[]         @relation("CityDistPinRequests")
-  staff_profile                  StaffProfile?        @relation("StaffAccount")
-  staff_members                  StaffProfile[]       @relation("StaffOwner")
-  notifications                  Notification[]
-  password_reset_tokens          PasswordResetToken[]
-  support_requests               SupportRequest[]
-  assigned_support_requests      SupportRequest[]     @relation("SupportRequestAssignee")
-  support_messages               SupportMessage[]
-  passkey_test_enabled           Boolean              @default(false)
-  passkey_credentials            PasskeyCredential[]
-  passkey_challenges             PasskeyChallenge[]
-  hiro_conversations             HiroConversation[]
+  id                                String                  @id @default(uuid())
+  member_id                         String                  @unique
+  username                          String                  @unique
+  full_name                         String
+  email                             String?
+  mobile                            String
+  profile_photo                     String?
+  password_hash                     String
+  login_disabled                    Boolean                 @default(false)
+  password_change_required          Boolean                 @default(false)
+  temporary_password_retained_at    DateTime?
+  password_is_temporary             Boolean                 @default(false)
+  password_retention_stage          Int                     @default(0)
+  password_prompt_due_at            DateTime?
+  password_changed_at               DateTime?
+  two_factor_enabled                Boolean                 @default(false)
+  two_factor_pin_hash               String?
+  two_factor_failed_attempts        Int                     @default(0)
+  two_factor_locked_until           DateTime?
+  role                              Role
+  status                            UserStatus              @default(active)
+  address                           String?
+  zip_code                          String?
+  street_address                    String?
+  region_code                       String?
+  region_name                       String?
+  province_code                     String?
+  province_name                     String?
+  city_muni_code                    String?
+  city_muni_name                    String?
+  barangay_code                     String?
+  barangay_name                     String?
+  identity_document_type            String?
+  identity_document_hash            String?
+  created_at                        DateTime                @default(now())
+  created_by                        String?
+  sponsored_nodes                   BinaryTreeNode[]        @relation("TreeNodeSponsor")
+  binary_tree_node                  BinaryTreeNode?         @relation("TreeNodeOwner")
+  commissions_overflow              Commission[]            @relation("CommissionOverflow")
+  commissions_triggered             Commission[]            @relation("CommissionSource")
+  commissions_earned                Commission[]            @relation("CommissionEarner")
+  distributor_profile               DistributorProfile?
+  inventory                         Inventory[]
+  orders_bought                     Order[]                 @relation("OrderBuyer")
+  orders_sold                       Order[]                 @relation("OrderSeller")
+  payment_methods                   PaymentMethod[]
+  payouts_approved                  Payout[]                @relation("PayoutApprover")
+  payouts                           Payout[]                @relation("PayoutUser")
+  pins_sold                         Pin[]                   @relation("PinSoldTo")
+  pins_generated                    Pin[]                   @relation("PinGenerator")
+  pins_used                         Pin[]                   @relation("PinUsedBy")
+  resellers_registered              ResellerProfile[]       @relation("ResellerRegisteredBy")
+  reseller_profile                  ResellerProfile?
+  creator                           User?                   @relation("UserCreatedBy", fields: [created_by], references: [id])
+  created_users                     User[]                  @relation("UserCreatedBy")
+  wallet                            Wallet?
+  pairing_logs                      PairingLog[]
+  city_dist_pin_requests            PinRequest[]            @relation("CityDistPinRequests")
+  staff_profile                     StaffProfile?           @relation("StaffAccount")
+  staff_members                     StaffProfile[]          @relation("StaffOwner")
+  notifications                     Notification[]
+  password_reset_tokens             PasswordResetToken[]
+  support_requests                  SupportRequest[]
+  assigned_support_requests         SupportRequest[]        @relation("SupportRequestAssignee")
+  support_messages                  SupportMessage[]
+  passkey_test_enabled              Boolean                 @default(false)
+  passkey_credentials               PasskeyCredential[]
+  passkey_challenges                PasskeyChallenge[]
+  hiro_conversations                HiroConversation[]
+  pos_terminals                     PosTerminal[]           @relation("PosTerminalOwner")
+  pos_shifts                        PosShift[]              @relation("PosShiftOwner")
+  pos_shifts_opened                 PosShift[]              @relation("PosShiftOpenedBy")
+  pos_shifts_closed                 PosShift[]              @relation("PosShiftClosedBy")
+  pos_transactions                  PosTransaction[]        @relation("PosTransactionOwner")
+  pos_transactions_created          PosTransaction[]        @relation("PosTransactionCashier")
+  pos_transactions_reviewed         PosTransaction[]        @relation("PosTransactionReviewer")
+  pos_transactions_as_member        PosTransaction[]        @relation("PosTransactionMember")
+  pos_registration_intakes          PosRegistrationIntake[] @relation("PosRegistrationOwner")
+  pos_registration_intakes_created  PosRegistrationIntake[] @relation("PosRegistrationCashier")
+  pos_registration_intakes_approved PosRegistrationIntake[] @relation("PosRegistrationApprover")
+  pos_registration_intakes_released PosRegistrationIntake[] @relation("PosRegistrationReleaser")
+  pos_registration_intakes_encoded  PosRegistrationIntake[] @relation("PosRegistrationEncoder")
+  pos_registration_accounts         PosRegistrationIntake[] @relation("PosRegistrationCompletedUser")
+  pos_registration_events           PosRegistrationEvent[]  @relation("PosRegistrationEventActor")
+  pos_adjustment_requests_created   PosAdjustmentRequest[]  @relation("PosAdjustmentRequester")
+  pos_adjustment_requests_reviewed  PosAdjustmentRequest[]  @relation("PosAdjustmentReviewer")
+  pos_adjustment_requests_owned     PosAdjustmentRequest[]  @relation("PosAdjustmentOwner")
 
   @@map("users")
 }
@@ -195,21 +213,22 @@ model ResellerProfile {
 }
 
 model Package {
-  id                    String            @id @default(uuid())
-  name                  String
-  price                 Decimal           @db.Decimal(10, 2)
-  direct_referral_bonus Decimal           @db.Decimal(10, 2)
-  pairing_bonus_value   Decimal           @db.Decimal(10, 2)
-  point_php_value       Decimal           @db.Decimal(10, 2)
-  point_reset_days      Int               @default(30)
-  is_active             Boolean           @default(true)
-  created_at            DateTime          @default(now())
-  products              PackageProduct[]
-  pins                  Pin[]
-  reseller_profiles     ResellerProfile[]
-  pin_requests          PinRequest[]
-  ranks                 Rank[]
-  rank_periods          RankPeriod[]
+  id                       String                  @id @default(uuid())
+  name                     String
+  price                    Decimal                 @db.Decimal(10, 2)
+  direct_referral_bonus    Decimal                 @db.Decimal(10, 2)
+  pairing_bonus_value      Decimal                 @db.Decimal(10, 2)
+  point_php_value          Decimal                 @db.Decimal(10, 2)
+  point_reset_days         Int                     @default(30)
+  is_active                Boolean                 @default(true)
+  created_at               DateTime                @default(now())
+  products                 PackageProduct[]
+  pins                     Pin[]
+  reseller_profiles        ResellerProfile[]
+  pin_requests             PinRequest[]
+  ranks                    Rank[]
+  rank_periods             RankPeriod[]
+  pos_registration_intakes PosRegistrationIntake[]
 
   @@map("packages")
 }
@@ -226,34 +245,35 @@ model PackageProduct {
 }
 
 model Pin {
-  id                                 String           @id @default(uuid())
-  pin_code                           String           @unique
+  id                                 String                 @id @default(uuid())
+  pin_code                           String                 @unique
   package_id                         String
   city_dist_id                       String
-  status                             PinStatus        @default(unused)
+  status                             PinStatus              @default(unused)
   used_by                            String?
   used_at                            DateTime?
   cancelled_at                       DateTime?
-  cancelled_by                       String?          @db.Uuid
-  cancellation_reason                String?          @db.VarChar(500)
+  cancelled_by                       String?                @db.Uuid
+  cancellation_reason                String?                @db.VarChar(500)
   generated_by                       String
   // Registration PINs fund a new account. Upgrade PINs fund only the
   // incremental package difference and name the source package.
-  pin_type                           String           @default("registration") @db.VarChar
-  upgrade_from_package_id            String?          @db.Uuid
-  pin_allocation_snapshot            Decimal?         @db.Decimal(12, 2)
-  upgrade_customer_payment_snapshot  Decimal?         @db.Decimal(12, 2)
-  upgrade_reseller_value_snapshot    Decimal?         @db.Decimal(12, 2)
-  upgrade_acquisition_cost_snapshot  Decimal?         @db.Decimal(12, 2)
-  upgrade_direct_allocation_snapshot Decimal?         @db.Decimal(12, 2)
-  upgrade_binary_allocation_snapshot Decimal?         @db.Decimal(12, 2)
+  pin_type                           String                 @default("registration") @db.VarChar
+  upgrade_from_package_id            String?                @db.Uuid
+  pin_allocation_snapshot            Decimal?               @db.Decimal(12, 2)
+  upgrade_customer_payment_snapshot  Decimal?               @db.Decimal(12, 2)
+  upgrade_reseller_value_snapshot    Decimal?               @db.Decimal(12, 2)
+  upgrade_acquisition_cost_snapshot  Decimal?               @db.Decimal(12, 2)
+  upgrade_direct_allocation_snapshot Decimal?               @db.Decimal(12, 2)
+  upgrade_binary_allocation_snapshot Decimal?               @db.Decimal(12, 2)
   upgrade_points_difference_snapshot Int?
-  created_at                         DateTime         @default(now())
-  city_distributor                   User             @relation("PinSoldTo", fields: [city_dist_id], references: [id])
-  generator                          User             @relation("PinGenerator", fields: [generated_by], references: [id])
-  package                            Package          @relation(fields: [package_id], references: [id])
-  used_by_user                       User?            @relation("PinUsedBy", fields: [used_by], references: [id])
+  created_at                         DateTime               @default(now())
+  city_distributor                   User                   @relation("PinSoldTo", fields: [city_dist_id], references: [id])
+  generator                          User                   @relation("PinGenerator", fields: [generated_by], references: [id])
+  package                            Package                @relation(fields: [package_id], references: [id])
+  used_by_user                       User?                  @relation("PinUsedBy", fields: [used_by], references: [id])
   reseller_profile                   ResellerProfile?
+  pos_registration_intake            PosRegistrationIntake?
 
   @@index([city_dist_id, status])
   @@index([city_dist_id, pin_type, status])
@@ -262,6 +282,7 @@ model Pin {
 
 model Product {
   id               String                  @id @default(uuid())
+  barcode          String?                 @unique
   name             String
   description      String?
   type             ProductType
@@ -279,6 +300,8 @@ model Product {
   binary_eligible  Boolean                 @default(true)
   inventory        Inventory[]
   order_items      OrderItem[]
+  pos_items        PosTransactionItem[]
+  pos_allowances   PosInventoryAllowance[]
   package_products PackageProduct[]
   area_visibility  ProductAreaVisibility[]
 
@@ -382,6 +405,8 @@ model InventoryAuditSession {
   started_at               DateTime             @default(now()) @db.Timestamptz(6)
   created_at               DateTime             @default(now()) @db.Timestamptz(6)
   updated_at               DateTime             @updatedAt @db.Timestamptz(6)
+  pos_shift_id             String?              @unique @db.Uuid
+  pos_shift                PosShift?            @relation(fields: [pos_shift_id], references: [id], onDelete: Restrict)
   items                    InventoryAuditItem[]
 
   @@index([owner_id, status, started_at])
@@ -923,24 +948,24 @@ model DirectReferralPayoutConsumption {
 }
 
 model Order {
-  id                         String      @id @default(uuid())
-  order_number               String?     @unique
+  id                         String          @id @default(uuid())
+  order_number               String?         @unique
   buyer_id                   String
   seller_id                  String
   order_type                 OrderType
-  status                     OrderStatus @default(pending)
-  total_amount               Decimal     @db.Decimal(10, 2)
-  is_cross_purchase          Boolean     @default(false)
-  payment_method             String?     @default("cash") @db.VarChar
-  payment_reference          String?     @db.VarChar
-  payment_status             String?     @default("unpaid") @db.VarChar
-  fulfillment_method         String      @default("partner_pickup") @db.VarChar
-  shipping_status            String?     @db.VarChar
-  shipping_fee               Decimal     @default(0) @db.Decimal(10, 2)
-  courier_name               String?     @db.VarChar
-  courier_service            String?     @db.VarChar
-  courier_quote_reference    String?     @db.VarChar
-  is_non_member_sale         Boolean     @default(false)
+  status                     OrderStatus     @default(pending)
+  total_amount               Decimal         @db.Decimal(10, 2)
+  is_cross_purchase          Boolean         @default(false)
+  payment_method             String?         @default("cash") @db.VarChar
+  payment_reference          String?         @db.VarChar
+  payment_status             String?         @default("unpaid") @db.VarChar
+  fulfillment_method         String          @default("partner_pickup") @db.VarChar
+  shipping_status            String?         @db.VarChar
+  shipping_fee               Decimal         @default(0) @db.Decimal(10, 2)
+  courier_name               String?         @db.VarChar
+  courier_service            String?         @db.VarChar
+  courier_quote_reference    String?         @db.VarChar
+  is_non_member_sale         Boolean         @default(false)
   customer_name              String?
   delivery_address           String?
   market_region_code         String?
@@ -961,11 +986,12 @@ model Order {
   notes                      String?
   delivered_at               DateTime?
   paid_at                    DateTime?
-  created_at                 DateTime    @default(now())
-  updated_at                 DateTime    @default(now()) @updatedAt
-  buyer                      User        @relation("OrderBuyer", fields: [buyer_id], references: [id])
-  seller                     User        @relation("OrderSeller", fields: [seller_id], references: [id])
+  created_at                 DateTime        @default(now())
+  updated_at                 DateTime        @default(now()) @updatedAt
+  buyer                      User            @relation("OrderBuyer", fields: [buyer_id], references: [id])
+  seller                     User            @relation("OrderSeller", fields: [seller_id], references: [id])
   items                      OrderItem[]
+  pos_transaction            PosTransaction?
 
   @@index([fulfillment_method, status], map: "orders_fulfillment_method_status_idx")
   @@map("orders")
@@ -983,6 +1009,287 @@ model OrderItem {
   product               Product  @relation(fields: [product_id], references: [id])
 
   @@map("order_items")
+}
+
+model PosTerminal {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  owner_id              String
+  installation_id       String                  @unique @db.VarChar(120)
+  name                  String                  @db.VarChar(120)
+  receipt_code          String                  @unique @db.VarChar(7)
+  receipt_sequence_next Int                     @default(1)
+  platform              String?                 @db.VarChar(80)
+  is_active             Boolean                 @default(true)
+  last_catalog_at       DateTime?               @db.Timestamptz(6)
+  last_inventory_at     DateTime?               @db.Timestamptz(6)
+  last_synced_at        DateTime?               @db.Timestamptz(6)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @updatedAt @db.Timestamptz(6)
+  owner                 User                    @relation("PosTerminalOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  shifts                PosShift[]
+  transactions          PosTransaction[]
+  sync_events           PosSyncEvent[]
+  inventory_allowance   PosInventoryAllowance[]
+  registration_intakes  PosRegistrationIntake[]
+
+  @@unique([owner_id, name])
+  @@index([owner_id, is_active])
+  @@map("pos_terminals")
+}
+
+model PosShift {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  owner_id               String
+  terminal_id            String                  @db.Uuid
+  opened_by_id           String
+  closed_by_id           String?
+  status                 PosShiftStatus          @default(open)
+  active_terminal_key    String?                 @unique @db.Uuid
+  opening_cash           Decimal                 @default(0) @db.Decimal(12, 2)
+  expected_cash_snapshot Decimal?                @db.Decimal(12, 2)
+  counted_cash           Decimal?                @db.Decimal(12, 2)
+  variance_snapshot      Decimal?                @db.Decimal(12, 2)
+  closing_count_attempts Int                     @default(0)
+  closing_explanation    String?                 @db.VarChar(1000)
+  closing_submitted_at   DateTime?               @db.Timestamptz(6)
+  opened_at              DateTime                @default(now()) @db.Timestamptz(6)
+  local_closed_at        DateTime?               @db.Timestamptz(6)
+  server_finalized_at    DateTime?               @db.Timestamptz(6)
+  created_at             DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                @updatedAt @db.Timestamptz(6)
+  owner                  User                    @relation("PosShiftOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  terminal               PosTerminal             @relation(fields: [terminal_id], references: [id], onDelete: Restrict)
+  opened_by              User                    @relation("PosShiftOpenedBy", fields: [opened_by_id], references: [id], onDelete: Restrict)
+  closed_by              User?                   @relation("PosShiftClosedBy", fields: [closed_by_id], references: [id], onDelete: Restrict)
+  transactions           PosTransaction[]
+  registration_intakes   PosRegistrationIntake[]
+  inventory_audit        InventoryAuditSession?
+
+  @@index([owner_id, status])
+  @@index([terminal_id, opened_at])
+  @@map("pos_shifts")
+}
+
+// The client UUID is permanent across retries. The unique constraint is the
+// server-side guard against duplicate orders, registrations, and stock release.
+model PosTransaction {
+  id                       String                @id @default(uuid()) @db.Uuid
+  client_transaction_id    String                @unique @db.Uuid
+  receipt_number           String                @unique @db.VarChar(80)
+  receipt_sequence         Int?
+  owner_id                 String
+  terminal_id              String                @db.Uuid
+  shift_id                 String?               @db.Uuid
+  cashier_id               String
+  payment_method_id        String?
+  transaction_type         PosTransactionType
+  status                   PosTransactionStatus  @default(pending_sync)
+  member_id                String?
+  customer_name_snapshot   String?
+  payment_method_snapshot  String                @db.VarChar(120)
+  payment_reference        String?               @db.VarChar(160)
+  subtotal_snapshot        Decimal               @db.Decimal(12, 2)
+  discount_snapshot        Decimal               @default(0) @db.Decimal(12, 2)
+  total_snapshot           Decimal               @db.Decimal(12, 2)
+  amount_received_snapshot Decimal               @db.Decimal(12, 2)
+  change_snapshot          Decimal               @default(0) @db.Decimal(12, 2)
+  order_id                 String?               @unique
+  registration_id          String?               @unique @db.Uuid
+  registration_payload     Json?
+  notes                    String?
+  local_created_at         DateTime              @db.Timestamptz(6)
+  server_received_at       DateTime?             @db.Timestamptz(6)
+  finalized_at             DateTime?             @db.Timestamptz(6)
+  reviewed_by_id           String?
+  reviewed_at              DateTime?             @db.Timestamptz(6)
+  review_notes             String?               @db.VarChar(500)
+  created_at               DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime              @updatedAt @db.Timestamptz(6)
+  owner                    User                  @relation("PosTransactionOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  terminal                 PosTerminal           @relation(fields: [terminal_id], references: [id], onDelete: Restrict)
+  shift                    PosShift?             @relation(fields: [shift_id], references: [id], onDelete: Restrict)
+  cashier                  User                  @relation("PosTransactionCashier", fields: [cashier_id], references: [id], onDelete: Restrict)
+  reviewer                 User?                 @relation("PosTransactionReviewer", fields: [reviewed_by_id], references: [id], onDelete: Restrict)
+  member                   User?                 @relation("PosTransactionMember", fields: [member_id], references: [id], onDelete: Restrict)
+  order                    Order?                @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  items                    PosTransactionItem[]
+  sync_events              PosSyncEvent[]
+  adjustment_request       PosAdjustmentRequest?
+
+  @@unique([payment_method_id, payment_reference])
+  @@unique([terminal_id, receipt_sequence])
+  @@index([owner_id, status, local_created_at])
+  @@index([terminal_id, status])
+  @@index([shift_id])
+  @@index([owner_id, status, reviewed_at])
+  @@map("pos_transactions")
+}
+
+// Completed receipts remain immutable. A separate request records who asked
+// for a full void/refund, why, and which independent approver decided it.
+model PosAdjustmentRequest {
+  id                 String         @id @default(uuid()) @db.Uuid
+  owner_id           String
+  pos_transaction_id String         @unique @db.Uuid
+  requested_by_id    String
+  reviewed_by_id     String?
+  request_type       String         @db.VarChar(20)
+  status             String         @default("pending") @db.VarChar(20)
+  reason             String         @db.VarChar(500)
+  review_notes       String?        @db.VarChar(500)
+  amount_snapshot    Decimal        @db.Decimal(12, 2)
+  requested_at       DateTime       @default(now()) @db.Timestamptz(6)
+  reviewed_at        DateTime?      @db.Timestamptz(6)
+  created_at         DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime       @updatedAt @db.Timestamptz(6)
+  transaction        PosTransaction @relation(fields: [pos_transaction_id], references: [id], onDelete: Restrict)
+  owner              User           @relation("PosAdjustmentOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  requester          User           @relation("PosAdjustmentRequester", fields: [requested_by_id], references: [id], onDelete: Restrict)
+  reviewer           User?          @relation("PosAdjustmentReviewer", fields: [reviewed_by_id], references: [id], onDelete: Restrict)
+
+  @@index([owner_id, status, requested_at])
+  @@map("pos_adjustment_requests")
+}
+
+model PosTransactionItem {
+  id                    String         @id @default(uuid()) @db.Uuid
+  pos_transaction_id    String         @db.Uuid
+  product_id            String
+  product_name_snapshot String
+  product_type_snapshot String         @db.VarChar(40)
+  quantity              Int
+  unit_price_snapshot   Decimal        @db.Decimal(12, 2)
+  unit_cost_snapshot    Decimal        @db.Decimal(12, 2)
+  pu_value_snapshot     Int            @default(0)
+  subtotal_snapshot     Decimal        @db.Decimal(12, 2)
+  local_stock_before    Int
+  local_stock_after     Int
+  transaction           PosTransaction @relation(fields: [pos_transaction_id], references: [id], onDelete: Cascade)
+  product               Product        @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@index([pos_transaction_id])
+  @@index([product_id])
+  @@map("pos_transaction_items")
+}
+
+model PosInventoryAllowance {
+  id                 String      @id @default(uuid()) @db.Uuid
+  owner_id           String
+  terminal_id        String      @db.Uuid
+  product_id         String
+  allocated_quantity Int
+  consumed_quantity  Int         @default(0)
+  revision           Int         @default(1)
+  expires_at         DateTime    @db.Timestamptz(6)
+  created_at         DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime    @updatedAt @db.Timestamptz(6)
+  terminal           PosTerminal @relation(fields: [terminal_id], references: [id], onDelete: Cascade)
+  product            Product     @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@unique([terminal_id, product_id])
+  @@index([owner_id, expires_at])
+  @@map("pos_inventory_allowances")
+}
+
+model PosSyncEvent {
+  id                 String          @id @default(uuid()) @db.Uuid
+  terminal_id        String          @db.Uuid
+  pos_transaction_id String?         @db.Uuid
+  event_type         String          @db.VarChar(80)
+  outcome            String          @db.VarChar(40)
+  request_checksum   String?         @db.VarChar(128)
+  details            Json?
+  created_at         DateTime        @default(now()) @db.Timestamptz(6)
+  terminal           PosTerminal     @relation(fields: [terminal_id], references: [id], onDelete: Cascade)
+  transaction        PosTransaction? @relation(fields: [pos_transaction_id], references: [id], onDelete: SetNull)
+
+  @@index([terminal_id, created_at])
+  @@index([pos_transaction_id, created_at])
+  @@map("pos_sync_events")
+}
+
+// A POS registration intake is deliberately separate from the reseller
+// account. It records payment and physical package release first, while the
+// existing reseller registration workflow remains the only account creator.
+// client_intake_id and released_at are the idempotency guards that prevent a
+// retry from creating a second intake or deducting package stock twice.
+model PosRegistrationIntake {
+  id                          String                      @id @default(uuid()) @db.Uuid
+  client_intake_id            String                      @unique @db.Uuid
+  receipt_number              String                      @unique @db.VarChar(80)
+  owner_id                    String
+  terminal_id                 String                      @db.Uuid
+  shift_id                    String                      @db.Uuid
+  cashier_id                  String
+  package_id                  String
+  payment_method_id           String?
+  pin_id                      String?                     @unique
+  status                      PosRegistrationIntakeStatus @default(draft_intake)
+  applicant_full_name         String                      @db.VarChar(180)
+  applicant_mobile            String                      @db.VarChar(40)
+  applicant_email             String?                     @db.VarChar(180)
+  applicant_birthday          DateTime                    @db.Date
+  applicant_birthplace        String                      @db.VarChar(240)
+  applicant_address           Json
+  identity_document_type      String?                     @db.VarChar(80)
+  identity_document_reference String?                     @db.VarChar(180)
+  referrer_username           String                      @db.VarChar(120)
+  preferred_position          String?                     @db.VarChar(10)
+  applicant_snapshot          Json
+  payment_method_snapshot     String                      @db.VarChar(160)
+  payment_reference           String?                     @db.VarChar(160)
+  payment_proof_url           String?
+  amount_snapshot             Decimal                     @db.Decimal(12, 2)
+  captured_offline            Boolean                     @default(false)
+  payment_verified_at         DateTime?                   @db.Timestamptz(6)
+  approver_id                 String?
+  released_at                 DateTime?                   @db.Timestamptz(6)
+  released_by_id              String?
+  encoding_started_at         DateTime?                   @db.Timestamptz(6)
+  encoder_id                  String?
+  completed_at                DateTime?                   @db.Timestamptz(6)
+  completed_user_id           String?                     @unique
+  exception_reason            String?                     @db.VarChar(500)
+  notes                       String?                     @db.VarChar(1000)
+  local_created_at            DateTime                    @db.Timestamptz(6)
+  server_received_at          DateTime                    @default(now()) @db.Timestamptz(6)
+  created_at                  DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                    @updatedAt @db.Timestamptz(6)
+  owner                       User                        @relation("PosRegistrationOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  terminal                    PosTerminal                 @relation(fields: [terminal_id], references: [id], onDelete: Restrict)
+  shift                       PosShift                    @relation(fields: [shift_id], references: [id], onDelete: Restrict)
+  cashier                     User                        @relation("PosRegistrationCashier", fields: [cashier_id], references: [id], onDelete: Restrict)
+  approver                    User?                       @relation("PosRegistrationApprover", fields: [approver_id], references: [id], onDelete: Restrict)
+  released_by                 User?                       @relation("PosRegistrationReleaser", fields: [released_by_id], references: [id], onDelete: Restrict)
+  encoder                     User?                       @relation("PosRegistrationEncoder", fields: [encoder_id], references: [id], onDelete: Restrict)
+  completed_user              User?                       @relation("PosRegistrationCompletedUser", fields: [completed_user_id], references: [id], onDelete: Restrict)
+  package                     Package                     @relation(fields: [package_id], references: [id], onDelete: Restrict)
+  pin                         Pin?                        @relation(fields: [pin_id], references: [id], onDelete: Restrict)
+  events                      PosRegistrationEvent[]
+
+  @@unique([payment_method_id, payment_reference])
+  @@index([owner_id, status, created_at])
+  @@index([cashier_id, shift_id])
+  @@index([terminal_id, created_at])
+  @@map("pos_registration_intakes")
+}
+
+model PosRegistrationEvent {
+  id          String                       @id @default(uuid()) @db.Uuid
+  intake_id   String                       @db.Uuid
+  actor_id    String
+  from_status PosRegistrationIntakeStatus?
+  to_status   PosRegistrationIntakeStatus
+  action      String                       @db.VarChar(80)
+  reason      String?                      @db.VarChar(500)
+  metadata    Json?
+  created_at  DateTime                     @default(now()) @db.Timestamptz(6)
+  intake      PosRegistrationIntake        @relation(fields: [intake_id], references: [id], onDelete: Cascade)
+  actor       User                         @relation("PosRegistrationEventActor", fields: [actor_id], references: [id], onDelete: Restrict)
+
+  @@index([intake_id, created_at])
+  @@index([actor_id, created_at])
+  @@map("pos_registration_events")
 }
 
 model AddressGeocodeCache {
@@ -1304,6 +1611,43 @@ enum OrderStatus {
   ready_for_pickup
   delivered
   cancelled
+}
+
+enum PosShiftStatus {
+  open
+  locally_closed
+  finalized
+  needs_review
+}
+
+enum PosTransactionType {
+  member_sale
+  non_member_sale
+  new_reseller_registration
+}
+
+enum PosTransactionStatus {
+  pending_sync
+  syncing
+  synced_pending_review
+  approved
+  needs_correction
+  rejected
+  finalized
+  voided
+  refunded
+}
+
+enum PosRegistrationIntakeStatus {
+  draft_intake
+  pending_payment_verification
+  payment_verified_ready_for_release
+  released_pending_encoding
+  encoding_in_progress
+  registration_completed
+  needs_correction
+  payment_rejected
+  cancelled_refund_required
 }
 
 enum PayoutStatus {

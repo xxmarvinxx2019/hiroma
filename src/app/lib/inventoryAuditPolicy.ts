@@ -3,12 +3,12 @@ export function canLocalAccountCount(isStaff: boolean, starterStaffType: string 
 }
 
 export function canLocalOwnerReview(params: {
-  isStaff: boolean
+  isAuthorizedApprover: boolean
   status: string
   submitterId: string | null | undefined
   starterId: string
   actorId: string
 }) {
   const submitterId = params.submitterId || params.starterId
-  return !params.isStaff && params.status === 'submitted' && submitterId !== params.actorId
+  return params.isAuthorizedApprover && params.status === 'submitted' && submitterId !== params.actorId
 }
