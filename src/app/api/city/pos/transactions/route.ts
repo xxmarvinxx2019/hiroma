@@ -5,7 +5,9 @@ import { createAuditLog, getClientInfo } from '@/app/lib/auditLog'
 import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
 import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+import { consumeWalkInScanProof, InvalidWalkInScanProofError } from '@/app/lib/walkInScanProof'
 import prisma from '@/app/lib/prisma'
+import { notifyPosReviewers } from '@/app/lib/posNotifications'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RECEIPT = /^HRM-([A-Z0-9]{3})-([A-F0-9]{7})-([0-9]{6})-([0-9]{6,})$/
@@ -316,6 +318,7 @@ export async function POST(req: NextRequest) {
     const shiftId = text(body.shift_id, 36)
     const customerType = body.customer_type === 'member' ? 'member' : body.customer_type === 'non_member' ? 'non_member' : ''
     const memberId = text(body.member_id, 100)
+    const scanProof = text(body.scan_proof, 128)
     const customerName = text(body.customer_name, 120)
     const paymentSelection = text(body.payment_method, 120)
     const paymentReference = text(body.payment_reference, 160) || null
@@ -334,7 +337,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
-    if (!customerType || (customerType === 'member' && !memberId) || !items || !paymentSelection || !Number.isFinite(amountReceived) || amountReceived < 0 || Number.isNaN(localCreatedAt.getTime())) {
+    if (!customerType || (customerType === 'member' && (!memberId || !scanProof)) || !items || !paymentSelection || !Number.isFinite(amountReceived) || amountReceived < 0 || Number.isNaN(localCreatedAt.getTime())) {
       return NextResponse.json(
         {
           error: 'Review the customer, cart, payment, and transaction details.',
@@ -395,6 +398,7 @@ export async function POST(req: NextRequest) {
               })
             : null
         if (customerType === 'member' && !member) throw new Error('POS_MEMBER_INVALID')
+        if (member) await consumeWalkInScanProof(tx, scanProof, user.id, member.id)
 
         let paymentMethodSnapshot = 'cash'
         let paymentMethodId: string | null = null
@@ -653,6 +657,19 @@ export async function POST(req: NextRequest) {
       },
       ...client,
     })
+    if (result.pendingReview) {
+      await notifyPosReviewers({
+        ownerId: user.id,
+        actorId,
+        permission: 'pos_approve',
+        type: 'pos_payment_pending',
+        title: 'POS payment needs verification',
+        message: `Payment for receipt ${receipt.receipt_number} is waiting for an independent approver. Do not release the products yet.`,
+        entityType: 'pos_transaction',
+        entityId: receipt.transaction_id,
+        actionUrl: '/dashboard/city/pos/approvals',
+      })
+    }
     return NextResponse.json({ receipt, replayed: false, rewards_pending: rewardsPending, payment_pending: result.pendingReview }, { status: 201 })
   } catch (error) {
     console.error('[POS FINALIZE]', error)
@@ -670,6 +687,12 @@ export async function POST(req: NextRequest) {
         },
         { status: 409 },
       )
+    if (error instanceof InvalidWalkInScanProofError) {
+      return NextResponse.json(
+        { error: error.message, code: 'POS_MEMBER_SCAN_REQUIRED' },
+        { status: 409 },
+      )
+    }
     const responses: Record<string, [string, number]> = {
       POS_ID_CONFLICT: ['That transaction identifier is already assigned to another location.', 409],
       POS_TERMINAL_INVALID: ['This POS terminal is inactive or no longer assigned to this location.', 403],

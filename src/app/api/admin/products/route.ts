@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+
+function normalizedBarcode(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const barcode = value.trim().toUpperCase()
+  return /^[A-Z0-9][A-Z0-9._-]{3,63}$/.test(barcode) ? barcode : undefined
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -81,7 +88,7 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      name, description, type, image_url,
+      name, description, type, image_url, barcode,
       srp, cost_price,
       regional_price, provincial_price, city_price, branch_price, reseller_price,
       pu_value, binary_eligible,
@@ -90,10 +97,13 @@ export async function POST(req: NextRequest) {
     if (!name || !reseller_price || !srp) {
       return NextResponse.json({ error: 'Name, reseller price and SRP are required.' }, { status: 400 })
     }
+    const officialBarcode = normalizedBarcode(barcode)
+    if (officialBarcode === undefined) return NextResponse.json({ error: 'Barcode must be 4–64 letters, numbers, dots, dashes, or underscores.' }, { status: 400 })
 
     const product = await prisma.product.create({
       data: {
         name:             name.trim(),
+        barcode:          officialBarcode,
         description:      description?.trim() || null,
         type:             type || 'physical',
         price:            parseFloat(srp),
@@ -127,6 +137,9 @@ export async function POST(req: NextRequest) {
 return NextResponse.json({ success: true, product })
   } catch (error) {
     console.error('[CREATE PRODUCT ERROR]', error)
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return NextResponse.json({ error: 'That product barcode is already assigned to another product.' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
@@ -139,7 +152,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const {
-      id, name, description, type, image_url, is_active,
+      id, name, description, type, image_url, barcode, is_active,
       srp, cost_price,
       regional_price, provincial_price, city_price, branch_price, reseller_price,
       pu_value, binary_eligible,
@@ -148,11 +161,14 @@ export async function PATCH(req: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: 'Product ID is required.' }, { status: 400 })
     }
+    const officialBarcode = barcode !== undefined ? normalizedBarcode(barcode) : undefined
+    if (officialBarcode === undefined && barcode !== undefined) return NextResponse.json({ error: 'Barcode must be blank or contain 4–64 letters, numbers, dots, dashes, or underscores.' }, { status: 400 })
 
     const product = await prisma.product.update({
       where: { id },
       data: {
         ...(name             != null && { name:             name.trim() }),
+        ...(barcode          !== undefined && { barcode: officialBarcode }),
         ...(description      != null && { description:      description?.trim() || null }),
         ...(type             != null && { type }),
         ...(srp              != null && { price:            parseFloat(srp) }),
@@ -189,6 +205,9 @@ export async function PATCH(req: NextRequest) {
 return NextResponse.json({ success: true, product })
   } catch (error) {
     console.error('[PATCH PRODUCT ERROR]', error)
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return NextResponse.json({ error: 'That product barcode is already assigned to another product.' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }

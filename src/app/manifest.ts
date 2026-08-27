@@ -7,7 +7,9 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: 'Hiroma POS',
     description: 'Secure and installable Hiroma cashier workspace for authorized branches and city distributors.',
     start_url: '/dashboard/city/pos?source=pwa',
-    scope: '/dashboard/city/pos',
+    // Keep authentication inside the installed window. An expired cashier
+    // session redirects to /login, which must remain inside the PWA scope.
+    scope: '/',
     display: 'standalone',
     orientation: 'any',
     background_color: '#f4f6fb',

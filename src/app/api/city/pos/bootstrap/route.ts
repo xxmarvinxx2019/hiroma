@@ -64,11 +64,24 @@ export async function POST(req: Request) {
         select: {
           id: true,
           full_name: true,
+          address: true,
+          street_address: true,
+          region_name: true,
+          province_name: true,
+          city_muni_name: true,
+          barangay_name: true,
+          zip_code: true,
           distributor_profile: {
             select: {
               dist_level: true,
-              coverage_area: true,
-              fulfillment_outlet_name: true,
+            coverage_area: true,
+            fulfillment_outlet_name: true,
+            fulfillment_outlet_address: true,
+            fulfillment_outlet_barangay_name: true,
+            fulfillment_outlet_city_muni_name: true,
+            fulfillment_outlet_province_name: true,
+            fulfillment_outlet_region_name: true,
+            fulfillment_outlet_zip_code: true,
             },
           },
         },
@@ -83,12 +96,10 @@ export async function POST(req: Request) {
           product: {
             select: {
               name: true,
+              barcode: true,
               type: true,
               reseller_price: true,
               price: true,
-              city_price: true,
-              branch_price: true,
-              cost_price: true,
               pu_value: true,
             },
           },
@@ -152,6 +163,28 @@ export async function POST(req: Request) {
       }
     }
 
+    const physicalOutletAddress = [
+      owner?.distributor_profile?.fulfillment_outlet_address,
+      owner?.distributor_profile?.fulfillment_outlet_barangay_name,
+      owner?.distributor_profile?.fulfillment_outlet_city_muni_name,
+      owner?.distributor_profile?.fulfillment_outlet_province_name,
+      owner?.distributor_profile?.fulfillment_outlet_region_name,
+      owner?.distributor_profile?.fulfillment_outlet_zip_code,
+    ].filter((part, index, values): part is string => Boolean(part?.trim()) && values.indexOf(part) === index).join(", ");
+    const registeredAddress = [
+      owner?.street_address,
+      owner?.barangay_name,
+      owner?.city_muni_name,
+      owner?.province_name,
+      owner?.region_name,
+      owner?.zip_code,
+    ].filter((part, index, values): part is string => Boolean(part?.trim()) && values.indexOf(part) === index).join(", ");
+    const hasPhysicalOutlet = Boolean(owner?.distributor_profile?.fulfillment_outlet_address?.trim());
+    const receiptAddress = (hasPhysicalOutlet ? physicalOutletAddress : registeredAddress)
+      || owner?.address
+      || owner?.distributor_profile?.coverage_area
+      || "";
+
     return NextResponse.json({
       cashier: {
         id: actorId,
@@ -167,17 +200,20 @@ export async function POST(req: Request) {
       },
       receipt_location_code: locationCode(owner?.distributor_profile?.coverage_area || owner?.full_name),
       receipt_range: receiptRange,
+      receipt_outlet_name: owner?.distributor_profile?.fulfillment_outlet_name?.trim() || owner?.full_name || "HIROMA POINT OF SALE",
+      receipt_address: receiptAddress,
+      receipt_address_source: hasPhysicalOutlet ? "physical_outlet" : "registered_address",
       location: owner,
       open_shift: openShift,
       catalog: inventory.map((row) => ({
         product_id: row.product_id,
+        barcode: row.product.barcode,
         name: row.product.name,
         type: row.product.type,
         stock: Math.max(0, row.quantity - row.reserved_quantity),
         stock_updated_at: row.updated_at,
         reseller_price: Number(row.product.reseller_price),
         srp_price: Number(row.product.price),
-        acquisition_cost: Number(owner?.distributor_profile?.dist_level === 'branch' ? row.product.branch_price : row.product.city_price || row.product.cost_price),
         pu_value: row.product.pu_value,
       })),
       payment_methods: [{ id: 'cash', type: 'cash', account_name: 'Cash' }, ...paymentMethods],

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { notifyPosReviewers } from '@/app/lib/posNotifications'
 
 function money(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -223,7 +224,20 @@ export async function PATCH(req: Request) {
       code: 'SHIFT_EXPLANATION_REQUIRED',
       required_explanations: { cash: result.cash, inventory: result.inventory },
     }, { status: 400 })
-    if ('branchSubmitted' in result) return NextResponse.json({ shift: result.shift, audit: result.audit, pending_approval: true })
+    if ('branchSubmitted' in result) {
+      await notifyPosReviewers({
+        ownerId: user.id,
+        actorId,
+        permission: 'pos_approve',
+        type: 'pos_shift_count_pending',
+        title: 'Cashier shift count needs approval',
+        message: `End-of-shift cash and inventory counts are ready for review. Reference ${result.audit.reference_number}.`,
+        entityType: 'inventory_audit',
+        entityId: result.audit.id,
+        actionUrl: '/dashboard/city/pos/approvals',
+      })
+      return NextResponse.json({ shift: result.shift, audit: result.audit, pending_approval: true })
+    }
     return NextResponse.json({ shift: result })
   } catch (error) {
     console.error('[POS CLOSE SHIFT]', error)

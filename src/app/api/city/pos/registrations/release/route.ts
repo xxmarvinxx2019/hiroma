@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { releasePosRegistrationPackage } from '@/app/lib/posRegistration'
 import { InsufficientStockError } from '@/app/lib/inventoryReservation'
+import { notifyPosReviewers } from '@/app/lib/posNotifications'
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser()
@@ -22,6 +23,25 @@ export async function POST(req: NextRequest) {
       }),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
+    if (!result.replayed) {
+      const intake = await prisma.posRegistrationIntake.findUnique({
+        where: { id },
+        select: { applicant_full_name: true, receipt_number: true },
+      })
+      if (intake) {
+        await notifyPosReviewers({
+          ownerId: user.id,
+          actorId,
+          permission: 'register_reseller',
+          type: 'pos_registration_ready_for_encoding',
+          title: 'Reseller account ready for encoding',
+          message: `${intake.applicant_full_name}'s package has been released and the reseller account is ready for final creation. Receipt ${intake.receipt_number}.`,
+          entityType: 'pos_registration',
+          entityId: id,
+          actionUrl: '/dashboard/city/pos/registrations',
+        })
+      }
+    }
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
     if (error instanceof InsufficientStockError) {

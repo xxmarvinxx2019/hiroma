@@ -1,158 +1,164 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   buildPersonName,
   hasCompletePersonName,
   normalizePersonName,
-} from '@/app/lib/nameFormat'
-import { generateTemporaryPassword } from '@/app/lib/temporaryPassword'
-import LegalNameFields from '@/app/components/registration/LegalNameFields'
+} from "@/app/lib/nameFormat";
+import { generateTemporaryPassword } from "@/app/lib/temporaryPassword";
+import LegalNameFields from "@/app/components/registration/LegalNameFields";
 
 interface VerifiedPin {
-  id: string
-  pin_code: string
-  package: { id: string; name: string; price: number } | null
+  id: string;
+  pin_code: string;
+  package: { id: string; name: string; price: number } | null;
 }
 
 interface AvailableSlot {
-  node_id: string
-  user_id: string
-  full_name: string
-  username: string
-  package: string
-  left_open: boolean
-  right_open: boolean
+  node_id: string;
+  user_id: string;
+  full_name: string;
+  username: string;
+  package: string;
+  left_open: boolean;
+  right_open: boolean;
 }
 
 interface SelectedSlot {
-  parent_node_id: string
-  position: 'left' | 'right'
-  parent_username: string
+  parent_node_id: string;
+  position: "left" | "right";
+  parent_username: string;
 }
 
 interface VerifiedReferral {
-  id: string
-  full_name: string
-  username: string
-  package: string | null
-  is_hiroma_node: boolean
-  daily_cap_reached: boolean
-  node_id: string
+  id: string;
+  full_name: string;
+  username: string;
+  package: string | null;
+  is_hiroma_node: boolean;
+  daily_cap_reached: boolean;
+  node_id: string;
 }
 
 function CityRegisterResellerPageInner() {
-  const router = useRouter()
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
+  const router = useRouter();
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1 — PIN
-  const [pinInput, setPinInput] = useState('')
-  const searchParams = useSearchParams()
-  const [pinData, setPinData] = useState<VerifiedPin | null>(null)
-  const [pinError, setPinError] = useState('')
-  const [pinLoading, setPinLoading] = useState(false)
-  const [posIntakeId, setPosIntakeId] = useState('')
-  const [posIntakeReceipt, setPosIntakeReceipt] = useState('')
-  const [posIntakeError, setPosIntakeError] = useState('')
+  const [pinInput, setPinInput] = useState("");
+  const searchParams = useSearchParams();
+  const [pinData, setPinData] = useState<VerifiedPin | null>(null);
+  const [pinError, setPinError] = useState("");
+  const [pinLoading, setPinLoading] = useState(false);
+  const [posIntakeId, setPosIntakeId] = useState("");
+  const [posIntakeReceipt, setPosIntakeReceipt] = useState("");
+  const [posIntakeError, setPosIntakeError] = useState("");
+  const [posSponsorFullName, setPosSponsorFullName] = useState("");
+  const [posRequestedUpline, setPosRequestedUpline] = useState("");
+  const [posUplineFullName, setPosUplineFullName] = useState("");
+  const [posRequestedPosition, setPosRequestedPosition] = useState<
+    "left" | "right" | ""
+  >("");
 
   // Step 2 — Location (PSGC)
-  const [regions, setRegions] = useState<{ code: string; name: string }[]>([])
+  const [regions, setRegions] = useState<{ code: string; name: string }[]>([]);
   const [provinces, setProvinces] = useState<{ code: string; name: string }[]>(
     [],
-  )
+  );
   const [cityMunis, setCityMunis] = useState<{ code: string; name: string }[]>(
     [],
-  )
+  );
   const [barangays, setBarangays] = useState<{ code: string; name: string }[]>(
     [],
-  )
-  const [loadingProv, setLoadingProv] = useState(false)
-  const [loadingCity, setLoadingCity] = useState(false)
-  const [loadingBarangays, setLoadingBarangays] = useState(false)
+  );
+  const [loadingProv, setLoadingProv] = useState(false);
+  const [loadingCity, setLoadingCity] = useState(false);
+  const [loadingBarangays, setLoadingBarangays] = useState(false);
   const [location, setLocation] = useState({
-    region_code: '',
-    region_name: '',
-    province_code: '',
-    province_name: '',
-    city_muni_code: '',
-    city_muni_name: '',
-    barangay_code: '',
-    barangay_name: '',
-    street: '',
-    zip_code: '',
-  })
+    region_code: "",
+    region_name: "",
+    province_code: "",
+    province_name: "",
+    city_muni_code: "",
+    city_muni_name: "",
+    barangay_code: "",
+    barangay_name: "",
+    street: "",
+    zip_code: "",
+  });
 
   // Step 3 — Referral & slot
-  const [referralInput, setReferralInput] = useState('')
+  const [referralInput, setReferralInput] = useState("");
   const [referralData, setReferralData] = useState<VerifiedReferral | null>(
     null,
-  )
-  const [referralError, setReferralError] = useState('')
-  const [referralLoading, setReferralLoading] = useState(false)
-  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([])
-  const [slotSearch, setSlotSearch] = useState('')
-  const [slotDropdownOpen, setSlotDropdownOpen] = useState(false)
-  const [slotsLoading, setSlotsLoading] = useState(false)
-  const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null)
+  );
+  const [referralError, setReferralError] = useState("");
+  const [referralLoading, setReferralLoading] = useState(false);
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
+  const [slotSearch, setSlotSearch] = useState("");
+  const [slotDropdownOpen, setSlotDropdownOpen] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
 
   // Step 4 — Details
   const [form, setForm] = useState({
-    full_name: '',
-    username: '',
-    email: '',
-    mobile: '',
-    password: '',
-    confirmPassword: '',
-    first_name: '',
-    middle_name: '',
-    last_name: '',
-    suffix: '',
+    full_name: "",
+    username: "",
+    email: "",
+    mobile: "",
+    password: "",
+    confirmPassword: "",
+    first_name: "",
+    middle_name: "",
+    last_name: "",
+    suffix: "",
     no_middle_name: false,
-    birthday: '',
-    birthplace: '',
-    identity_document_type: '',
-    identity_document_number: '',
-  })
+    birthday: "",
+    birthplace: "",
+    identity_document_type: "",
+    identity_document_number: "",
+  });
   const [nameCapInfo, setNameCapInfo] = useState<{
-    count: number
-    max: number
-    remaining: number
-    remaining_after_registration?: number
-    account_number?: number
-    first_account?: boolean
-    proposed_username?: string
-    ready?: boolean
-    error?: string
-    confirmation_required?: boolean
-    matching_usernames?: string[]
-  } | null>(null)
-  const [formLoading, setFormLoading] = useState(false)
-  const [agreedToTerms, setAgreedToTerms] = useState(false)
-  const [formError, setFormError] = useState('')
+    count: number;
+    max: number;
+    remaining: number;
+    remaining_after_registration?: number;
+    account_number?: number;
+    first_account?: boolean;
+    proposed_username?: string;
+    ready?: boolean;
+    error?: string;
+    confirmation_required?: boolean;
+    matching_usernames?: string[];
+  } | null>(null);
+  const [formLoading, setFormLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [formError, setFormError] = useState("");
   const [identityConfirmation, setIdentityConfirmation] = useState<
-    'same' | 'different' | null
-  >(null)
-  const [identityPromptOpen, setIdentityPromptOpen] = useState(false)
+    "same" | "different" | null
+  >(null);
+  const [identityPromptOpen, setIdentityPromptOpen] = useState(false);
   const [successData, setSuccessData] = useState<{
-    id: string
-    full_name: string
-    username: string
-    address: string
-    birthday: string
-    package: any
-  } | null>(null)
-  const [smsPromptOpen, setSmsPromptOpen] = useState(false)
-  const [smsSending, setSmsSending] = useState(false)
+    id: string;
+    full_name: string;
+    username: string;
+    address: string;
+    birthday: string;
+    package: any;
+  } | null>(null);
+  const [smsPromptOpen, setSmsPromptOpen] = useState(false);
+  const [smsSending, setSmsSending] = useState(false);
   const [smsStatus, setSmsStatus] = useState<{
-    type: 'success' | 'error' | 'skipped'
-    message: string
-  } | null>(null)
+    type: "success" | "error" | "skipped";
+    message: string;
+  } | null>(null);
 
   // Load regions
   useEffect(() => {
-    fetch('https://psgc.gitlab.io/api/regions/')
+    fetch("https://psgc.gitlab.io/api/regions/")
       .then((r) => r.json())
       .then((data) =>
         setRegions(
@@ -161,26 +167,19 @@ function CityRegisterResellerPageInner() {
             .sort((a: any, b: any) => a.name.localeCompare(b.name)),
         ),
       )
-      .catch(() => {})
-  }, [])
+      .catch(() => {});
+  }, []);
 
   // Load provinces when region changes
   // NCR and some regions have no provinces — cities go directly under the region
   useEffect(() => {
     if (!location.region_code) {
-      setProvinces([])
-      setCityMunis([])
-      return
+      setProvinces([]);
+      setCityMunis([]);
+      return;
     }
-    setLoadingProv(true)
-    setLocation((l) => ({
-      ...l,
-      province_code: '',
-      province_name: '',
-      city_muni_code: '',
-      city_muni_name: '',
-    }))
-    setCityMunis([])
+    setLoadingProv(true);
+    setCityMunis([]);
 
     fetch(
       `https://psgc.gitlab.io/api/regions/${location.region_code}/provinces/`,
@@ -189,9 +188,9 @@ function CityRegisterResellerPageInner() {
       .then((data) => {
         if (!Array.isArray(data) || data.length === 0) {
           // No provinces (e.g. NCR) — load cities directly under region
-          setProvinces([])
-          setLoadingProv(false)
-          setLoadingCity(true)
+          setProvinces([]);
+          setLoadingProv(false);
+          setLoadingCity(true);
           return fetch(
             `https://psgc.gitlab.io/api/regions/${location.region_code}/cities-municipalities/`,
           )
@@ -201,34 +200,34 @@ function CityRegisterResellerPageInner() {
                 cities
                   .map((c: any) => ({ code: c.code, name: c.name }))
                   .sort((a: any, b: any) => a.name.localeCompare(b.name)),
-              )
+              );
               // Auto-set province as region for address purposes
               setLocation((l) => ({
                 ...l,
-                province_code: 'DIRECT',
-                province_name: '',
-              }))
+                province_code: "DIRECT",
+                province_name: "",
+              }));
             })
             .catch(() => setCityMunis([]))
-            .finally(() => setLoadingCity(false))
+            .finally(() => setLoadingCity(false));
         }
         setProvinces(
           data
             .map((p: any) => ({ code: p.code, name: p.name }))
             .sort((a: any, b: any) => a.name.localeCompare(b.name)),
-        )
+        );
       })
       .catch(() => setProvinces([]))
-      .finally(() => setLoadingProv(false))
-  }, [location.region_code])
+      .finally(() => setLoadingProv(false));
+  }, [location.region_code]);
 
   // Load cities when province changes (only for regions that have provinces)
   useEffect(() => {
-    if (!location.province_code || location.province_code === 'DIRECT') {
-      if (location.province_code !== 'DIRECT') setCityMunis([])
-      return
+    if (!location.province_code || location.province_code === "DIRECT") {
+      if (location.province_code !== "DIRECT") setCityMunis([]);
+      return;
     }
-    setLoadingCity(true)
+    setLoadingCity(true);
     fetch(
       `https://psgc.gitlab.io/api/provinces/${location.province_code}/cities-municipalities/`,
     )
@@ -241,24 +240,16 @@ function CityRegisterResellerPageInner() {
         ),
       )
       .catch(() => setCityMunis([]))
-      .finally(() => setLoadingCity(false))
-    setLocation((l) => ({ ...l, city_muni_code: '', city_muni_name: '' }))
-  }, [location.province_code])
+      .finally(() => setLoadingCity(false));
+  }, [location.province_code]);
 
   // Load the official PSGC barangays for the selected city or municipality.
   useEffect(() => {
     if (!location.city_muni_code) {
-      setBarangays([])
-      setLocation((l) => ({ ...l, barangay_code: '', barangay_name: '' }))
-      return
+      setBarangays([]);
+      return;
     }
-    setLoadingBarangays(true)
-    setLocation((l) => ({
-      ...l,
-      barangay_code: '',
-      barangay_name: '',
-      zip_code: '',
-    }))
+    setLoadingBarangays(true);
     fetch(
       `https://psgc.gitlab.io/api/cities-municipalities/${location.city_muni_code}/barangays/`,
     )
@@ -271,18 +262,18 @@ function CityRegisterResellerPageInner() {
         ),
       )
       .catch(() => setBarangays([]))
-      .finally(() => setLoadingBarangays(false))
-  }, [location.city_muni_code])
+      .finally(() => setLoadingBarangays(false));
+  }, [location.city_muni_code]);
 
   // Close slot dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('.slot-dropdown-container'))
-        setSlotDropdownOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+      if (!(e.target as HTMLElement).closest(".slot-dropdown-container"))
+        setSlotDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const fullAddress = [
     location.street,
@@ -293,74 +284,80 @@ function CityRegisterResellerPageInner() {
     location.zip_code,
   ]
     .filter(Boolean)
-    .join(', ')
+    .join(", ");
 
   const resetForm = useCallback(() => {
-    setStep(1)
-    setPinInput('')
-    setPinData(null)
-    setPinError('')
+    setStep(1);
+    setPinInput("");
+    setPinData(null);
+    setPinError("");
     setLocation({
-      region_code: '',
-      region_name: '',
-      province_code: '',
-      province_name: '',
-      city_muni_code: '',
-      city_muni_name: '',
-      barangay_code: '',
-      barangay_name: '',
-      street: '',
-      zip_code: '',
-    })
-    setProvinces([])
-    setCityMunis([])
-    setReferralInput('')
-    setReferralData(null)
-    setReferralError('')
-    setAvailableSlots([])
-    setSlotSearch('')
-    setSelectedSlot(null)
+      region_code: "",
+      region_name: "",
+      province_code: "",
+      province_name: "",
+      city_muni_code: "",
+      city_muni_name: "",
+      barangay_code: "",
+      barangay_name: "",
+      street: "",
+      zip_code: "",
+    });
+    setProvinces([]);
+    setCityMunis([]);
+    setReferralInput("");
+    setReferralData(null);
+    setReferralError("");
+    setAvailableSlots([]);
+    setSlotSearch("");
+    setSelectedSlot(null);
     setForm({
-      full_name: '',
-      first_name: '',
-      middle_name: '',
-      last_name: '',
-      suffix: '',
+      full_name: "",
+      first_name: "",
+      middle_name: "",
+      last_name: "",
+      suffix: "",
       no_middle_name: false,
-      username: '',
-      email: '',
-      mobile: '',
-      password: '',
-      confirmPassword: '',
-      birthday: '',
-      birthplace: '',
-      identity_document_type: '',
-      identity_document_number: '',
-    })
-    setAgreedToTerms(false)
-    setNameCapInfo(null)
-    setFormError('')
-    setIdentityConfirmation(null)
-    setIdentityPromptOpen(false)
-    setSmsPromptOpen(false)
-    setSmsSending(false)
-    setSmsStatus(null)
-  }, [])
+      username: "",
+      email: "",
+      mobile: "",
+      password: "",
+      confirmPassword: "",
+      birthday: "",
+      birthplace: "",
+      identity_document_type: "",
+      identity_document_number: "",
+    });
+    setAgreedToTerms(false);
+    setNameCapInfo(null);
+    setFormError("");
+    setIdentityConfirmation(null);
+    setIdentityPromptOpen(false);
+    setSmsPromptOpen(false);
+    setSmsSending(false);
+    setSmsStatus(null);
+  }, []);
 
   // A released POS intake pre-fills the applicant record. PIN verification,
   // sponsor placement, and final review remain deliberate encoder actions.
   useEffect(() => {
-    const intakeId = searchParams.get('pos_intake')
-    if (!intakeId) return
-    fetch(`/api/city/pos/registration-encoding?id=${encodeURIComponent(intakeId)}`, { cache: 'no-store' })
+    const intakeId = searchParams.get("pos_intake");
+    if (!intakeId) return;
+    fetch(
+      `/api/city/pos/registration-encoding?id=${encodeURIComponent(intakeId)}`,
+      { cache: "no-store" },
+    )
       .then(async (response) => {
-        const result = await response.json()
-        if (!response.ok) throw new Error(result.error || 'Unable to load the POS registration handoff.')
-        const registration = result.registration
-        const applicant = registration.applicant_snapshot || {}
-        const address = registration.applicant_address || {}
-        setPosIntakeId(registration.id)
-        setPosIntakeReceipt(registration.receipt_number)
+        const result = await response.json();
+        if (!response.ok)
+          throw new Error(
+            result.error || "Unable to load the POS registration handoff.",
+          );
+        const registration = result.registration;
+        const applicant = registration.applicant_snapshot || {};
+        const address = registration.applicant_address || {};
+        setPosIntakeId(registration.id);
+        setPosIntakeReceipt(registration.receipt_number);
         setForm((current) => ({
           ...current,
           full_name: applicant.full_name || current.full_name,
@@ -373,105 +370,144 @@ function CityRegisterResellerPageInner() {
           mobile: applicant.mobile || current.mobile,
           birthday: applicant.birthday || current.birthday,
           birthplace: applicant.birthplace || current.birthplace,
-          identity_document_type: applicant.identity_document_type || current.identity_document_type,
-          identity_document_number: applicant.identity_document_reference || applicant.identity_document_number || current.identity_document_number,
-        }))
-        setReferralInput(registration.referrer_username || '')
+          identity_document_type:
+            applicant.identity_document_type || current.identity_document_type,
+          identity_document_number:
+            applicant.identity_document_reference ||
+            applicant.identity_document_number ||
+            current.identity_document_number,
+        }));
+        setReferralInput(registration.referrer_username || "");
+        setPosSponsorFullName(applicant.referrer_full_name || "");
+        setPosRequestedUpline(applicant.upline_username || "");
+        setPosUplineFullName(applicant.upline_full_name || "");
+        setPosRequestedPosition(
+          applicant.preferred_position === "left" ||
+            applicant.preferred_position === "right"
+            ? applicant.preferred_position
+            : "",
+        );
         setLocation({
-          region_code: address.region_code || '',
-          region_name: address.region_name || '',
-          province_code: address.province_code || '',
-          province_name: address.province_name || '',
-          city_muni_code: address.city_muni_code || '',
-          city_muni_name: address.city_muni_name || '',
-          barangay_code: address.barangay_code || '',
-          barangay_name: address.barangay_name || '',
-          street: address.street || address.street_address || '',
-          zip_code: address.zip_code || '',
-        })
+          region_code: address.region_code || "",
+          region_name: address.region_name || "",
+          province_code: address.province_code || "",
+          province_name: address.province_name || "",
+          city_muni_code: address.city_muni_code || "",
+          city_muni_name: address.city_muni_name || "",
+          barangay_code: address.barangay_code || "",
+          barangay_name: address.barangay_name || "",
+          street: address.street || address.street_address || "",
+          zip_code: address.zip_code || "",
+        });
       })
-      .catch((reason) => setPosIntakeError(reason instanceof Error ? reason.message : 'Unable to load POS registration handoff.'))
-  }, [searchParams])
+      .catch((reason) =>
+        setPosIntakeError(
+          reason instanceof Error
+            ? reason.message
+            : "Unable to load POS registration handoff.",
+        ),
+      );
+  }, [searchParams]);
 
   // Step 1 — Verify PIN
   // Auto-fill and verify PIN from URL param
   useEffect(() => {
-    const pinFromUrl = searchParams.get('pin')
+    const pinFromUrl = searchParams.get("pin");
     if (pinFromUrl) {
-      setPinInput(pinFromUrl.toUpperCase())
+      setPinInput(pinFromUrl.toUpperCase());
       // Auto-verify after short delay
       setTimeout(async () => {
-        const res = await fetch('/api/city/pins/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/city/pins/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pin_code: pinFromUrl.trim().toUpperCase() }),
-        })
-        const data = await res.json()
+        });
+        const data = await res.json();
         if (res.ok && data.pin) {
-          setPinData(data.pin)
+          setPinData(data.pin);
         } else {
-          setPinError(data.error || 'Invalid PIN')
+          setPinError(data.error || "Invalid PIN");
         }
-      }, 300)
+      }, 300);
     }
-  }, [])
+  }, []);
 
   const verifyPin = async () => {
     if (!pinInput.trim()) {
-      setPinError('Please enter a PIN code.')
-      return
+      setPinError("Please enter a PIN code.");
+      return;
     }
-    setPinLoading(true)
-    setPinError('')
-    const res = await fetch('/api/city/pins/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    setPinLoading(true);
+    setPinError("");
+    const res = await fetch("/api/city/pins/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin_code: pinInput.trim().toUpperCase() }),
-    })
-    const data = await res.json()
+    });
+    const data = await res.json();
     if (!res.ok) {
-      setPinError(data.error || 'Invalid PIN.')
+      setPinError(data.error || "Invalid PIN.");
     } else {
-      setPinData(data.pin)
-      setStep(2)
+      setPinData(data.pin);
+      setStep(2);
     }
-    setPinLoading(false)
-  }
+    setPinLoading(false);
+  };
 
   // Step 3 — Verify referral + load slots
   const verifyReferral = async () => {
     if (!referralInput.trim()) {
-      setReferralError('Please enter a referral username.')
-      return
+      setReferralError("Please enter a referral username.");
+      return;
     }
-    setReferralLoading(true)
-    setReferralError('')
-    setReferralData(null)
-    setAvailableSlots([])
-    setSlotSearch('')
-    setSelectedSlot(null)
+    setReferralLoading(true);
+    setReferralError("");
+    setReferralData(null);
+    setAvailableSlots([]);
+    setSlotSearch("");
+    setSelectedSlot(null);
 
-    setSlotsLoading(true)
+    setSlotsLoading(true);
     try {
-      const res = await fetch('/api/city/resellers/verify-referral', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/city/resellers/verify-referral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: referralInput.trim().toLowerCase() }),
-      })
-      const data = await res.json()
+      });
+      const data = await res.json();
       if (!res.ok) {
-        setReferralError(data.error || 'Referral not found.')
-        return
+        setReferralError(data.error || "Referral not found.");
+        return;
       }
-      setReferralData(data.reseller)
-      setAvailableSlots(data.slots || [])
+      setReferralData(data.reseller);
+      setAvailableSlots(data.slots || []);
+      if (posRequestedUpline) {
+        setSlotSearch(posRequestedUpline);
+        const requestedSlot = (data.slots || []).find(
+          (slot: AvailableSlot) =>
+            slot.username.toLowerCase() === posRequestedUpline.toLowerCase() &&
+            ((posRequestedPosition === "left" && slot.left_open) ||
+              (posRequestedPosition === "right" && slot.right_open)),
+        );
+        if (requestedSlot && posRequestedPosition) {
+          setSelectedSlot({
+            parent_node_id: requestedSlot.node_id,
+            parent_username: requestedSlot.username,
+            position: posRequestedPosition,
+          });
+        } else if (posRequestedPosition) {
+          setReferralError(
+            `The POS requested the ${posRequestedPosition} side under @${posRequestedUpline}, but that slot is not currently available. Select another verified placement.`,
+          );
+        }
+      }
     } catch {
-      setReferralError('Unable to verify referral. Please try again.')
+      setReferralError("Unable to verify referral. Please try again.");
     } finally {
-      setSlotsLoading(false)
-      setReferralLoading(false)
+      setSlotsLoading(false);
+      setReferralLoading(false);
     }
-  }
+  };
 
   const checkNameCap = async (
     name: string,
@@ -479,15 +515,15 @@ function CityRegisterResellerPageInner() {
     birthplace = form.birthplace,
     confirmation = identityConfirmation,
   ) => {
-    const normalizedName = normalizePersonName(name)
+    const normalizedName = normalizePersonName(name);
     if (!normalizedName || !birthday || !birthplace.trim()) {
-      setNameCapInfo(null)
+      setNameCapInfo(null);
       setForm((current) => ({
         ...current,
         full_name: normalizedName,
-        username: '',
-      }))
-      return
+        username: "",
+      }));
+      return;
     }
 
     const query = new URLSearchParams({
@@ -498,32 +534,33 @@ function CityRegisterResellerPageInner() {
       identity_document_number: form.identity_document_number,
       mobile: form.mobile,
       email: form.email,
-      identity_confirmation: confirmation || '',
-    })
+      identity_confirmation: confirmation || "",
+    });
     const res = await fetch(
       `/api/city/resellers/check-name?${query.toString()}`,
-    )
-    const data = await res.json()
+    );
+    const data = await res.json();
     if (!res.ok) {
-      setNameCapInfo(data)
+      setNameCapInfo(data);
       setForm((current) => ({
         ...current,
         full_name: normalizedName,
-        username: '',
-      }))
-      return
+        username: "",
+      }));
+      return;
     }
-    setNameCapInfo(data)
-    if (data.confirmation_required && !confirmation) setIdentityPromptOpen(true)
-    const temporaryPassword = generateTemporaryPassword(normalizedName)
+    setNameCapInfo(data);
+    if (data.confirmation_required && !confirmation)
+      setIdentityPromptOpen(true);
+    const temporaryPassword = generateTemporaryPassword(normalizedName);
     setForm((current) => ({
       ...current,
       full_name: normalizedName,
-      username: data.proposed_username || '',
+      username: data.proposed_username || "",
       password: temporaryPassword,
       confirmPassword: temporaryPassword,
-    }))
-  }
+    }));
+  };
   // Step 4 — Register
   const handleRegister = async () => {
     if (
@@ -533,93 +570,93 @@ function CityRegisterResellerPageInner() {
       !form.email ||
       !form.password
     ) {
-      setFormError('Please fill in all required fields.')
-      return
+      setFormError("Please fill in all required fields.");
+      return;
     }
     if (form.password !== form.confirmPassword) {
-      setFormError('Passwords do not match.')
-      return
+      setFormError("Passwords do not match.");
+      return;
     }
     if (!hasCompletePersonName(form.full_name)) {
       if (!form.first_name.trim() || !form.last_name.trim()) {
-        setFormError('First name and last name are required.')
-        return
+        setFormError("First name and last name are required.");
+        return;
       }
       if (!form.no_middle_name && !form.middle_name.trim()) {
         setFormError(
           'Enter the legal middle name or select "This member legally has no middle name."',
-        )
-        return
+        );
+        return;
       }
       setFormError(
-        'Enter the complete legal name: first name, middle name, and last name.',
-      )
-      return
+        "Enter the complete legal name: first name, middle name, and last name.",
+      );
+      return;
     }
     if (form.password.length < 6) {
-      setFormError('Password must be at least 6 characters.')
-      return
+      setFormError("Password must be at least 6 characters.");
+      return;
     }
     if (nameCapInfo && nameCapInfo.remaining === 0) {
-      setFormError(`Maximum accounts reached for "${form.full_name}".`)
-      return
+      setFormError(`Maximum accounts reached for "${form.full_name}".`);
+      return;
     }
     if (!form.birthday) {
-      setFormError('Please enter date of birth.')
-      return
+      setFormError("Please enter date of birth.");
+      return;
     }
     if (!form.username) {
       setFormError(
-        'Complete the name, date of birth, and place of birth so the system can generate a username.',
-      )
-      return
+        "Complete the name, date of birth, and place of birth so the system can generate a username.",
+      );
+      return;
     }
     if (!form.birthplace) {
-      setFormError('Please enter place of birth.')
-      return
+      setFormError("Please enter place of birth.");
+      return;
     }
     if (!form.identity_document_type || !form.identity_document_number.trim()) {
-      setFormError('Please select a valid ID and enter its number.')
-      return
+      setFormError("Please select a valid ID and enter its number.");
+      return;
     }
     if (nameCapInfo?.confirmation_required && !identityConfirmation) {
-      setIdentityPromptOpen(true)
-      setFormError('Please confirm the possible matching person.')
-      return
+      setIdentityPromptOpen(true);
+      setFormError("Please confirm the possible matching person.");
+      return;
     }
     if (!agreedToTerms) {
       setFormError(
-        'You must agree to the Terms and Conditions before registering.',
-      )
-      return
+        "You must agree to the Terms and Conditions before registering.",
+      );
+      return;
     }
     if (!selectedSlot) {
-      setFormError('No placement slot selected.')
-      return
+      setFormError("No placement slot selected.");
+      return;
     }
     if (!location.city_muni_name) {
-      setFormError('Please select a complete location.')
-      return
+      setFormError("Please select a complete location.");
+      return;
     }
     if (!location.street.trim()) {
-      setFormError('House No. / Street / Purok / Subdivision is required.')
-      return
+      setFormError("House No. / Street / Purok / Subdivision is required.");
+      return;
     }
     if (!/^\d{4}$/.test(location.zip_code)) {
-      setFormError('Please enter a valid 4-digit ZIP code.')
-      return
+      setFormError("Please enter a valid 4-digit ZIP code.");
+      return;
     }
     if (!location.barangay_code || !location.barangay_name) {
-      setFormError('Please select an official barangay from the list.')
-      return
+      setFormError("Please select an official barangay from the list.");
+      return;
     }
 
-    setFormLoading(true)
-    setFormError('')
+    setFormLoading(true);
+    setFormError("");
 
-    const res = await fetch('/api/city/resellers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("/api/city/resellers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         full_name: normalizePersonName(form.full_name),
         username: form.username.toLowerCase(),
@@ -637,7 +674,7 @@ function CityRegisterResellerPageInner() {
         region_code: location.region_code,
         region_name: location.region_name,
         province_code:
-          location.province_code === 'DIRECT' ? null : location.province_code,
+          location.province_code === "DIRECT" ? null : location.province_code,
         province_name: location.province_name || null,
         city_muni_code: location.city_muni_code,
         city_muni_name: location.city_muni_name,
@@ -654,11 +691,11 @@ function CityRegisterResellerPageInner() {
         actual_position: selectedSlot.position,
         pos_intake_id: posIntakeId || null,
       }),
-    })
-    const data = await res.json()
+    });
+    const data = await res.json();
 
     if (!res.ok) {
-      setFormError(data.error || 'Registration failed.')
+      setFormError(data.error || "Registration failed.");
     } else {
       setSuccessData({
         id: data.reseller.id,
@@ -667,49 +704,79 @@ function CityRegisterResellerPageInner() {
         address: fullAddress,
         birthday: form.birthday,
         package: data.package || null,
-      })
-      setSmsStatus(null)
-      setSmsPromptOpen(true)
+      });
+      setSmsStatus(null);
+      setSmsPromptOpen(true);
     }
-    setFormLoading(false)
-  }
+    setFormLoading(false);
+  };
 
   const sendWelcomeSms = async () => {
-    if (!successData) return
-    setSmsSending(true)
-    const res = await fetch('/api/city/resellers/send-welcome-sms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    if (!successData) return;
+    setSmsSending(true);
+    const res = await fetch("/api/city/resellers/send-welcome-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         reseller_id: successData.id,
         password: form.password,
       }),
-    })
-    const data = await res.json()
-    setSmsSending(false)
-    setSmsPromptOpen(false)
+    });
+    const data = await res.json();
+    setSmsSending(false);
+    setSmsPromptOpen(false);
     setSmsStatus(
       res.ok
         ? {
-            type: 'success',
-            message: data.message || 'Login credentials sent by SMS.',
+            type: "success",
+            message: data.message || "Login credentials sent by SMS.",
           }
-        : { type: 'error', message: data.error || 'SMS could not be sent.' },
-    )
-  }
+        : { type: "error", message: data.error || "SMS could not be sent." },
+    );
+  };
 
   return (
     <div className="max-w-2xl mx-auto">
       {posIntakeReceipt && (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-          <strong>POS handoff {posIntakeReceipt}</strong> — payment and package release are already recorded. Review the pre-filled data, assign the PIN and placement, then create the account. Inventory will not be deducted again.
+          <strong>POS handoff {posIntakeReceipt}</strong> — payment and package
+          release are already recorded. Review the pre-filled data, assign the
+          PIN and placement, then create the account. Inventory will not be
+          deducted again.
+          <div className="mt-3 grid gap-2 rounded-lg border border-emerald-200 bg-white/70 p-3 sm:grid-cols-2">
+            <div>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                Direct sponsor on signed form
+              </span>
+              <strong>{posSponsorFullName || "Not provided"}</strong>
+              {referralInput && <span className="ml-1">@{referralInput}</span>}
+            </div>
+            <div>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                Requested direct upline
+              </span>
+              <strong>{posUplineFullName || "Not provided"}</strong>
+              {posRequestedUpline && (
+                <span className="ml-1">@{posRequestedUpline}</span>
+              )}
+              {posRequestedPosition && (
+                <span className="ml-1 capitalize">
+                  · {posRequestedPosition}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       )}
-      {posIntakeError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{posIntakeError}</div>}
+      {posIntakeError && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {posIntakeError}
+        </div>
+      )}
       {/* Header */}
       <div className="mb-6">
         <button
-          onClick={() => router.push('/dashboard/city/resellers')}
+          onClick={() => router.push("/dashboard/city/resellers")}
           className="text-xs text-gray-400 hover:text-[#0D1B3E] transition-colors mb-3 flex items-center gap-1"
         >
           ← Back to Resellers
@@ -724,21 +791,21 @@ function CityRegisterResellerPageInner() {
 
       {/* Progress */}
       <div className="flex items-center gap-2 mb-8">
-        {['PIN', 'Location', 'Referral & Slot', 'Details'].map((label, i) => (
+        {["PIN", "Location", "Referral & Slot", "Details"].map((label, i) => (
           <div key={label} className="flex items-center gap-2 flex-1">
             <div
               className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                 step > i + 1
-                  ? 'bg-[#1a7a4a] text-white'
+                  ? "bg-[#1a7a4a] text-white"
                   : step === i + 1
-                    ? 'bg-[#C9A84C] text-[#0D1B3E]'
-                    : 'bg-[#F0F2F8] text-gray-400'
+                    ? "bg-[#C9A84C] text-[#0D1B3E]"
+                    : "bg-[#F0F2F8] text-gray-400"
               }`}
             >
-              {step > i + 1 ? '✓' : i + 1}
+              {step > i + 1 ? "✓" : i + 1}
             </div>
             <span
-              className={`text-xs font-medium hidden sm:block ${step === i + 1 ? 'text-[#0D1B3E]' : 'text-gray-400'}`}
+              className={`text-xs font-medium hidden sm:block ${step === i + 1 ? "text-[#0D1B3E]" : "text-gray-400"}`}
             >
               {label}
             </span>
@@ -766,10 +833,10 @@ function CityRegisterResellerPageInner() {
               <input
                 value={pinInput}
                 onChange={(e) => {
-                  setPinInput(e.target.value.toUpperCase())
-                  setPinError('')
+                  setPinInput(e.target.value.toUpperCase());
+                  setPinError("");
                 }}
-                onKeyDown={(e) => e.key === 'Enter' && verifyPin()}
+                onKeyDown={(e) => e.key === "Enter" && verifyPin()}
                 placeholder="e.g. HRM-2026-GLD-12345"
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2.5 text-sm font-mono text-[#0D1B3E] outline-none focus:border-[#C9A84C] tracking-wider uppercase"
               />
@@ -784,7 +851,7 @@ function CityRegisterResellerPageInner() {
               disabled={pinLoading || !pinInput.trim()}
               className="w-full bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-3 hover:bg-[#E8C96A] disabled:opacity-60 transition-colors"
             >
-              {pinLoading ? 'Verifying...' : 'Verify PIN →'}
+              {pinLoading ? "Verifying..." : "Verify PIN →"}
             </button>
           </div>
         )}
@@ -817,12 +884,19 @@ function CityRegisterResellerPageInner() {
               <select
                 value={location.region_code}
                 onChange={(e) => {
-                  const opt = regions.find((r) => r.code === e.target.value)
+                  const opt = regions.find((r) => r.code === e.target.value);
                   setLocation((l) => ({
                     ...l,
                     region_code: e.target.value,
-                    region_name: opt?.name || '',
-                  }))
+                    region_name: opt?.name || "",
+                    province_code: "",
+                    province_name: "",
+                    city_muni_code: "",
+                    city_muni_name: "",
+                    barangay_code: "",
+                    barangay_name: "",
+                    zip_code: "",
+                  }));
                 }}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
               >
@@ -845,17 +919,24 @@ function CityRegisterResellerPageInner() {
                   value={location.province_code}
                   disabled={!location.region_code || loadingProv}
                   onChange={(e) => {
-                    const opt = provinces.find((p) => p.code === e.target.value)
+                    const opt = provinces.find(
+                      (p) => p.code === e.target.value,
+                    );
                     setLocation((l) => ({
                       ...l,
                       province_code: e.target.value,
-                      province_name: opt?.name || '',
-                    }))
+                      province_name: opt?.name || "",
+                      city_muni_code: "",
+                      city_muni_name: "",
+                      barangay_code: "",
+                      barangay_name: "",
+                      zip_code: "",
+                    }));
                   }}
                   className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"
                 >
                   <option value="">
-                    {loadingProv ? 'Loading...' : 'Select province...'}
+                    {loadingProv ? "Loading..." : "Select province..."}
                   </option>
                   {provinces.map((p) => (
                     <option key={p.code} value={p.code}>
@@ -874,17 +955,20 @@ function CityRegisterResellerPageInner() {
                 value={location.city_muni_code}
                 disabled={!location.province_code || loadingCity}
                 onChange={(e) => {
-                  const opt = cityMunis.find((c) => c.code === e.target.value)
+                  const opt = cityMunis.find((c) => c.code === e.target.value);
                   setLocation((l) => ({
                     ...l,
                     city_muni_code: e.target.value,
-                    city_muni_name: opt?.name || '',
-                  }))
+                    city_muni_name: opt?.name || "",
+                    barangay_code: "",
+                    barangay_name: "",
+                    zip_code: "",
+                  }));
                 }}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"
               >
                 <option value="">
-                  {loadingCity ? 'Loading...' : 'Select city/municipality...'}
+                  {loadingCity ? "Loading..." : "Select city/municipality..."}
                 </option>
                 {cityMunis.map((c) => (
                   <option key={c.code} value={c.code}>
@@ -904,19 +988,19 @@ function CityRegisterResellerPageInner() {
                 onChange={(e) => {
                   const selected = barangays.find(
                     (b) => b.code === e.target.value,
-                  )
+                  );
                   setLocation((l) => ({
                     ...l,
                     barangay_code: e.target.value,
-                    barangay_name: selected?.name || '',
-                  }))
+                    barangay_name: selected?.name || "",
+                  }));
                 }}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:opacity-50"
               >
                 <option value="">
                   {loadingBarangays
-                    ? 'Loading barangays...'
-                    : 'Select barangay...'}
+                    ? "Loading barangays..."
+                    : "Select barangay..."}
                 </option>
                 {barangays.map((b) => (
                   <option key={b.code} value={b.code}>
@@ -929,7 +1013,7 @@ function CityRegisterResellerPageInner() {
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">
-                  House No. / Street / Purok / Subdivision{' '}
+                  House No. / Street / Purok / Subdivision{" "}
                   <span className="text-[#C9A84C]">*</span>
                 </label>
                 <input
@@ -954,7 +1038,7 @@ function CityRegisterResellerPageInner() {
                   onChange={(e) =>
                     setLocation((l) => ({
                       ...l,
-                      zip_code: e.target.value.replace(/\D/g, '').slice(0, 4),
+                      zip_code: e.target.value.replace(/\D/g, "").slice(0, 4),
                     }))
                   }
                   placeholder="e.g. 6529"
@@ -992,8 +1076,8 @@ function CityRegisterResellerPageInner() {
                     !location.street.trim() ||
                     !/^\d{4}$/.test(location.zip_code)
                   )
-                    return
-                  setStep(3)
+                    return;
+                  setStep(3);
                 }}
                 disabled={
                   !location.city_muni_name ||
@@ -1028,13 +1112,13 @@ function CityRegisterResellerPageInner() {
                 <input
                   value={referralInput}
                   onChange={(e) => {
-                    setReferralInput(e.target.value.toLowerCase())
-                    setReferralError('')
-                    setReferralData(null)
-                    setAvailableSlots([])
-                    setSlotSearch('')
+                    setReferralInput(e.target.value.toLowerCase());
+                    setReferralError("");
+                    setReferralData(null);
+                    setAvailableSlots([]);
+                    setSlotSearch("");
                   }}
-                  onKeyDown={(e) => e.key === 'Enter' && verifyReferral()}
+                  onKeyDown={(e) => e.key === "Enter" && verifyReferral()}
                   placeholder="Enter referrer's username"
                   className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
                 />
@@ -1043,7 +1127,7 @@ function CityRegisterResellerPageInner() {
                   disabled={referralLoading || !referralInput.trim()}
                   className="bg-[#010521] text-white text-xs font-medium rounded-lg px-4 hover:bg-[#1A2F5E] disabled:opacity-60"
                 >
-                  {referralLoading ? '...' : 'Verify'}
+                  {referralLoading ? "..." : "Verify"}
                 </button>
               </div>
               {referralError && (
@@ -1059,7 +1143,7 @@ function CityRegisterResellerPageInner() {
                   <div className="w-9 h-9 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0">
                     <span className="text-[#C9A84C] font-bold text-sm">
                       {referralData.is_hiroma_node
-                        ? 'H'
+                        ? "H"
                         : referralData.full_name.charAt(0)}
                     </span>
                   </div>
@@ -1068,9 +1152,9 @@ function CityRegisterResellerPageInner() {
                       {referralData.full_name}
                     </p>
                     <p className="text-xs text-gray-400">
-                      @{referralData.username} ·{' '}
+                      @{referralData.username} ·{" "}
                       {referralData.is_hiroma_node
-                        ? 'Top node'
+                        ? "Top node"
                         : `Package: ${referralData.package}`}
                     </p>
                     {referralData.daily_cap_reached && (
@@ -1099,8 +1183,8 @@ function CityRegisterResellerPageInner() {
                     <input
                       value={slotSearch}
                       onChange={(e) => {
-                        setSlotSearch(e.target.value)
-                        setSlotDropdownOpen(true)
+                        setSlotSearch(e.target.value);
+                        setSlotDropdownOpen(true);
                       }}
                       onFocus={() => setSlotDropdownOpen(true)}
                       placeholder="Type name or username..."
@@ -1138,13 +1222,13 @@ function CityRegisterResellerPageInner() {
                                       onClick={() => {
                                         setSelectedSlot({
                                           parent_node_id: slot.node_id,
-                                          position: 'left',
+                                          position: "left",
                                           parent_username: slot.username,
-                                        })
+                                        });
                                         setSlotSearch(
                                           `${slot.full_name} (@${slot.username}) — Left`,
-                                        )
-                                        setSlotDropdownOpen(false)
+                                        );
+                                        setSlotDropdownOpen(false);
                                       }}
                                       className="text-[10px] bg-[#010521] text-white px-2.5 py-1 rounded-full hover:bg-[#1A2F5E]"
                                     >
@@ -1156,13 +1240,13 @@ function CityRegisterResellerPageInner() {
                                       onClick={() => {
                                         setSelectedSlot({
                                           parent_node_id: slot.node_id,
-                                          position: 'right',
+                                          position: "right",
                                           parent_username: slot.username,
-                                        })
+                                        });
                                         setSlotSearch(
                                           `${slot.full_name} (@${slot.username}) — Right`,
-                                        )
-                                        setSlotDropdownOpen(false)
+                                        );
+                                        setSlotDropdownOpen(false);
                                       }}
                                       className="text-[10px] bg-[#C9A84C] text-[#0D1B3E] px-2.5 py-1 rounded-full hover:bg-[#E8C96A]"
                                     >
@@ -1211,11 +1295,11 @@ function CityRegisterResellerPageInner() {
               <button
                 onClick={() => {
                   if (!selectedSlot) {
-                    setReferralError('Please select a placement slot.')
-                    return
+                    setReferralError("Please select a placement slot.");
+                    return;
                   }
-                  setReferralError('')
-                  setStep(4)
+                  setReferralError("");
+                  setStep(4);
                 }}
                 disabled={!selectedSlot}
                 className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] disabled:opacity-60"
@@ -1234,13 +1318,13 @@ function CityRegisterResellerPageInner() {
                 ✓ All confirmed
               </p>
               <p className="text-xs text-gray-500">
-                PIN: <strong>{pinData?.pin_code}</strong> ·{' '}
+                PIN: <strong>{pinData?.pin_code}</strong> ·{" "}
                 {pinData?.package?.name}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">📍 {fullAddress}</p>
               <p className="text-xs text-gray-500 mt-0.5">
-                Referrer: <strong>@{referralData?.username}</strong> ·{' '}
-                <strong>{selectedSlot?.position}</strong> leg under{' '}
+                Referrer: <strong>@{referralData?.username}</strong> ·{" "}
+                <strong>{selectedSlot?.position}</strong> leg under{" "}
                 <strong>@{selectedSlot?.parent_username}</strong>
               </p>
             </div>
@@ -1252,20 +1336,20 @@ function CityRegisterResellerPageInner() {
                   const fullName = buildPersonName({
                     firstName: legalName.first_name,
                     middleName: legalName.no_middle_name
-                      ? ''
+                      ? ""
                       : legalName.middle_name,
                     lastName: legalName.last_name,
                     suffix: legalName.suffix,
-                  })
+                  });
                   setForm((current) => ({
                     ...current,
                     ...legalName,
                     full_name: fullName,
-                    username: '',
-                    password: '',
-                    confirmPassword: '',
-                  }))
-                  setNameCapInfo(null)
+                    username: "",
+                    password: "",
+                    confirmPassword: "",
+                  }));
+                  setNameCapInfo(null);
                 }}
                 onBlur={() =>
                   checkNameCap(form.full_name, form.birthday, form.birthplace)
@@ -1273,12 +1357,12 @@ function CityRegisterResellerPageInner() {
               />
               {nameCapInfo?.ready && (
                 <p
-                  className={`text-xs mt-1 ${nameCapInfo.remaining_after_registration === 0 ? 'text-[#9a6f1e]' : 'text-gray-500'}`}
+                  className={`text-xs mt-1 ${nameCapInfo.remaining_after_registration === 0 ? "text-[#9a6f1e]" : "text-gray-500"}`}
                 >
                   {nameCapInfo.first_account
-                    ? 'First account'
-                    : 'Existing member'}{' '}
-                  · Account {nameCapInfo.account_number} of {nameCapInfo.max} ·{' '}
+                    ? "First account"
+                    : "Existing member"}{" "}
+                  · Account {nameCapInfo.account_number} of {nameCapInfo.max} ·{" "}
                   {nameCapInfo.remaining_after_registration} slots remaining
                   after registration
                 </p>
@@ -1340,9 +1424,9 @@ function CityRegisterResellerPageInner() {
                     setForm({
                       ...form,
                       birthday: e.target.value,
-                      username: '',
-                    })
-                    setNameCapInfo(null)
+                      username: "",
+                    });
+                    setNameCapInfo(null);
                   }}
                   onBlur={(e) =>
                     checkNameCap(
@@ -1365,9 +1449,9 @@ function CityRegisterResellerPageInner() {
                     setForm({
                       ...form,
                       birthplace: e.target.value,
-                      username: '',
-                    })
-                    setNameCapInfo(null)
+                      username: "",
+                    });
+                    setNameCapInfo(null);
                   }}
                   onBlur={(e) =>
                     checkNameCap(form.full_name, form.birthday, e.target.value)
@@ -1389,9 +1473,9 @@ function CityRegisterResellerPageInner() {
                     setForm({
                       ...form,
                       identity_document_type: e.target.value,
-                      username: '',
-                    })
-                    setNameCapInfo(null)
+                      username: "",
+                    });
+                    setNameCapInfo(null);
                   }}
                   onBlur={() =>
                     checkNameCap(form.full_name, form.birthday, form.birthplace)
@@ -1400,15 +1484,15 @@ function CityRegisterResellerPageInner() {
                 >
                   <option value="">Select valid ID</option>
                   {[
-                    'National ID',
-                    'Passport',
-                    'Driver’s License',
-                    'TIN ID',
-                    'UMID',
-                    'PhilHealth ID',
-                    'Voter’s ID',
-                    'Postal ID',
-                    'PRC ID',
+                    "National ID",
+                    "Passport",
+                    "Driver’s License",
+                    "TIN ID",
+                    "UMID",
+                    "PhilHealth ID",
+                    "Voter’s ID",
+                    "Postal ID",
+                    "PRC ID",
                   ].map((type) => (
                     <option key={type} value={type}>
                       {type}
@@ -1426,9 +1510,9 @@ function CityRegisterResellerPageInner() {
                     setForm({
                       ...form,
                       identity_document_number: e.target.value,
-                      username: '',
-                    })
-                    setNameCapInfo(null)
+                      username: "",
+                    });
+                    setNameCapInfo(null);
                   }}
                   onBlur={() =>
                     checkNameCap(form.full_name, form.birthday, form.birthplace)
@@ -1458,7 +1542,7 @@ function CityRegisterResellerPageInner() {
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">
-                  Confirm temporary password{' '}
+                  Confirm temporary password{" "}
                   <span className="text-[#C9A84C]">*</span>
                 </label>
                 <input
@@ -1466,7 +1550,7 @@ function CityRegisterResellerPageInner() {
                   value={form.confirmPassword}
                   readOnly
                   placeholder="Generated automatically"
-                  className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400' : 'border-[#0D1B3E]/15 focus:border-[#C9A84C]'}`}
+                  className={`w-full bg-[#F0F2F8] border rounded-lg px-3 py-2 text-sm outline-none ${form.confirmPassword && form.password !== form.confirmPassword ? "border-red-400" : "border-[#0D1B3E]/15 focus:border-[#C9A84C]"}`}
                 />
               </div>
             </div>
@@ -1487,10 +1571,10 @@ function CityRegisterResellerPageInner() {
                 <span className="text-xs text-gray-600 leading-relaxed">
                   By clicking this, I confirm that all information provided is
                   accurate and truthful. I understand that providing false
-                  information may result in account termination. I agree to the{' '}
+                  information may result in account termination. I agree to the{" "}
                   <span className="text-[#C9A84C] font-semibold">
                     Terms and Conditions
-                  </span>{' '}
+                  </span>{" "}
                   of Hiroma.
                 </span>
               </label>
@@ -1505,8 +1589,8 @@ function CityRegisterResellerPageInner() {
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => {
-                  setStep(3)
-                  setFormError('')
+                  setStep(3);
+                  setFormError("");
                 }}
                 className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] text-sm rounded-lg py-2.5 hover:bg-[#e4e7f0]"
               >
@@ -1522,7 +1606,7 @@ function CityRegisterResellerPageInner() {
                 }
                 className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] disabled:opacity-60"
               >
-                {formLoading ? 'Registering...' : 'Register Reseller ✓'}
+                {formLoading ? "Registering..." : "Register Reseller ✓"}
               </button>
             </div>
           </div>
@@ -1539,18 +1623,18 @@ function CityRegisterResellerPageInner() {
               Is this the same person?
             </h3>
             <p className="mt-2 text-sm text-gray-500">
-              The system found {nameCapInfo.matching_usernames?.length || 1}{' '}
+              The system found {nameCapInfo.matching_usernames?.length || 1}{" "}
               active account with the same legal name and birth date.
             </p>
             <p className="mt-3 text-xs text-gray-500">
               Existing account
               {(nameCapInfo.matching_usernames?.length || 0) === 1
-                ? ''
-                : 's'}:{' '}
+                ? ""
+                : "s"}:{" "}
               <span className="font-mono text-[#0D1B3E]">
                 {nameCapInfo.matching_usernames
                   ?.map((username) => `@${username}`)
-                  .join(', ')}
+                  .join(", ")}
               </span>
             </p>
             <p className="mt-3 text-xs text-gray-400">
@@ -1560,14 +1644,14 @@ function CityRegisterResellerPageInner() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={() => {
-                  setIdentityConfirmation('different')
-                  setIdentityPromptOpen(false)
+                  setIdentityConfirmation("different");
+                  setIdentityPromptOpen(false);
                   checkNameCap(
                     form.full_name,
                     form.birthday,
                     form.birthplace,
-                    'different',
-                  )
+                    "different",
+                  );
                 }}
                 className="flex-1 rounded-xl bg-[#F0F2F8] py-3 text-sm font-semibold text-[#0D1B3E]"
               >
@@ -1575,14 +1659,14 @@ function CityRegisterResellerPageInner() {
               </button>
               <button
                 onClick={() => {
-                  setIdentityConfirmation('same')
-                  setIdentityPromptOpen(false)
+                  setIdentityConfirmation("same");
+                  setIdentityPromptOpen(false);
                   checkNameCap(
                     form.full_name,
                     form.birthday,
                     form.birthplace,
-                    'same',
-                  )
+                    "same",
+                  );
                 }}
                 className="flex-1 rounded-xl bg-[#C9A84C] py-3 text-sm font-bold text-[#0D1B3E]"
               >
@@ -1610,11 +1694,11 @@ function CityRegisterResellerPageInner() {
             <div className="flex gap-2 mt-5">
               <button
                 onClick={() => {
-                  setSmsPromptOpen(false)
+                  setSmsPromptOpen(false);
                   setSmsStatus({
-                    type: 'skipped',
-                    message: 'SMS sending was skipped.',
-                  })
+                    type: "skipped",
+                    message: "SMS sending was skipped.",
+                  });
                 }}
                 disabled={smsSending}
                 className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] font-semibold text-sm rounded-xl py-3 disabled:opacity-60"
@@ -1626,7 +1710,7 @@ function CityRegisterResellerPageInner() {
                 disabled={smsSending}
                 className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 disabled:opacity-60"
               >
-                {smsSending ? 'Sending...' : 'Yes, send SMS'}
+                {smsSending ? "Sending..." : "Yes, send SMS"}
               </button>
             </div>
           </div>
@@ -1642,7 +1726,7 @@ function CityRegisterResellerPageInner() {
                 className="absolute inset-0 pointer-events-none"
                 style={{
                   background:
-                    'radial-gradient(ellipse 60% 60% at 50% 100%, rgba(201,168,76,0.12) 0%, transparent 70%)',
+                    "radial-gradient(ellipse 60% 60% at 50% 100%, rgba(201,168,76,0.12) 0%, transparent 70%)",
                 }}
               />
               <div className="w-16 h-16 bg-[#C9A84C]/20 border-2 border-[#C9A84C]/40 rounded-full flex items-center justify-center mx-auto mb-3 relative">
@@ -1665,7 +1749,7 @@ function CityRegisterResellerPageInner() {
               <p className="text-white/60 text-sm mt-2 relative">
                 <span className="text-[#C9A84C] font-semibold">
                   {successData.full_name}
-                </span>{' '}
+                </span>{" "}
                 is now an active Hiroma reseller
               </p>
               <p className="text-white/40 text-xs mt-1 relative">
@@ -1677,11 +1761,11 @@ function CityRegisterResellerPageInner() {
               {smsStatus && (
                 <div
                   className={`rounded-xl px-4 py-3 text-xs font-medium ${
-                    smsStatus.type === 'success'
-                      ? 'bg-green-50 border border-green-200 text-green-700'
-                      : smsStatus.type === 'error'
-                        ? 'bg-red-50 border border-red-200 text-red-600'
-                        : 'bg-gray-50 border border-gray-200 text-gray-500'
+                    smsStatus.type === "success"
+                      ? "bg-green-50 border border-green-200 text-green-700"
+                      : smsStatus.type === "error"
+                        ? "bg-red-50 border border-red-200 text-red-600"
+                        : "bg-gray-50 border border-gray-200 text-gray-500"
                   }`}
                 >
                   {smsStatus.message}
@@ -1713,8 +1797,8 @@ function CityRegisterResellerPageInner() {
                   <div className="flex justify-between text-xs">
                     <span className="text-gray-500">Birth date</span>
                     <span className="font-medium text-[#0D1B3E]">
-                      {new Intl.DateTimeFormat('en-PH', {
-                        dateStyle: 'long',
+                      {new Intl.DateTimeFormat("en-PH", {
+                        dateStyle: "long",
                       }).format(new Date(`${successData.birthday}T00:00:00`))}
                     </span>
                   </div>
@@ -1820,7 +1904,7 @@ function CityRegisterResellerPageInner() {
                             >
                               <div className="flex items-center gap-2 min-w-0">
                                 <span
-                                  className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'}`}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${p.type === "physical" ? "bg-[#eef0f8] text-[#0D1B3E]" : "bg-[#f0f7ff] text-[#2563eb]"}`}
                                 >
                                   {p.type}
                                 </span>
@@ -1829,7 +1913,7 @@ function CityRegisterResellerPageInner() {
                                     {p.name}
                                   </p>
                                   <p className="text-[10px] text-gray-400">
-                                    SRP: ₱{Number(p.srp).toLocaleString()} ×{' '}
+                                    SRP: ₱{Number(p.srp).toLocaleString()} ×{" "}
                                     {p.quantity}
                                   </p>
                                 </div>
@@ -1852,9 +1936,9 @@ function CityRegisterResellerPageInner() {
                 </p>
                 <div className="space-y-1.5">
                   {[
-                    '📱 Share login credentials with the reseller',
-                    '🛍️ Hand over the physical products included',
-                    '📊 Monitor their progress in your Resellers list',
+                    "📱 Share login credentials with the reseller",
+                    "🛍️ Hand over the physical products included",
+                    "📊 Monitor their progress in your Resellers list",
                   ].map((s, i) => (
                     <p key={i} className="text-xs text-gray-500">
                       {s}
@@ -1866,15 +1950,15 @@ function CityRegisterResellerPageInner() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setSuccessData(null)
-                    resetForm()
+                    setSuccessData(null);
+                    resetForm();
                   }}
                   className="flex-1 bg-[#F0F2F8] text-[#0D1B3E] font-semibold text-sm rounded-xl py-3 hover:bg-[#e4e7f0] transition-colors"
                 >
                   Register Another
                 </button>
                 <button
-                  onClick={() => router.push('/dashboard/city/resellers')}
+                  onClick={() => router.push("/dashboard/city/resellers")}
                   className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-bold text-sm rounded-xl py-3 hover:bg-[#E8C96A] transition-colors"
                 >
                   View Resellers →
@@ -1885,7 +1969,7 @@ function CityRegisterResellerPageInner() {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 export default function CityRegisterResellerPage() {
@@ -1899,5 +1983,5 @@ export default function CityRegisterResellerPage() {
     >
       <CityRegisterResellerPageInner />
     </Suspense>
-  )
+  );
 }

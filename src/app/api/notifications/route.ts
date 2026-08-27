@@ -6,11 +6,12 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const recipientId = user.actor_id || user.id
 
     const page = Math.max(1, Number(req.nextUrl.searchParams.get('page') || 1))
     const pageSize = Math.min(50, Math.max(1, Number(req.nextUrl.searchParams.get('pageSize') || 20)))
     const unreadOnly = req.nextUrl.searchParams.get('unread') === 'true'
-    const where = { user_id: user.id, ...(unreadOnly ? { read_at: null } : {}) }
+    const where = { user_id: recipientId, ...(unreadOnly ? { read_at: null } : {}) }
 
     const [notifications, total, unread] = await Promise.all([
       prisma.notification.findMany({
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
         take: pageSize,
       }),
       prisma.notification.count({ where }),
-      prisma.notification.count({ where: { user_id: user.id, read_at: null } }),
+      prisma.notification.count({ where: { user_id: recipientId, read_at: null } }),
     ])
 
     return NextResponse.json({
@@ -43,6 +44,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const recipientId = user.actor_id || user.id
 
     const { id, all } = await req.json()
     if (!all && !id) {
@@ -51,16 +53,16 @@ export async function PATCH(req: NextRequest) {
 
     if (all) {
       await prisma.notification.updateMany({
-        where: { user_id: user.id, read_at: null },
+        where: { user_id: recipientId, read_at: null },
         data: { read_at: new Date() },
       })
     } else {
       const result = await prisma.notification.updateMany({
-        where: { id, user_id: user.id, read_at: null },
+        where: { id, user_id: recipientId, read_at: null },
         data: { read_at: new Date() },
       })
       if (result.count === 0) {
-        const exists = await prisma.notification.count({ where: { id, user_id: user.id } })
+        const exists = await prisma.notification.count({ where: { id, user_id: recipientId } })
         if (!exists) return NextResponse.json({ error: 'Notification not found.' }, { status: 404 })
       }
     }

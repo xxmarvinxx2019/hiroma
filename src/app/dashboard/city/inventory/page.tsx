@@ -20,7 +20,7 @@ interface InventoryItem {
     name:             string
     type:             string
     is_active:        boolean
-    city_price:   number
+    city_price: number | null
     provincial_price: number
   }
 }
@@ -77,6 +77,15 @@ export default function CityInventoryPage() {
     total_cost_value: 0, total_sell_value: 0, total_selling_value: 0, potential_profit: 0,
     actual_revenue: 0, actual_cost: 0, actual_profit: 0,
   })
+  const [canViewFinancials, setCanViewFinancials] = useState<boolean | null>(null)
+  const [cashierShift, setCashierShift] = useState({
+    has_open_shift: false,
+    opened_at: null as string | null,
+    transaction_count: 0,
+    sales_total: 0,
+    cash_sales: 0,
+    non_cash_sales: 0,
+  })
   const [editingId, setEditingId]         = useState<string | null>(null)
   const [editThreshold, setEditThreshold] = useState('')
   const [saving, setSaving]               = useState(false)
@@ -86,7 +95,10 @@ export default function CityInventoryPage() {
     return () => clearTimeout(t)
   }, [searchInput])
 
-  useEffect(() => { setPage(1) }, [search, typeFilter, stockFilter])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPage(1), 0)
+    return () => window.clearTimeout(timer)
+  }, [search, typeFilter, stockFilter])
 
   const fetchInventory = useCallback(() => {
     setLoading(true)
@@ -99,11 +111,16 @@ export default function CityInventoryPage() {
         setMeta(d.meta || { total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
         setSummary(d.summary || {})
         setProductSales(d.productSales || d.product_sales || [])
+        setCanViewFinancials(Boolean(d.access?.can_view_financials))
+        if (d.cashier_shift_summary) setCashierShift(d.cashier_shift_summary)
       })
       .finally(() => setLoading(false))
   }, [page, search, typeFilter, stockFilter])
 
-  useEffect(() => { fetchInventory() }, [fetchInventory])
+  useEffect(() => {
+    const timer = window.setTimeout(() => fetchInventory(), 0)
+    return () => window.clearTimeout(timer)
+  }, [fetchInventory])
 
   useEffect(() => {
     fetch('/api/inventory/transfers', { cache: 'no-store' })
@@ -149,51 +166,74 @@ export default function CityInventoryPage() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      {/* Inventory overview */}
+      <div className={`grid grid-cols-2 gap-3 md:grid-cols-3 ${canViewFinancials ? 'xl:grid-cols-6' : ''}`}>
         {[
-          { label: 'Total Products',   value: summary.total_products,                      color: '#0D1B3E', icon: '📦', sub: `${summary.total_units.toLocaleString()} units in stock` },
-          { label: 'Low Stock',        value: summary.low_stock,                           color: '#9a6f1e', icon: '⚠️', sub: 'Below threshold', badge: summary.low_stock > 0 ? 'Restock soon' : undefined },
-          { label: 'Out of Stock',     value: summary.out_of_stock,                        color: '#b9383e', icon: '❌', sub: 'Need immediate restock', badge: summary.out_of_stock > 0 ? 'Urgent!' : undefined },
-          { label: 'Inventory Cost Value', value: fmt(summary.total_cost_value || 0), color: '#8a6218', icon: '🏷️', sub: 'Historical acquisition cost of on-hand stock' },
-          { label: 'Potential Sales Value', value: fmt(summary.total_selling_value || summary.total_sell_value || 0), color: '#2563eb', icon: '💰', sub: 'If all on-hand units sell at reseller price' },
-          { label: 'Potential Gross Profit', value: fmt(summary.potential_profit || 0), color: '#187443', icon: '💎', sub: 'Potential sales value minus inventory cost' },
-        ].map(s => (
-          <div key={s.label} className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
-            style={{ borderColor: s.color, backgroundColor: s.color, color: '#fff' }}>
-            <div className="flex items-start justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style={{ backgroundColor: '#FFFFFF24' }}>
-                {s.icon}
-              </div>
-              {s.badge && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: '#FFFFFF24', textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.badge}</span>}
+          { label: 'Total Products', value: summary.total_products, color: '#0D1B3E', icon: 'P', sub: `${summary.total_units.toLocaleString()} units in stock` },
+          { label: 'Low Stock', value: summary.low_stock, color: '#9a6f1e', icon: 'L', sub: 'Below threshold', badge: summary.low_stock > 0 ? 'Restock soon' : undefined },
+          { label: 'Out of Stock', value: summary.out_of_stock, color: '#b9383e', icon: 'O', sub: 'Need immediate restock', badge: summary.out_of_stock > 0 ? 'Urgent!' : undefined },
+          ...(canViewFinancials ? [
+            { label: 'Inventory Cost Value', value: fmt(summary.total_cost_value || 0), color: '#8a6218', icon: 'C', sub: 'Historical acquisition cost of on-hand stock' },
+            { label: 'Potential Sales Value', value: fmt(summary.total_selling_value || summary.total_sell_value || 0), color: '#2563eb', icon: 'S', sub: 'If all on-hand units sell at reseller price' },
+            { label: 'Potential Gross Profit', value: fmt(summary.potential_profit || 0), color: '#187443', icon: 'G', sub: 'Potential sales value minus inventory cost' },
+          ] : []),
+        ].map((card) => (
+          <div key={card.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style={{ borderColor: card.color, backgroundColor: card.color, color: '#fff' }}>
+            <div className="mb-3 flex items-start justify-between">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl text-sm font-black" style={{ backgroundColor: '#FFFFFF24' }}>{card.icon}</div>
+              {card.badge && <span className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: '#FFFFFF24' }}>{card.badge}</span>}
             </div>
-            <p className="text-xs font-bold uppercase tracking-wide mb-1 text-white/95" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.label}</p>
-            <p className="text-xl font-extrabold text-white" style={{ textShadow: '0 2px 3px rgba(0,0,0,.45)' }}>{s.value}</p>
-            <p className="text-xs font-semibold leading-relaxed text-white/90 mt-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.sub}</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-white/95">{card.label}</p>
+            <p className="text-xl font-extrabold">{card.value}</p>
+            <p className="mt-1 text-xs font-semibold leading-relaxed text-white/90">{card.sub}</p>
           </div>
         ))}
       </div>
 
-      {/* Revenue cards */}
-      {summary.actual_revenue > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Actual Revenue', value: fmtS(summary.actual_revenue), color: '#2563eb', icon: '📈' },
-            { label: 'Actual Cost',    value: fmtS(summary.actual_cost),    color: '#b9383e', icon: '🏷️' },
-            { label: 'Actual Profit',  value: fmtS(summary.actual_profit),  color: '#187443', icon: '💎',
-              sub: summary.actual_revenue > 0 ? `${Math.round((summary.actual_profit / summary.actual_revenue) * 100)}% margin` : '' },
-          ].map(s => (
-            <div key={s.label} className="rounded-xl border p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
-              style={{ borderColor: s.color, backgroundColor: s.color, color: '#fff' }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-bold text-white/95 uppercase tracking-wide" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.label}</p>
-                <span className="text-lg">{s.icon}</span>
+      {canViewFinancials === false && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-bold text-[#0D1B3E]">Current Shift Summary</h2>
+            <p className="text-xs text-gray-400">{cashierShift.has_open_shift ? 'Resets when a new shift is opened' : 'No open shift - values remain at zero'}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            {[
+              { label: 'Shift Sales', value: fmt(cashierShift.sales_total), color: '#2563eb', sub: 'Finalized transactions' },
+              { label: 'Transactions', value: cashierShift.transaction_count.toLocaleString(), color: '#0D1B3E', sub: 'Completed this shift' },
+              { label: 'Cash Sales', value: fmt(cashierShift.cash_sales), color: '#187443', sub: 'Cash received for sales' },
+              { label: 'Non-Cash Sales', value: fmt(cashierShift.non_cash_sales), color: '#7c5dba', sub: 'Approved non-cash payments' },
+            ].map((card) => (
+              <div key={card.label} className="rounded-xl p-4 text-white" style={{ backgroundColor: card.color }}>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/90">{card.label}</p>
+                <p className="mt-2 text-xl font-extrabold">{card.value}</p>
+                <p className="mt-1 text-[10px] text-white/80">{card.sub}</p>
               </div>
-              <p className="text-xl font-extrabold text-white" style={{ textShadow: '0 2px 3px rgba(0,0,0,.45)' }}>{s.value}</p>
-              {s.sub && <p className="text-xs font-semibold text-white/90 mt-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,.45)' }}>{s.sub}</p>}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {canViewFinancials === true && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-bold text-[#0D1B3E]">Today’s Sales Snapshot</h2>
+            <p className="text-xs text-gray-400">Finalized and delivered sales today. Use Reports for custom dates and full details.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {[
+              { label: 'Actual Revenue', value: fmtS(summary.actual_revenue), color: '#2563eb', sub: 'Completed sales' },
+              { label: 'Actual Cost', value: fmtS(summary.actual_cost), color: '#b9383e', sub: 'Acquisition cost of units sold' },
+              { label: 'Actual Profit', value: fmtS(summary.actual_profit), color: '#187443', sub: summary.actual_revenue > 0 ? `${Math.round((summary.actual_profit / summary.actual_revenue) * 100)}% margin` : 'No completed sales yet' },
+            ].map((card) => (
+              <div key={card.label} className="rounded-xl p-4 text-white" style={{ backgroundColor: card.color }}>
+                <p className="text-xs font-bold uppercase tracking-wide text-white/95">{card.label}</p>
+                <p className="mt-2 text-xl font-extrabold">{card.value}</p>
+                <p className="mt-1 text-xs text-white/85">{card.sub}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Pending delivery callout */}
@@ -229,10 +269,10 @@ export default function CityInventoryPage() {
           className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'inventory' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📦 Stock Levels
         </button>
-        <button onClick={() => setTab('sales')}
+        {canViewFinancials && <button onClick={() => setTab('sales')}
           className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'sales' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📊 Sales Summary
-        </button>
+        </button>}
         <button onClick={() => setTab('ledger')}
           className={`shrink-0 text-xs px-4 py-2 rounded-lg font-medium transition-all ${tab === 'ledger' ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
           📚 Movement Ledger
@@ -299,7 +339,7 @@ export default function CityInventoryPage() {
                 { key: 'low', label: '⚠️ Low' },
                 { key: 'ok',  label: '✅ OK'  },
               ].map(f => (
-                <button key={f.key} onClick={() => setStockFilter(f.key as any)}
+                <button key={f.key} onClick={() => setStockFilter(f.key as 'all' | 'out' | 'low' | 'ok')}
                   className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${stockFilter === f.key ? 'bg-[#010521] text-white' : 'bg-[#f8f9fc] text-gray-400 hover:text-[#0D1B3E]'}`}>
                   {f.label}
                 </button>
@@ -332,7 +372,7 @@ export default function CityInventoryPage() {
                 {/* Product */}
                 <div>
                   <p className="text-xs font-semibold text-[#0D1B3E] truncate">{item.product.name}</p>
-                  <p className="text-[10px] text-gray-400">{fmt(item.product.city_price)} / unit</p>
+                  {item.product.city_price != null && <p className="text-[10px] text-gray-400">{fmt(item.product.city_price)} / unit</p>}
                 </div>
                 {/* Type */}
                 <span className="text-[10px] bg-[#eef0f8] text-[#0D1B3E] px-2 py-0.5 rounded-full capitalize font-medium w-fit">
@@ -386,7 +426,7 @@ export default function CityInventoryPage() {
       )}
 
       {/* ── SALES MOVEMENT TAB ── */}
-      {tab === 'sales' && (
+      {tab === 'sales' && canViewFinancials && (
         <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
           <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
             <p className="text-sm font-bold text-[#0D1B3E]">Product Movement</p>

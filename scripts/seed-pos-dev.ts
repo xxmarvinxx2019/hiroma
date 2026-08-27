@@ -111,6 +111,47 @@ await prisma.inventory.upsert({
   create: { owner_id: city.id, product_id: product.id, quantity: 50, reserved_quantity: 0, low_stock_threshold: 10 },
 })
 
+// Keep one clearly labelled local-only registration package available so the
+// POS registration flow can be exercised without inventing package data in the UI.
+let registrationPackage = await prisma.package.findFirst({
+  where: { name: 'POS Starter Test Package' },
+})
+registrationPackage = registrationPackage
+  ? await prisma.package.update({
+      where: { id: registrationPackage.id },
+      data: {
+        price: 249,
+        direct_referral_bonus: 0,
+        pairing_bonus_value: 0,
+        point_php_value: 0,
+        is_active: true,
+      },
+    })
+  : await prisma.package.create({
+      data: {
+        name: 'POS Starter Test Package',
+        price: 249,
+        direct_referral_bonus: 0,
+        pairing_bonus_value: 0,
+        point_php_value: 0,
+        is_active: true,
+      },
+    })
+
+const packageProduct = await prisma.packageProduct.findFirst({
+  where: { package_id: registrationPackage.id, product_id: product.id },
+})
+if (packageProduct) {
+  await prisma.packageProduct.update({
+    where: { id: packageProduct.id },
+    data: { quantity: 1 },
+  })
+} else {
+  await prisma.packageProduct.create({
+    data: { package_id: registrationPackage.id, product_id: product.id, quantity: 1 },
+  })
+}
+
 const payment = await prisma.paymentMethod.findFirst({ where: { user_id: city.id, type: 'gcash', account_number: '09000000000' } })
 if (!payment) await prisma.paymentMethod.create({ data: { user_id: city.id, type: 'gcash', account_name: 'Hiroma POS Test', account_number: '09000000000', status: 'approved' } })
 const bank = await prisma.paymentMethod.findFirst({ where: { user_id: city.id, type: 'bank', account_number: '0000000001' } })

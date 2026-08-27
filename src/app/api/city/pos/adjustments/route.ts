@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import prisma from '@/app/lib/prisma'
+import { notifyPosReviewers } from '@/app/lib/posNotifications'
 
 function canApprove(user: Awaited<ReturnType<typeof getCurrentUser>>) {
   return Boolean(user && user.role === 'city' && (!user.is_staff || user.permissions?.includes('pos_approve')))
@@ -96,6 +97,17 @@ export async function POST(req: NextRequest) {
       description: `${requestType === 'void' ? 'Void' : 'Refund'} requested for ${transaction.receipt_number}.`,
       metadata: { pos_transaction_id: transaction.id, request_id: created.id, request_type: requestType, reason },
       ...client, status: 'under_review',
+    })
+    await notifyPosReviewers({
+      ownerId: user.id,
+      actorId,
+      permission: 'pos_approve',
+      type: 'pos_adjustment_pending',
+      title: `${requestType === 'void' ? 'Void' : 'Refund'} request needs review`,
+      message: `Receipt ${transaction.receipt_number} has a ${requestType} request waiting for an independent decision.`,
+      entityType: 'pos_adjustment_request',
+      entityId: created.id,
+      actionUrl: '/dashboard/city/pos/adjustments',
     })
     return NextResponse.json({ request: created }, { status: 201 })
   } catch (error) {

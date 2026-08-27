@@ -203,3 +203,45 @@
 .animate-slide-up {
   animation: slide-up 0.3s ease-out forwards;
 }
+
+/* POS receipt printing: print the finalized receipt, never the dashboard shell. */
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .pos-print-overlay,
+  .pos-print-receipt,
+  .pos-print-receipt * {
+    visibility: visible !important;
+  }
+
+  .pos-print-overlay {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+
+  .pos-print-receipt {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 6mm !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  .pos-print-actions {
+    display: none !important;
+  }
+}

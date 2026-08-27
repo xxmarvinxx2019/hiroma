@@ -48,6 +48,32 @@ test('POS visibly identifies the authenticated cashier', () => {
   assert.match(page, /cashier_name: data\.cashier\.full_name/)
 })
 
+test('POS member pricing requires a fresh Digital ID QR proof', () => {
+  const page = read('src/app/dashboard/city/pos/page.tsx')
+  const transactions = read('src/app/api/city/pos/transactions/route.ts')
+  assert.match(page, /Scan Digital ID QR/)
+  assert.match(page, /scan_proof: customerType === "member" \? memberScanProof : null/)
+  assert.match(page, /Boolean\(selectedMember && memberScanProof\)/)
+  assert.match(transactions, /customerType === 'member' && \(!memberId \|\| !scanProof\)/)
+  assert.match(transactions, /await consumeWalkInScanProof\(tx, scanProof, user\.id, member\.id\)/)
+  assert.match(transactions, /POS_MEMBER_SCAN_REQUIRED/)
+})
+
+test('POS product barcode is admin-controlled, unique, and scan-to-add', () => {
+  const schema = read('prisma/schema.prisma')
+  const migration = read('prisma/migrations/20260826093000_add_product_barcode/migration.sql')
+  const products = read('src/app/api/admin/products/route.ts')
+  const bootstrap = read('src/app/api/city/pos/bootstrap/route.ts')
+  const page = read('src/app/dashboard/city/pos/page.tsx')
+  assert.match(schema, /barcode\s+String\?\s+@unique/)
+  assert.match(migration, /CREATE UNIQUE INDEX "products_barcode_key"/)
+  assert.match(products, /normalizedBarcode/)
+  assert.match(products, /barcode:\s+officialBarcode/)
+  assert.match(bootstrap, /barcode: row\.product\.barcode/)
+  assert.match(page, /Scan product barcode/)
+  assert.match(page, /addProductByBarcode/)
+})
+
 test('cashier navigation exposes a POS-only sync center without financial totals', () => {
   const layout = read('src/app/dashboard/city/layout.tsx')
   const sync = read('src/app/dashboard/city/pos/sync/page.tsx')

@@ -282,6 +282,7 @@ model Pin {
 
 model Product {
   id               String                  @id @default(uuid())
+  barcode          String?                 @unique
   name             String
   description      String?
   type             ProductType

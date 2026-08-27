@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import PosInstallControl from "@/app/components/pos/PosInstallControl";
-import { deleteQueuedSale, listQueuedSales, permanentReceiptNumber, PosQueuedSale, PosReceiptRange, saveQueuedSale } from "@/app/lib/posOfflineQueue";
+import { loadPosDeviceSettings } from "@/app/lib/posDeviceSettings";
+import { deleteQueuedSale, listQueuedSales, loadPosBootstrap, permanentReceiptNumber, PosQueuedSale, PosReceiptRange, savePosBootstrap, saveQueuedSale } from "@/app/lib/posOfflineQueue";
 
 type Bootstrap = {
   cashier: {
@@ -14,6 +15,9 @@ type Bootstrap = {
   terminal: { id: string; name: string; receipt_code: string };
   receipt_location_code: string;
   receipt_range: PosReceiptRange;
+  receipt_outlet_name?: string;
+  receipt_address?: string;
+  receipt_address_source?: "physical_outlet" | "registered_address";
   location: {
     full_name: string;
     distributor_profile?: {
@@ -23,6 +27,7 @@ type Bootstrap = {
   } | null;
   catalog: Array<{
     product_id: string;
+    barcode: string | null;
     name: string;
     type: string;
     stock: number;
@@ -47,6 +52,146 @@ type Member = {
   full_name: string;
 };
 type CustomerType = "member" | "non_member";
+
+function extractMemberIdFromQr(value: string) {
+  try {
+    return decodeURIComponent(value).trim().toUpperCase().match(/HRM-\d{4}-\d{6}/)?.[0] || "";
+  } catch {
+    return "";
+  }
+}
+
+function PosMemberQrScanner({
+  onClose,
+  onVerified,
+}: {
+  onClose: () => void;
+  onVerified: (member: Member, scanProof: string) => void;
+}) {
+  const scannerElementId = `pos-member-qr-${useId().replace(/:/g, "-")}`;
+  const detectionLocked = useRef(false);
+  const [scannerError, setScannerError] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    let scanner: import("html5-qrcode").Html5Qrcode | null = null;
+
+    async function verifyMember(decodedText: string) {
+      const memberId = extractMemberIdFromQr(decodedText);
+      if (!memberId) {
+        setScannerError("This is not a valid Hiroma Digital ID QR code.");
+        return false;
+      }
+      try {
+        const response = await fetch(`/api/city/orders/reseller-orders?member_id=${encodeURIComponent(memberId)}`, { cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok || !result.reseller || !result.scan_proof) {
+          throw new Error(result.error || "The reseller could not be verified.");
+        }
+        onVerified(result.reseller as Member, String(result.scan_proof));
+        return true;
+      } catch (reason) {
+        setScannerError(reason instanceof Error ? reason.message : "The reseller could not be verified.");
+        return false;
+      }
+    }
+
+    async function startScanner() {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (disposed) return;
+        scanner = new Html5Qrcode(scannerElementId);
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 240, height: 240 }, aspectRatio: 1 },
+          async (decodedText) => {
+            if (detectionLocked.current) return;
+            detectionLocked.current = true;
+            setScannerError("");
+            const accepted = await verifyMember(decodedText);
+            if (!accepted) detectionLocked.current = false;
+          },
+          () => undefined,
+        );
+      } catch {
+        if (!disposed) setScannerError("Camera unavailable. Allow camera access and try again.");
+      }
+    }
+
+    void startScanner();
+    return () => {
+      disposed = true;
+      if (scanner?.isScanning) void scanner.stop().then(() => scanner?.clear()).catch(() => undefined);
+      else scanner?.clear();
+    };
+  }, [onVerified, scannerElementId]);
+
+  return (
+    <div className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pos-member-scanner-title">
+      <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close Digital ID scanner" />
+      <section className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
+        <header className="flex items-start justify-between border-b px-5 py-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#b98a16]">Secure member verification</p>
+            <h2 id="pos-member-scanner-title" className="mt-1 text-xl font-bold text-[#071638]">Scan Digital ID QR</h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">Ask the reseller to show the QR code from their Hiroma Digital ID.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100" aria-label="Close scanner">✕</button>
+        </header>
+        <div className="flex-1 space-y-4 p-5">
+          <div className="overflow-hidden rounded-2xl border border-[#d4af45]/50 bg-[#010521] p-2">
+            <div id={scannerElementId} className="min-h-[310px] overflow-hidden rounded-xl" />
+          </div>
+          <p className="rounded-xl bg-blue-50 p-3 text-sm leading-6 text-blue-900">Member pricing unlocks only after a valid, active Digital ID is scanned. The verification is single-use and expires shortly.</p>
+          {scannerError ? <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{scannerError}</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PosProductScanner({ onClose, onDetected }: { onClose: () => void; onDetected: (barcode: string) => boolean }) {
+  const scannerElementId = `pos-product-code-${useId().replace(/:/g, "-")}`;
+  const detectionLocked = useRef(false);
+  const [scannerError, setScannerError] = useState("");
+  useEffect(() => {
+    let disposed = false;
+    let scanner: import("html5-qrcode").Html5Qrcode | null = null;
+    async function start() {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (disposed) return;
+        scanner = new Html5Qrcode(scannerElementId);
+        await scanner.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 280, height: 180 } }, (decodedText) => {
+          if (detectionLocked.current) return;
+          detectionLocked.current = true;
+          const accepted = onDetected(decodedText.trim().toUpperCase());
+          if (!accepted) {
+            setScannerError("No active product matches this barcode.");
+            detectionLocked.current = false;
+          }
+        }, () => undefined);
+      } catch {
+        if (!disposed) setScannerError("Camera unavailable. Use a USB/Bluetooth barcode scanner or enter the code below.");
+      }
+    }
+    void start();
+    return () => {
+      disposed = true;
+      if (scanner?.isScanning) void scanner.stop().then(() => scanner?.clear()).catch(() => undefined);
+      else scanner?.clear();
+    };
+  }, [onDetected, scannerElementId]);
+  return (
+    <div className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pos-product-scanner-title">
+      <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close product scanner" />
+      <section className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
+        <header className="flex items-start justify-between border-b p-5"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b98a16]">Fast checkout</p><h2 id="pos-product-scanner-title" className="mt-1 text-xl font-bold text-[#071638]">Scan product barcode</h2><p className="mt-1 text-sm text-gray-500">The matched product is added to the cart using its official POS price.</p></div><button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100">✕</button></header>
+        <div className="space-y-4 p-5"><div className="overflow-hidden rounded-2xl border border-[#d4af45]/50 bg-[#010521] p-2"><div id={scannerElementId} className="min-h-[300px] overflow-hidden rounded-xl" /></div>{scannerError ? <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{scannerError}</p> : null}</div>
+      </section>
+    </div>
+  );
+}
 type Receipt = {
   client_transaction_id: string;
   receipt_number: string;
@@ -70,6 +215,135 @@ type Receipt = {
   }>;
   sync_status?: "saved_offline" | "synced";
 };
+
+function escapeReceiptHtml(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatReceiptMoney(value: number) {
+  return new Intl.NumberFormat("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function printThermalReceipt(
+  receipt: Receipt,
+  outlet: { name: string; address?: string },
+) {
+  const deviceSettings = loadPosDeviceSettings();
+  const paperWidth = deviceSettings.paperWidth === "58" ? 58 : 80;
+  const contentWidth = paperWidth - 4;
+  const frame = document.createElement("iframe");
+  frame.title = "Hiroma receipt print";
+  frame.setAttribute("aria-hidden", "true");
+  Object.assign(frame.style, {
+    position: "fixed",
+    right: "0",
+    bottom: "0",
+    width: "1px",
+    height: "1px",
+    border: "0",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  document.body.appendChild(frame);
+
+  const printWindow = frame.contentWindow;
+  const printDocument = frame.contentDocument;
+  if (!printWindow || !printDocument) {
+    frame.remove();
+    return;
+  }
+
+  const isPending = receipt.payment_status === "pending_verification";
+  const itemRows = receipt.items
+    .map(
+      (item) => `
+        <div class="item">
+          <div class="item-name">${escapeReceiptHtml(item.name)}</div>
+          <div class="item-line"><span>${item.quantity} x PHP ${formatReceiptMoney(item.unit_price)}</span><strong>PHP ${formatReceiptMoney(item.subtotal)}</strong></div>
+        </div>`,
+    )
+    .join("");
+
+  printDocument.open();
+  printDocument.write(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeReceiptHtml(receipt.receipt_number)}</title>
+  <style>
+    @page { size: ${paperWidth}mm auto; margin: 2mm; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: ${contentWidth}mm; background: #fff; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: ${paperWidth === 58 ? "10px" : "11px"}; line-height: 1.35; }
+    .receipt { width: ${contentWidth}mm; padding: 2mm; }
+    .center { text-align: center; }
+    .brand { font-size: 16px; font-weight: 800; letter-spacing: .12em; }
+    .subtitle { margin-top: 1mm; font-size: 10px; font-weight: 700; }
+    .muted { color: #333; font-size: 9px; }
+    .rule { border-top: 1px dashed #000; margin: 3mm 0; }
+    .row, .item-line { display: flex; justify-content: space-between; gap: 3mm; }
+    .row { margin: 1.2mm 0; }
+    .row strong, .item-line strong { text-align: right; }
+    .item { margin: 2mm 0; }
+    .item-name { font-weight: 700; }
+    .item-line { margin-top: .5mm; font-size: 10px; }
+    .total { font-size: 14px; font-weight: 800; }
+    .notice { margin-top: 3mm; border: 1px solid #000; padding: 2mm; font-size: 9px; font-weight: 700; text-align: center; }
+    .footer { margin-top: 4mm; text-align: center; font-size: 9px; }
+  </style>
+</head>
+<body>
+  <main class="receipt">
+    <header class="center">
+      <div class="brand">HIROMA</div>
+      <div class="subtitle">${escapeReceiptHtml(outlet.name || "POINT OF SALE")}</div>
+      ${outlet.address ? `<div class="muted">${escapeReceiptHtml(outlet.address)}</div>` : ""}
+      <div class="muted">${isPending ? "PAYMENT VERIFICATION SLIP" : "OFFICIAL SALES RECEIPT"}</div>
+    </header>
+    <div class="rule"></div>
+    <div class="row"><span>Receipt</span><strong>${escapeReceiptHtml(receipt.receipt_number)}</strong></div>
+    <div class="row"><span>Date</span><strong>${escapeReceiptHtml(new Date(receipt.created_at).toLocaleString("en-PH"))}</strong></div>
+    <div class="row"><span>Customer</span><strong>${escapeReceiptHtml(receipt.customer_name)}</strong></div>
+    <div class="row"><span>Cashier</span><strong>${escapeReceiptHtml(receipt.cashier_name)}</strong></div>
+    <div class="rule"></div>
+    ${itemRows}
+    <div class="rule"></div>
+    <div class="row total"><span>TOTAL</span><strong>PHP ${formatReceiptMoney(receipt.total)}</strong></div>
+    <div class="row"><span>Payment</span><strong>${escapeReceiptHtml(receipt.payment_method)}</strong></div>
+    <div class="row"><span>Received</span><strong>PHP ${formatReceiptMoney(receipt.amount_received)}</strong></div>
+    <div class="row"><span>Change</span><strong>PHP ${formatReceiptMoney(receipt.change)}</strong></div>
+    ${receipt.payment_reference ? `<div class="row"><span>Reference</span><strong>${escapeReceiptHtml(receipt.payment_reference)}</strong></div>` : ""}
+    ${isPending ? '<div class="notice">PAYMENT NOT YET VERIFIED<br />DO NOT RELEASE PRODUCTS</div>' : ""}
+    ${receipt.sync_status === "saved_offline" ? '<div class="notice">RECORDED OFFLINE - AWAITING SYNC</div>' : ""}
+    ${receipt.customer_type === "member" ? '<div class="notice">MEMBER / RESELLER PURCHASE<br />FINAL SALE - NOT REFUNDABLE</div>' : ""}
+    <footer class="footer">Thank you for choosing Hiroma.<br />Keep this receipt for your records.</footer>
+  </main>
+</body>
+</html>`);
+  printDocument.close();
+
+  let removed = false;
+  const cleanup = () => {
+    if (!removed) {
+      removed = true;
+      frame.remove();
+    }
+  };
+  printWindow.addEventListener("afterprint", cleanup, { once: true });
+  window.setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+  }, 150);
+  window.setTimeout(cleanup, 60_000);
+}
 
 type ShiftClosingData = {
   shift: { id: string; status: string } | null;
@@ -97,12 +371,13 @@ export default function PointOfSalePage() {
   const [inventoryRecountExplanation, setInventoryRecountExplanation] = useState("");
   const [closingResult, setClosingResult] = useState<{ pendingApproval: boolean; message: string } | null>(null);
   const [customerType, setCustomerType] = useState<CustomerType>("non_member");
-  const [memberSearch, setMemberSearch] = useState("");
-  const [memberResults, setMemberResults] = useState<Member[]>([]);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [searchingMember, setSearchingMember] = useState(false);
+  const [memberScanProof, setMemberScanProof] = useState("");
+  const [showMemberScanner, setShowMemberScanner] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [productSearch, setProductSearch] = useState("");
+  const [showProductScanner, setShowProductScanner] = useState(false);
+  const [productScanMessage, setProductScanMessage] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountReceived, setAmountReceived] = useState("");
@@ -137,24 +412,44 @@ export default function PointOfSalePage() {
     } catch {
       localStorage.removeItem("hiroma_pos_receipt_range");
     }
-    fetch("/api/city/pos/bootstrap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        installation_id: installationId,
-        name: `POS ${installationId.slice(0, 8).toUpperCase()}`,
-        platform,
-        receipt_range: receiptRange,
-      }),
-    })
-      .then(async (response) => {
+    async function initializeTerminal() {
+      if (!navigator.onLine) {
+        const cached = await loadPosBootstrap<Bootstrap>().catch(() => undefined);
+        if (cached) setData(cached);
+        if (!cached) setError("This device has not completed its first online POS setup. Reconnect once to prepare offline checkout.");
+        return;
+      }
+
+      // A stale installed POS window can temporarily block an IndexedDB
+      // upgrade. Cached data is useful, but it must not delay online startup.
+      void loadPosBootstrap<Bootstrap>()
+        .then((cached) => {
+          if (cached) setData((current) => current || cached);
+        })
+        .catch(() => undefined);
+
+      try {
+        const response = await fetch("/api/city/pos/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            installation_id: installationId,
+            name: `POS ${installationId.slice(0, 8).toUpperCase()}`,
+            platform,
+            receipt_range: receiptRange,
+          }),
+        });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Unable to initialize POS.");
         setError("");
         setData(result);
+        await savePosBootstrap(result);
         localStorage.setItem("hiroma_pos_receipt_range", JSON.stringify(result.receipt_range));
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to initialize POS."));
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to initialize POS.");
+      }
+    }
+    void initializeTerminal();
     return () => {
       window.removeEventListener("online", updateConnection);
       window.removeEventListener("offline", updateConnection);
@@ -298,30 +593,6 @@ export default function PointOfSalePage() {
     };
   }, [online]);
 
-  useEffect(() => {
-    if (customerType !== "member" || selectedMember || memberSearch.trim().length < 2 || !online) {
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setSearchingMember(true);
-      try {
-        const response = await fetch(`/api/city/pos/members?search=${encodeURIComponent(memberSearch.trim())}`, { signal: controller.signal, cache: "no-store" });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Unable to search members.");
-        setMemberResults(result.members || []);
-      } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to search members.");
-      } finally {
-        if (!controller.signal.aborted) setSearchingMember(false);
-      }
-    }, 300);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [customerType, memberSearch, online, selectedMember]);
-
   const filteredProducts = useMemo(() => data?.catalog.filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase())) || [], [data?.catalog, productSearch]);
   const cartRows = useMemo(
     () =>
@@ -342,7 +613,7 @@ export default function PointOfSalePage() {
   const total = useMemo(() => cartRows.reduce((sum, row) => sum + row.subtotal, 0), [cartRows]);
   const received = Number(amountReceived) || 0;
   const isCash = paymentMethod === "cash";
-  const customerReady = customerType === "non_member" || Boolean(selectedMember);
+  const customerReady = customerType === "non_member" || Boolean(selectedMember && memberScanProof);
   const paymentReady = isCash ? received >= total && total > 0 : total > 0 && paymentReference.trim().length > 0;
 
   function setQuantity(productId: string, next: number) {
@@ -352,11 +623,28 @@ export default function PointOfSalePage() {
     setCart((current) => ({ ...current, [productId]: quantity }));
   }
 
+  function addProductByBarcode(rawBarcode: string) {
+    const barcode = rawBarcode.trim().toUpperCase();
+    const product = data?.catalog.find((item) => item.barcode?.toUpperCase() === barcode);
+    if (!product) {
+      setProductScanMessage("No active product matches that barcode.");
+      return false;
+    }
+    const current = cart[product.product_id] || 0;
+    if (current >= product.stock) {
+      setProductScanMessage(`${product.name} has no additional available stock.`);
+      return false;
+    }
+    setQuantity(product.product_id, current + 1);
+    setProductScanMessage(`${product.name} added to the cart.`);
+    setShowProductScanner(false);
+    return true;
+  }
+
   function selectCustomerType(next: CustomerType) {
     setCustomerType(next);
     setSelectedMember(null);
-    setMemberSearch("");
-    setMemberResults([]);
+    setMemberScanProof("");
     setCart({});
     setAmountReceived("");
     setPaymentReference("");
@@ -366,9 +654,42 @@ export default function PointOfSalePage() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker
-      .register("/sw-pos.js", {
-        scope: "/dashboard/city/pos",
+      .register("/sw-pos.js?v=5", {
+        scope: "/",
         updateViaCache: "none",
+      })
+      .then(async (registered) => {
+        const assets = [...new Set(performance
+          .getEntriesByType("resource")
+          .map((entry) => new URL(entry.name).pathname)
+          .filter((path) => path.startsWith("/_next/static/")))];
+
+        // Save the authenticated POS shell before checking for a worker update.
+        // A failed or delayed update must never prevent offline preparation.
+        if ("caches" in window && navigator.onLine) {
+          const [pageCache, runtimeCache, shellResponse] = await Promise.all([
+            caches.open("hiroma-pos-pages-v5"),
+            caches.open("hiroma-pos-runtime-v5"),
+            fetch("/dashboard/city/pos", { credentials: "include", cache: "no-store" }),
+          ]);
+          const shellPath = new URL(shellResponse.url).pathname;
+          if (shellResponse.ok && shellPath.startsWith("/dashboard/city/pos") && shellResponse.headers.get("content-type")?.includes("text/html")) {
+            await pageCache.put("/dashboard/city/pos", shellResponse.clone());
+          }
+          await Promise.all(assets.map(async (path) => {
+            const response = await fetch(path);
+            if (response.ok) await runtimeCache.put(path, response);
+          }));
+        }
+
+        // Updating is best-effort. The page shell above is already safe even if
+        // the browser delays service-worker activation.
+        await registered.update().catch((reason) => {
+          console.warn("[POS SERVICE WORKER UPDATE]", reason);
+        });
+        registered.waiting?.postMessage({ type: "SKIP_WAITING" });
+        const registration = await navigator.serviceWorker.ready;
+        (registration.active || navigator.serviceWorker.controller)?.postMessage({ type: "CACHE_POS_SHELL", assets });
       })
       .catch((reason) => {
         console.warn("[POS SERVICE WORKER]", reason);
@@ -427,6 +748,7 @@ export default function PointOfSalePage() {
       shift_id: data.open_shift.id,
       customer_type: customerType,
       member_id: selectedMember?.id || null,
+      scan_proof: customerType === "member" ? memberScanProof : null,
       customer_name: customerName,
       payment_method: paymentMethod,
       payment_reference: isCash ? null : paymentReference,
@@ -516,7 +838,7 @@ export default function PointOfSalePage() {
       );
       setCart({});
       setSelectedMember(null);
-      setMemberSearch("");
+      setMemberScanProof("");
       setCustomerName("");
       setAmountReceived("");
       setPaymentReference("");
@@ -644,56 +966,35 @@ export default function PointOfSalePage() {
                 </div>
 
                 {customerType === "member" ? (
-                  <div className="relative mt-4">
+                  <div className="mt-4">
                     {selectedMember ? (
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-green-300 bg-green-50 p-4">
                         <div>
-                          <span className="text-xs font-bold uppercase text-green-700">Verified member</span>
+                          <span className="text-xs font-bold uppercase text-green-700">Digital ID verified</span>
                           <b className="mt-1 block text-sm text-[#071638]">{selectedMember.full_name}</b>
                           <span className="text-xs text-gray-500">
                             @{selectedMember.username}
                             {selectedMember.member_id ? ` · ${selectedMember.member_id}` : ""}
                           </span>
                         </div>
-                        <button onClick={() => setSelectedMember(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">
-                          Change
+                        <button onClick={() => { setSelectedMember(null); setMemberScanProof(""); setShowMemberScanner(true); }} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">
+                          Scan another
                         </button>
                       </div>
                     ) : (
-                      <>
-                        <label className="text-xs font-bold text-[#071638]">Search member nationwide</label>
-                        <input
-                          value={memberSearch}
-                          onChange={(event) => setMemberSearch(event.target.value)}
-                          placeholder="Username, member ID, or full name"
-                          className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
-                        />
-                        {memberSearch.trim().length > 0 && memberSearch.trim().length < 2 && <p className="mt-2 text-xs text-amber-700">Enter at least 2 characters.</p>}
-                        {(searchingMember || memberResults.length > 0) && (
-                          <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border bg-white shadow-xl">
-                            {searchingMember ? (
-                              <p className="p-4 text-sm text-gray-500">Searching…</p>
-                            ) : (
-                              memberResults.map((member) => (
-                                <button
-                                  key={member.id}
-                                  onClick={() => {
-                                    setSelectedMember(member);
-                                    setMemberResults([]);
-                                  }}
-                                  className="block w-full border-b px-4 py-3 text-left last:border-0 hover:bg-[#fff9e8]"
-                                >
-                                  <b className="block text-sm text-[#071638]">{member.full_name}</b>
-                                  <span className="text-xs text-gray-500">
-                                    @{member.username}
-                                    {member.member_id ? ` · ${member.member_id}` : ""}
-                                  </span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </>
+                      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                        <b className="block text-sm text-[#071638]">Verify the reseller before adding products</b>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">Scan the QR from their Hiroma Digital ID. A name or username alone does not unlock reseller pricing.</p>
+                        <button
+                          type="button"
+                          disabled={!online}
+                          onClick={() => setShowMemberScanner(true)}
+                          className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-[#071638] px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          ▣ Scan Digital ID QR
+                        </button>
+                        {!online ? <p className="mt-2 text-xs font-semibold text-amber-700">Reconnect to verify a member. Offline sales are non-member cash sales only.</p> : null}
+                      </div>
                     )}
                   </div>
                 ) : (
@@ -712,13 +1013,9 @@ export default function PointOfSalePage() {
                 )}
 
                 <div className="mt-5 border-t pt-5">
-                  <label className="text-xs font-bold text-[#071638]">Products</label>
-                  <input
-                    value={productSearch}
-                    onChange={(event) => setProductSearch(event.target.value)}
-                    placeholder="Search products…"
-                    className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
-                  />
+                  <div className="flex items-center justify-between gap-3"><label className="text-xs font-bold text-[#071638]">Products</label><button type="button" onClick={() => { setProductScanMessage(""); setShowProductScanner(true); }} className="rounded-lg bg-[#071638] px-3 py-2 text-xs font-bold text-white">▣ Scan barcode</button></div>
+                  <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && addProductByBarcode(productSearch)) setProductSearch(""); }} placeholder="Search products or scan/type barcode…" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
+                  {productScanMessage ? <p className={`mt-2 text-xs font-semibold ${productScanMessage.includes("added") ? "text-green-700" : "text-amber-700"}`}>{productScanMessage}</p> : null}
                 </div>
                 <div className="mt-3 space-y-2">
                   {filteredProducts.map((product) => {
@@ -978,8 +1275,8 @@ export default function PointOfSalePage() {
           </div>
         )}
         {receipt && (
-          <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
-            <div className="my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="pos-print-overlay fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+            <div className="pos-print-receipt my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <div className="text-center">
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p>
                 <h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">
@@ -1060,11 +1357,19 @@ export default function PointOfSalePage() {
                   </div>
                 )}
               </div>
-              <div className="mt-6 grid grid-cols-2 gap-2">
-                <button onClick={() => window.print()} className="rounded-xl border px-4 py-3 text-sm font-bold">
-                  {receipt.payment_status === "pending_verification" ? "Print pending slip" : "Print receipt"}
+              <div className="pos-print-actions mt-5 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => printThermalReceipt(receipt, {
+                    name: data?.receipt_outlet_name || data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || "HIROMA POINT OF SALE",
+                    address: data?.receipt_address,
+                  })}
+                  className="rounded-lg border px-3 py-2.5 text-sm font-semibold"
+                >
+                  {receipt.payment_status === "pending_verification"
+                    ? "Print pending slip"
+                    : "Print receipt"}
                 </button>
-                <button onClick={() => setReceipt(null)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">
+                <button onClick={() => setReceipt(null)} className="rounded-lg bg-[#d4af45] px-3 py-2.5 text-sm font-semibold text-[#071638]">
                   New sale
                 </button>
               </div>
@@ -1072,6 +1377,18 @@ export default function PointOfSalePage() {
           </div>
         )}
       </div>
+      {showMemberScanner ? (
+        <PosMemberQrScanner
+          onClose={() => setShowMemberScanner(false)}
+          onVerified={(member, proof) => {
+            setSelectedMember(member);
+            setMemberScanProof(proof);
+            setShowMemberScanner(false);
+            setError("");
+          }}
+        />
+      ) : null}
+      {showProductScanner ? <PosProductScanner onClose={() => setShowProductScanner(false)} onDetected={addProductByBarcode} /> : null}
     </main>
   );
 }
