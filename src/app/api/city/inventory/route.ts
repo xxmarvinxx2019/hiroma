@@ -189,13 +189,15 @@ export async function GET(req: NextRequest) {
     const shiftTransactions = openShift
       ? await prisma.posTransaction.findMany({
           where: { shift_id: openShift.id, status: { in: ['finalized', 'approved'] } },
-          select: { total_snapshot: true, payment_method_snapshot: true },
+          select: { total_snapshot: true, payment_method_snapshot: true, adjustment_requests: { where: { status: 'approved', request_type: 'refund' }, select: { amount_snapshot: true } } },
         })
       : []
-    const shiftSales = shiftTransactions.reduce((sum, transaction) => sum + Number(transaction.total_snapshot), 0)
+    const netShiftAmount = (transaction: (typeof shiftTransactions)[number]) => Number(transaction.total_snapshot)
+      - transaction.adjustment_requests.reduce((sum, request) => sum + Number(request.amount_snapshot), 0)
+    const shiftSales = shiftTransactions.reduce((sum, transaction) => sum + netShiftAmount(transaction), 0)
     const shiftCashSales = shiftTransactions.reduce(
       (sum, transaction) => transaction.payment_method_snapshot.trim().toLowerCase() === 'cash'
-        ? sum + Number(transaction.total_snapshot)
+        ? sum + netShiftAmount(transaction)
         : sum,
       0,
     )

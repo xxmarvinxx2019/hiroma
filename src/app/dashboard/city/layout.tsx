@@ -1,12 +1,19 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import NotificationBell from '@/app/components/ui/NotificationBell'
-import Link from 'next/link'
-import Image from 'next/image'
-import { usePathname, useRouter } from 'next/navigation'
-import { useAutoLogout } from '@/app/hooks/useAutoLogout'
-import FirstLoginPasswordModal from '@/app/components/security/FirstLoginPasswordModal'
+import { useState, useEffect } from "react";
+import NotificationBell from "@/app/components/ui/NotificationBell";
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
+import { useAutoLogout } from "@/app/hooks/useAutoLogout";
+import FirstLoginPasswordModal from "@/app/components/security/FirstLoginPasswordModal";
+import {
+  DEFAULT_POS_APPEARANCE,
+  loadPosAppearance,
+  POS_APPEARANCE_CHANGE_EVENT,
+  PosAppearanceSettings,
+  resolvePosTheme,
+} from "@/app/lib/posAppearance";
 
 // ============================================================
 // NAV ITEMS
@@ -14,82 +21,124 @@ import FirstLoginPasswordModal from '@/app/components/security/FirstLoginPasswor
 
 const navItems = [
   {
-    section: 'Main',
+    section: "Main",
     items: [
-      { label: 'Dashboard', href: '/dashboard/city', icon: '📊' },
-      { label: 'Resellers', href: '/dashboard/city/resellers', icon: '👥' },
-      { label: 'Top Performers', href: '/dashboard/city/top-performers', icon: '🏆' },
+      { label: "Dashboard", href: "/dashboard/city", icon: "📊" },
+      { label: "Resellers", href: "/dashboard/city/resellers", icon: "👥" },
+      {
+        label: "Top Performers",
+        href: "/dashboard/city/top-performers",
+        icon: "🏆",
+      },
     ],
   },
   {
-    section: 'Distribution',
+    section: "Distribution",
     items: [
-      { label: 'PINs', href: '/dashboard/city/pins', icon: '🔑' },
-      { label: 'Inventory', href: '/dashboard/city/inventory', icon: '📦' },
-      { label: 'Orders', href: '/dashboard/city/orders', icon: '🛒' },
-      { label: 'Point of Sale', href: '/dashboard/city/pos', icon: '🧾' },
-      { label: 'Registration Center', href: '/dashboard/city/pos/registrations', icon: '📝' },
-      { label: 'Approval Center', href: '/dashboard/city/pos/approvals', icon: '✅' },
-      { label: 'Void & Refunds', href: '/dashboard/city/pos/adjustments', icon: '↩️' },
-      { label: 'Shift History', href: '/dashboard/city/pos/history', icon: '🕘' },
-    { label: 'Sync Center', href: '/dashboard/city/pos/sync', icon: '🔄' },
-    { label: 'POS Settings', href: '/dashboard/city/pos/settings', icon: '⚙️' },
-      { label: 'Reports', href: '/dashboard/city/reports', icon: '📈' },
-      { label: 'Payment Methods', href: '/dashboard/city/payment-methods', icon: '💳' },
-      { label: 'PIN Requests',     href: '/dashboard/city/pin-requests',     icon: '🔑' },
+      { label: "PINs", href: "/dashboard/city/pins", icon: "🔑" },
+      { label: "Inventory", href: "/dashboard/city/inventory", icon: "📦" },
+      { label: "Orders", href: "/dashboard/city/orders", icon: "🛒" },
+      { label: "Point of Sale", href: "/dashboard/city/pos", icon: "🧾" },
+      {
+        label: "Registration Center",
+        href: "/dashboard/city/pos/registrations",
+        icon: "📝",
+      },
+      {
+        label: "Approval Center",
+        href: "/dashboard/city/pos/approvals",
+        icon: "✅",
+      },
+      {
+        label: "Receipts",
+        href: "/dashboard/city/pos/adjustments",
+        icon: "↩️",
+      },
+      { label: "Shift", href: "/dashboard/city/pos/history", icon: "🕘" },
+      { label: "Sync Center", href: "/dashboard/city/pos/sync", icon: "🔄" },
+      {
+        label: "POS Settings",
+        href: "/dashboard/city/pos/settings",
+        icon: "⚙️",
+      },
+      { label: "Reports", href: "/dashboard/city/reports", icon: "📈" },
+      {
+        label: "Payment Methods",
+        href: "/dashboard/city/payment-methods",
+        icon: "💳",
+      },
+      {
+        label: "PIN Requests",
+        href: "/dashboard/city/pin-requests",
+        icon: "🔑",
+      },
     ],
   },
   {
-    section: 'Account',
+    section: "Account",
     items: [
-      { label: 'Digital ID', href: '/dashboard/city/digital-id', icon: '' },
+      { label: "Digital ID", href: "/dashboard/city/digital-id", icon: "" },
     ],
   },
-]
+];
 
-const staffNavItem = { label: 'Staff', href: '/dashboard/city/staff', icon: '🪪' }
+const staffNavItem = {
+  label: "Staff",
+  href: "/dashboard/city/staff",
+  icon: "🪪",
+};
+
+const cashierNavPriority: Record<string, number> = {
+  "/dashboard/city/pos": 1,
+  "/dashboard/city/pos/registrations": 2,
+  "/dashboard/city/inventory": 3,
+  "/dashboard/city/pos/adjustments": 4,
+  "/dashboard/city/pos/history": 5,
+  "/dashboard/city/pos/sync": 6,
+  "/dashboard/city/pos/settings": 7,
+};
 
 type PendingWorkCounts = {
-  registration_center: number
-  approval_center: number
-  void_refunds: number
-  sync_center: number
-}
+  registration_center: number;
+  approval_center: number;
+  void_refunds: number;
+  sync_center: number;
+};
 
 const emptyPendingWork: PendingWorkCounts = {
   registration_center: 0,
   approval_center: 0,
   void_refunds: 0,
   sync_center: 0,
-}
+};
 
 const pendingCountKey: Record<string, keyof PendingWorkCounts> = {
-  '/dashboard/city/pos/registrations': 'registration_center',
-  '/dashboard/city/pos/approvals': 'approval_center',
-  '/dashboard/city/pos/adjustments': 'void_refunds',
-  '/dashboard/city/pos/sync': 'sync_center',
-  '/dashboard/city/pos/settings': 'sync_center',
-}
+  "/dashboard/city/pos/registrations": "registration_center",
+  "/dashboard/city/pos/approvals": "approval_center",
+  "/dashboard/city/pos/adjustments": "void_refunds",
+  "/dashboard/city/pos/sync": "sync_center",
+  "/dashboard/city/pos/settings": "sync_center",
+};
 
 const navPermission: Record<string, string> = {
-  '/dashboard/city': 'dashboard',
-  '/dashboard/city/resellers': 'resellers',
-  '/dashboard/city/top-performers': 'resellers',
-  '/dashboard/city/pins': 'pins',
-  '/dashboard/city/inventory': 'inventory',
-  '/dashboard/city/orders': 'orders',
-  '/dashboard/city/pos': 'pos',
-  '/dashboard/city/pos/registrations': 'pos|register_reseller',
-  '/dashboard/city/pos/approvals': 'pos_approve',
-  '/dashboard/city/pos/adjustments': 'pos|pos_approve',
-  '/dashboard/city/pos/shift-approvals': 'pos_approve',
-  '/dashboard/city/pos/history': 'pos',
-  '/dashboard/city/pos/sync': 'pos',
-  '/dashboard/city/pos/settings': 'pos',
-  '/dashboard/city/reports': 'reports|orders',
-  '/dashboard/city/payment-methods': 'payment_methods',
-  '/dashboard/city/pin-requests': 'pin_requests',
-}
+  "/dashboard/city": "dashboard",
+  "/dashboard/city/resellers": "resellers",
+  "/dashboard/city/top-performers": "resellers",
+  "/dashboard/city/pins": "pins",
+  "/dashboard/city/inventory": "inventory",
+  "/dashboard/city/orders": "orders",
+  "/dashboard/city/pos": "pos",
+  "/dashboard/city/pos/registrations": "pos|register_reseller",
+  "/dashboard/city/pos/approvals": "pos_approve",
+  "/dashboard/city/pos/adjustments": "pos|pos_approve",
+  "/dashboard/city/pos/shift-approvals": "pos_approve",
+  "/dashboard/city/pos/history": "pos",
+  "/dashboard/city/pos/sync": "pos",
+  "/dashboard/city/pos/settings": "pos",
+  "/dashboard/city/reports": "reports|orders",
+  "/dashboard/city/payment-methods": "payment_methods",
+  "/dashboard/city/pin-requests": "pin_requests",
+};
 
 // ============================================================
 // SIDEBAR
@@ -104,92 +153,152 @@ function Sidebar({
   pendingWork,
 }: {
   user: {
-    id: string
-    full_name: string
-    username: string
-    profile_photo?: string | null
-    distributor_profile?: { coverage_area: string; dist_level: string }
-    is_staff?: boolean
-    permissions?: string[]
-    password_change_required?: boolean
-    password_review_reason?: 'temporary_first_login' | 'temporary_day_3' | 'temporary_day_7' | 'temporary_day_30' | 'quarterly'
-  } | null
-  pathname: string
-  onClose: () => void
-  onLogout: () => void
-  pendingTransfers: number
-  pendingWork: PendingWorkCounts
+    id: string;
+    full_name: string;
+    username: string;
+    profile_photo?: string | null;
+    distributor_profile?: { coverage_area: string; dist_level: string };
+    is_staff?: boolean;
+    permissions?: string[];
+    password_change_required?: boolean;
+    password_review_reason?:
+      | "temporary_first_login"
+      | "temporary_day_3"
+      | "temporary_day_7"
+      | "temporary_day_30"
+      | "quarterly";
+  } | null;
+  pathname: string;
+  onClose: () => void;
+  onLogout: () => void;
+  pendingTransfers: number;
+  pendingWork: PendingWorkCounts;
 }) {
   const isActive = (href: string) => {
-    if (href === '/dashboard/city') return pathname === href
-    if (href === '/dashboard/city/pos') return pathname === href
-    if (href === '/dashboard/city/pos/registrations') {
-      return pathname.startsWith(href) || pathname.startsWith('/dashboard/city/pos/new-registration')
+    if (href === "/dashboard/city") return pathname === href;
+    if (href === "/dashboard/city/pos") return pathname === href;
+    if (href === "/dashboard/city/pos/registrations") {
+      return (
+        pathname.startsWith(href) ||
+        pathname.startsWith("/dashboard/city/pos/new-registration")
+      );
     }
-    if (href === '/dashboard/city/pos/approvals') {
-      return pathname === href || pathname.startsWith('/dashboard/city/pos/registration-approvals') || pathname.startsWith('/dashboard/city/pos/shift-approvals')
+    if (href === "/dashboard/city/pos/approvals") {
+      return (
+        pathname === href ||
+        pathname.startsWith("/dashboard/city/pos/registration-approvals") ||
+        pathname.startsWith("/dashboard/city/pos/shift-approvals")
+      );
     }
-    return pathname.startsWith(href)
-  }
+    return pathname.startsWith(href);
+  };
 
   return (
-    <div className="w-56 bg-[#010521] flex flex-col" style={{ height: '100vh' }}>
+    <div
+      className="w-56 bg-[#010521] flex flex-col"
+      style={{ height: "100vh" }}
+    >
       {/* Logo */}
-      <div className="px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0" style={{ height: '56px' }}>
+      <div
+        className="px-4 flex items-center gap-3 border-b border-white/5 flex-shrink-0"
+        style={{ height: "56px" }}
+      >
         <div className="w-8 h-8 relative flex-shrink-0">
-          <Image src="/hiroma-logo.jpg" alt="Hiroma" fill className="object-contain rounded-md" />
+          <Image
+            src="/hiroma-logo.jpg"
+            alt="Hiroma"
+            fill
+            className="object-contain rounded-md"
+          />
         </div>
-        <span className="text-white font-medium text-sm tracking-[0.2em]">HIROMA</span>
+        <span className="text-white font-medium text-sm tracking-[0.2em]">
+          HIROMA
+        </span>
       </div>
 
       {/* Nav */}
       <nav
         className="scrollbar-hide flex-1 py-3 px-3"
-        style={{ overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        style={{
+          overflowY: "auto",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+        }}
       >
         {navItems.map((group) => (
           <div key={group.section} className="mb-3">
             <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">
               {group.section}
             </p>
-            {[...group.items, ...(group.section === 'Main' && !user?.is_staff ? [staffNavItem] : [])]
-              .filter((item) => !user?.is_staff || navPermission[item.href]?.split('|').some((permission) => user.permissions?.includes(permission)))
+            {[
+              ...group.items,
+              ...(group.section === "Main" && !user?.is_staff
+                ? [staffNavItem]
+                : []),
+            ]
+              .filter(
+                (item) =>
+                  !user?.is_staff ||
+                  navPermission[item.href]
+                    ?.split("|")
+                    .some((permission) =>
+                      user.permissions?.includes(permission),
+                    ),
+              )
+              .map((item) =>
+                user?.is_staff && item.href === "/dashboard/city/pos"
+                  ? { ...item, label: "Sales" }
+                  : user?.is_staff &&
+                      item.href === "/dashboard/city/pos/adjustments"
+                    ? { ...item, label: "Receipts" }
+                    : item,
+              )
+              .sort((a, b) =>
+                user?.is_staff
+                  ? (cashierNavPriority[a.href] ?? 99) -
+                    (cashierNavPriority[b.href] ?? 99)
+                  : 0,
+              )
               .map((item) => {
-              const workKey = pendingCountKey[item.href]
-              const pendingCount = workKey ? pendingWork[workKey] : 0
-              return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm mb-0.5 transition-all duration-150 ${
-                  isActive(item.href)
-                    ? 'bg-[#C9A84C]/15 text-[#C9A84C] border-l-2 border-[#C9A84C] rounded-l-none pl-2.5'
-                    : 'text-white/50 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {item.icon && <span className="text-base">{item.icon}</span>}
-                <span className="flex-1">{item.label}</span>
-                {item.href === '/dashboard/city/inventory' && pendingTransfers > 0 && (
-                  <span
-                    className="inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
-                    title={`${pendingTransfers} incoming transfer${pendingTransfers === 1 ? '' : 's'} awaiting physical receiving`}
-                    aria-label={`${pendingTransfers} incoming transfers awaiting physical receiving`}
+                const workKey = pendingCountKey[item.href];
+                const pendingCount = workKey ? pendingWork[workKey] : 0;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm mb-0.5 transition-all duration-150 ${
+                      isActive(item.href)
+                        ? "bg-[#C9A84C]/15 text-[#C9A84C] border-l-2 border-[#C9A84C] rounded-l-none pl-2.5"
+                        : "text-white/50 hover:text-white hover:bg-white/5"
+                    }`}
                   >
-                    {pendingTransfers > 99 ? '99+' : pendingTransfers}
-                  </span>
-                )}
-                {pendingCount > 0 && (
-                  <span
-                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
-                    title={`${pendingCount} pending item${pendingCount === 1 ? '' : 's'} requiring attention`}
-                    aria-label={`${pendingCount} pending items requiring attention`}
-                  >
-                    {pendingCount > 99 ? '99+' : pendingCount}
-                  </span>
-                )}
-              </Link>
-              )})}
+                    {item.icon && (
+                      <span className="text-base">{item.icon}</span>
+                    )}
+                    <span className="flex-1">{item.label}</span>
+                    {item.href === "/dashboard/city/inventory" &&
+                      pendingTransfers > 0 && (
+                        <span
+                          className="inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
+                          title={`${pendingTransfers} incoming transfer${pendingTransfers === 1 ? "" : "s"} awaiting physical receiving`}
+                          aria-label={`${pendingTransfers} incoming transfers awaiting physical receiving`}
+                        >
+                          {pendingTransfers > 99 ? "99+" : pendingTransfers}
+                        </span>
+                      )}
+                    {pendingCount > 0 && (
+                      <span
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e05252] px-1.5 text-[10px] font-bold text-white shadow-sm"
+                        title={`${pendingCount} pending item${pendingCount === 1 ? "" : "s"} requiring attention`}
+                        aria-label={`${pendingCount} pending items requiring attention`}
+                      >
+                        {pendingCount > 99 ? "99+" : pendingCount}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
           </div>
         ))}
       </nav>
@@ -198,144 +307,264 @@ function Sidebar({
       <div className="px-3 py-3 border-t border-white/5 flex-shrink-0 bg-[#010521]">
         <div className="flex items-center gap-2.5 mb-2">
           <div className="w-7 h-7 rounded-full bg-[#C9A84C]/20 border border-[#C9A84C]/40 flex items-center justify-center flex-shrink-0 overflow-hidden">
-            {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'C'}</span>}
+            {user?.profile_photo ? (
+              <img
+                src={user.profile_photo}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="text-[#C9A84C] text-xs font-bold">
+                {user?.full_name?.charAt(0) || "C"}
+              </span>
+            )}
           </div>
           <div className="overflow-hidden">
-            <p className="text-white text-xs font-medium truncate">{user?.full_name || 'City Dist.'}</p>
+            <p className="text-white text-xs font-medium truncate">
+              {user?.full_name || "City Dist."}
+            </p>
             <p className="text-white/40 text-xs truncate">
-              {user?.distributor_profile?.dist_level === 'branch'
-                ? `Branch${user.distributor_profile.coverage_area ? ` · ${user.distributor_profile.coverage_area}` : ''}`
-                : user?.distributor_profile?.coverage_area || 'City distributor'}
+              {user?.distributor_profile?.dist_level === "branch"
+                ? `Branch${user.distributor_profile.coverage_area ? ` · ${user.distributor_profile.coverage_area}` : ""}`
+                : user?.distributor_profile?.coverage_area ||
+                  "City distributor"}
             </p>
           </div>
         </div>
-
       </div>
     </div>
-  )
+  );
 }
 
 // ============================================================
 // LAYOUT
 // ============================================================
 
-export default function CityLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
-  const router = useRouter()
-  const [showWarning, setShowWarning] = useState(false)
-  const [countdown, setCountdown]     = useState(30)
+export default function CityLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [showWarning, setShowWarning] = useState(false);
+  const [countdown, setCountdown] = useState(30);
 
   const { stayLoggedIn } = useAutoLogout({
-    onWarning: (secs) => { setShowWarning(true); setCountdown(secs) },
-    onActive:  ()     => { setShowWarning(false); setCountdown(30) },
-    onLogout:  ()     => { setShowWarning(false) },
-  })
-  const [sidebarOpen, setSidebarOpen]               = useState(false)
-  const [profileMenuOpen, setProfileMenuOpen]       = useState(false)
-  const [user, setUser]                               = useState<Parameters<typeof Sidebar>[0]['user']>(null)
-  const [pendingTransfers, setPendingTransfers]       = useState(0)
-  const [pendingWork, setPendingWork]                 = useState<PendingWorkCounts>(emptyPendingWork)
+    onWarning: (secs) => {
+      setShowWarning(true);
+      setCountdown(secs);
+    },
+    onActive: () => {
+      setShowWarning(false);
+      setCountdown(30);
+    },
+    onLogout: () => {
+      setShowWarning(false);
+    },
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [user, setUser] = useState<Parameters<typeof Sidebar>[0]["user"]>(null);
+  const [pendingTransfers, setPendingTransfers] = useState(0);
+  const [pendingWork, setPendingWork] =
+    useState<PendingWorkCounts>(emptyPendingWork);
+  const [posShiftOpen, setPosShiftOpen] = useState(false);
+  const [posAppearance, setPosAppearance] = useState<PosAppearanceSettings>(
+    DEFAULT_POS_APPEARANCE,
+  );
+  const [systemDark, setSystemDark] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/me')
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystem = () => setSystemDark(media.matches);
+    const updateAppearance = (event: Event) =>
+      setPosAppearance((event as CustomEvent<PosAppearanceSettings>).detail);
+    const initial = window.setTimeout(() => {
+      setPosAppearance(loadPosAppearance());
+      updateSystem();
+    }, 0);
+    media.addEventListener("change", updateSystem);
+    window.addEventListener(POS_APPEARANCE_CHANGE_EVENT, updateAppearance);
+    return () => {
+      window.clearTimeout(initial);
+      media.removeEventListener("change", updateSystem);
+      window.removeEventListener(POS_APPEARANCE_CHANGE_EVENT, updateAppearance);
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateShiftState = (event: Event) => {
+      setPosShiftOpen((event as CustomEvent<{ open: boolean }>).detail.open);
+    };
+    window.addEventListener("hiroma:pos-shift-state", updateShiftState);
+    return () =>
+      window.removeEventListener("hiroma:pos-shift-state", updateShiftState);
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+
+    void Promise.all([
+      navigator.serviceWorker
+        ?.getRegistrations()
+        .then((registrations) =>
+          Promise.all(
+            registrations.map((registration) => registration.unregister()),
+          ),
+        ),
+      "caches" in window
+        ? caches
+            .keys()
+            .then((keys) =>
+              Promise.all(
+                keys
+                  .filter((key) => key.startsWith("hiroma-pos-"))
+                  .map((key) => caches.delete(key)),
+              ),
+            )
+        : Promise.resolve([]),
+    ]).catch((reason) => console.warn("[POS DEV CACHE CLEANUP]", reason));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
       .then((r) => r.json())
       .then((data) => {
-        if (data.user) setUser(data.user)
-        else router.push('/login')
+        if (data.user) setUser(data.user);
+        else router.push("/login");
       })
-      .catch(() => router.push('/login'))
-  }, [router])
+      .catch(() => router.push("/login"));
+  }, [router]);
 
   useEffect(() => {
-    const updatePhoto = (event: Event) => setUser((current) => current ? { ...current, profile_photo: (event as CustomEvent<string | null>).detail } : current)
-    window.addEventListener('hiroma-profile-photo-change', updatePhoto)
-    return () => window.removeEventListener('hiroma-profile-photo-change', updatePhoto)
-  }, [])
+    const updatePhoto = (event: Event) =>
+      setUser((current) =>
+        current
+          ? {
+              ...current,
+              profile_photo: (event as CustomEvent<string | null>).detail,
+            }
+          : current,
+      );
+    window.addEventListener("hiroma-profile-photo-change", updatePhoto);
+    return () =>
+      window.removeEventListener("hiroma-profile-photo-change", updatePhoto);
+  }, []);
 
   useEffect(() => {
-    if (!user?.id || user.distributor_profile?.dist_level !== 'branch') {
-      return
+    if (!user?.id || user.distributor_profile?.dist_level !== "branch") {
+      return;
     }
 
-    let active = true
+    let active = true;
     const loadPendingTransfers = () => {
-      fetch('/api/inventory/transfers?summary=pending')
+      fetch("/api/inventory/transfers?summary=pending")
         .then((response) => response.json())
         .then((data) => {
-          if (active && typeof data.pending === 'number') setPendingTransfers(data.pending)
+          if (active && typeof data.pending === "number")
+            setPendingTransfers(data.pending);
         })
-        .catch(() => undefined)
-    }
-    const handleTransferChange = () => loadPendingTransfers()
+        .catch(() => undefined);
+    };
+    const handleTransferChange = () => loadPendingTransfers();
 
-    loadPendingTransfers()
-    const timer = window.setInterval(loadPendingTransfers, 30_000)
-    window.addEventListener('hiroma-incoming-transfer-change', handleTransferChange)
+    loadPendingTransfers();
+    const timer = window.setInterval(loadPendingTransfers, 30_000);
+    window.addEventListener(
+      "hiroma-incoming-transfer-change",
+      handleTransferChange,
+    );
     return () => {
-      active = false
-      window.clearInterval(timer)
-      window.removeEventListener('hiroma-incoming-transfer-change', handleTransferChange)
-    }
-  }, [user?.id, user?.distributor_profile?.dist_level])
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener(
+        "hiroma-incoming-transfer-change",
+        handleTransferChange,
+      );
+    };
+  }, [user?.id, user?.distributor_profile?.dist_level]);
 
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id) return;
 
-    let active = true
+    let active = true;
     const loadPendingWork = () => {
-      fetch('/api/city/pos/pending-summary', { cache: 'no-store', credentials: 'include' })
-        .then((response) => response.ok ? response.json() : null)
+      fetch("/api/city/pos/pending-summary", {
+        cache: "no-store",
+        credentials: "include",
+      })
+        .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
-          if (active && data?.counts) setPendingWork({ ...emptyPendingWork, ...data.counts })
+          if (active && data?.counts)
+            setPendingWork({ ...emptyPendingWork, ...data.counts });
         })
-        .catch(() => undefined)
-    }
+        .catch(() => undefined);
+    };
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') loadPendingWork()
-    }
+      if (document.visibilityState === "visible") loadPendingWork();
+    };
 
-    loadPendingWork()
-    const timer = window.setInterval(loadPendingWork, 15_000)
-    window.addEventListener('focus', loadPendingWork)
-    window.addEventListener('hiroma-pos-pending-change', loadPendingWork)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
+    loadPendingWork();
+    const timer = window.setInterval(loadPendingWork, 15_000);
+    window.addEventListener("focus", loadPendingWork);
+    window.addEventListener("hiroma-pos-pending-change", loadPendingWork);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
-      active = false
-      window.clearInterval(timer)
-      window.removeEventListener('focus', loadPendingWork)
-      window.removeEventListener('hiroma-pos-pending-change', loadPendingWork)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-    }
-  }, [user?.id])
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", loadPendingWork);
+      window.removeEventListener("hiroma-pos-pending-change", loadPendingWork);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [user?.id]);
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.push('/login')
-  }
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  };
 
   const currentLabel =
     navItems
       .flatMap((g) => g.items)
       .sort((a, b) => b.href.length - a.href.length)
       .find((i) =>
-        i.href === '/dashboard/city' ? pathname === i.href : pathname.startsWith(i.href)
-      )?.label || 'Dashboard'
+        i.href === "/dashboard/city"
+          ? pathname === i.href
+          : pathname.startsWith(i.href),
+      )?.label || "Dashboard";
+
+  const posWorkspace =
+    pathname.startsWith("/dashboard/city/pos") ||
+    Boolean(user?.is_staff && pathname === "/dashboard/city/inventory");
+  const posTheme = resolvePosTheme(posAppearance, systemDark);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#F0F2F8' }}>
+    <div
+      data-pos-theme={posWorkspace ? posTheme : "light"}
+      style={{
+        display: "flex",
+        height: "100vh",
+        overflow: "hidden",
+        background: posWorkspace && posTheme === "dark" ? "#0f172a" : "#F0F2F8",
+      }}
+    >
       {user?.is_staff && (
         <FirstLoginPasswordModal
           open={Boolean(user.password_change_required)}
           reviewReason={user.password_review_reason}
           endpoint="/api/city/profile/password"
           allowRetain={false}
-          onResolved={() => router.push('/login/distributor')}
+          onResolved={() => router.push("/login/distributor")}
         />
       )}
       {/* Inactivity warning */}
       {showWarning && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-[#9a6f1e] text-white text-sm px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 whitespace-nowrap">
-          <span>⚠️ You will be logged out in <strong>{countdown}s</strong> due to inactivity. Move your mouse or press any key to stay logged in.</span>
+          <span>
+            ⚠️ You will be logged out in <strong>{countdown}s</strong> due to
+            inactivity. Move your mouse or press any key to stay logged in.
+          </span>
           <button
             onClick={() => setShowWarning(false)}
             className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
@@ -347,85 +576,215 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block flex-shrink-0">
-        <Sidebar user={user} pathname={pathname} onClose={() => {}} onLogout={handleLogout} pendingTransfers={pendingTransfers} pendingWork={pendingWork} />
+        <Sidebar
+          user={user}
+          pathname={pathname}
+          onClose={() => {}}
+          onLogout={handleLogout}
+          pendingTransfers={pendingTransfers}
+          pendingWork={pendingWork}
+        />
       </div>
 
       {/* Mobile Sidebar */}
       {sidebarOpen && (
         <>
-          <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
+          <div
+            className="fixed inset-0 bg-black/50 z-20 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
           <div className="fixed top-0 left-0 z-30 md:hidden">
-            <Sidebar user={user} pathname={pathname} onClose={() => setSidebarOpen(false)} onLogout={handleLogout} pendingTransfers={pendingTransfers} pendingWork={pendingWork} />
+            <Sidebar
+              user={user}
+              pathname={pathname}
+              onClose={() => setSidebarOpen(false)}
+              onLogout={handleLogout}
+              pendingTransfers={pendingTransfers}
+              pendingWork={pendingWork}
+            />
           </div>
         </>
       )}
 
       {/* Main */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+          overflow: "hidden",
+        }}
+      >
         {/* Topbar */}
-        <header className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0" style={{ height: '56px' }}>
+        <header
+          className="bg-[#010521] flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0"
+          style={{ height: "56px" }}
+        >
           <div className="flex items-center gap-3">
-            <button className="md:hidden text-white/60 hover:text-white" onClick={() => setSidebarOpen(!sidebarOpen)}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            <button
+              className="md:hidden text-white/60 hover:text-white"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
               </svg>
             </button>
             <span className="text-white/60 text-sm">{currentLabel}</span>
           </div>
           <div className="flex items-center gap-3">
+            {pathname === "/dashboard/city/pos" &&
+              user?.is_staff &&
+              posShiftOpen && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(new Event("hiroma:open-close-shift"))
+                  }
+                  className="rounded-lg border border-[#d4af45]/50 bg-[#d4af45] px-3 py-2 text-xs font-bold text-[#071638] transition hover:bg-[#e2c15d]"
+                >
+                  Close Shift
+                </button>
+              )}
+            {pathname.startsWith("/dashboard/city/pos") && (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                aria-label="Refresh current page"
+                title="Refresh current page"
+                className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af45]"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-[18px] w-[18px]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+                  <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+                </svg>
+              </button>
+            )}
             <NotificationBell userId={user?.id} role="city" />
             <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-semibold px-3 py-1 rounded-full border border-[#1D9E75]/30 tracking-wide">
-              {user?.distributor_profile?.dist_level === 'branch' ? 'BRANCH' : 'CITY DIST.'}
+              {user?.distributor_profile?.dist_level === "branch"
+                ? "BRANCH"
+                : "CITY DIST."}
             </span>
             <div className="relative">
-              <button onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center overflow-hidden hover:border-[#C9A84C] transition-colors">
-                {user?.profile_photo ? <img src={user.profile_photo} alt="" className="h-full w-full object-cover" /> : <span className="text-[#C9A84C] text-xs font-bold">{user?.full_name?.charAt(0) || 'C'}</span>}
+              <button
+                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="w-8 h-8 rounded-full bg-[#1A2F5E] border-2 border-[#C9A84C]/50 flex items-center justify-center overflow-hidden hover:border-[#C9A84C] transition-colors"
+              >
+                {user?.profile_photo ? (
+                  <img
+                    src={user.profile_photo}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-[#C9A84C] text-xs font-bold">
+                    {user?.full_name?.charAt(0) || "C"}
+                  </span>
+                )}
               </button>
               {profileMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setProfileMenuOpen(false)}
+                  />
                   <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-[#0D1B3E]/8 w-52 overflow-hidden">
                     <div className="px-4 py-3 border-b border-[#0D1B3E]/8 bg-[#f8f9fc]">
-                      <p className="text-xs font-bold text-[#0D1B3E]">{user?.full_name || 'City Dist.'}</p>
-                      <p className="text-[10px] text-gray-400">@{user?.username || ''}</p>
+                      <p className="text-xs font-bold text-[#0D1B3E]">
+                        {user?.full_name || "City Dist."}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        @{user?.username || ""}
+                      </p>
                     </div>
                     <div className="py-1">
                       {!user?.is_staff && (
-                        <Link href="/dashboard/city/profile" onClick={() => setProfileMenuOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+                        <Link
+                          href="/dashboard/city/profile"
+                          onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors"
+                        >
                           <span className="text-base">👤</span>
-                          <span className="text-xs text-[#0D1B3E] font-medium">Profile</span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">
+                            Profile
+                          </span>
                         </Link>
                       )}
                       {!user?.is_staff && (
-                        <Link href="/dashboard/city/digital-id" onClick={() => setProfileMenuOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
-                          <span className="grid h-4 w-4 place-items-center rounded bg-[#7c5dba] text-[9px] font-bold text-white">ID</span>
-                          <span className="text-xs text-[#0D1B3E] font-medium">Digital ID</span>
+                        <Link
+                          href="/dashboard/city/digital-id"
+                          onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors"
+                        >
+                          <span className="grid h-4 w-4 place-items-center rounded bg-[#7c5dba] text-[9px] font-bold text-white">
+                            ID
+                          </span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">
+                            Digital ID
+                          </span>
                         </Link>
                       )}
                       {!user?.is_staff && (
-                        <Link href="/dashboard/city/settings" onClick={() => setProfileMenuOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
-                          <span className="text-base" aria-hidden="true">&#9881;</span>
-                          <span className="text-xs text-[#0D1B3E] font-medium">Settings</span>
+                        <Link
+                          href="/dashboard/city/settings"
+                          onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors"
+                        >
+                          <span className="text-base" aria-hidden="true">
+                            &#9881;
+                          </span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">
+                            Settings
+                          </span>
                         </Link>
                       )}
                       {user?.is_staff && (
-                        <Link href="/dashboard/city/pos/settings" onClick={() => setProfileMenuOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors">
-                          <span className="text-base" aria-hidden="true">&#9881;</span>
-                          <span className="text-xs text-[#0D1B3E] font-medium">POS Settings</span>
+                        <Link
+                          href="/dashboard/city/pos/settings"
+                          onClick={() => setProfileMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8f9fc] transition-colors"
+                        >
+                          <span className="text-base" aria-hidden="true">
+                            &#9881;
+                          </span>
+                          <span className="text-xs text-[#0D1B3E] font-medium">
+                            POS Settings
+                          </span>
                         </Link>
                       )}
                     </div>
                     <div className="border-t border-[#0D1B3E]/8 py-1">
-                      <button onClick={() => { setProfileMenuOpen(false); handleLogout() }}
-                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#fdecea] transition-colors w-full text-left">
+                      <button
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          handleLogout();
+                        }}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#fdecea] transition-colors w-full text-left"
+                      >
                         <span className="text-base">🚪</span>
-                        <span className="text-xs text-[#e05252] font-medium">Sign Out</span>
+                        <span className="text-xs text-[#e05252] font-medium">
+                          Sign Out
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -436,10 +795,10 @@ export default function CityLayout({ children }: { children: React.ReactNode }) 
         </header>
 
         {/* Page Content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+        <main style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
           {children}
         </main>
       </div>
     </div>
-  )
+  );
 }

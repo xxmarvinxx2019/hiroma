@@ -9,14 +9,15 @@ interface InstallPromptEvent extends Event {
 
 export default function PosInstallControl() {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null)
-  const [standalone, setStandalone] = useState(false)
-  const [ios, setIos] = useState(false)
+  const [standalone, setStandalone] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches,
+  )
+  const [ios] = useState(() =>
+    typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent),
+  )
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    setStandalone(window.matchMedia('(display-mode: standalone)').matches)
-    setIos(/iPad|iPhone|iPod/.test(navigator.userAgent))
-
     const onPrompt = (event: Event) => {
       event.preventDefault()
       setPrompt(event as InstallPromptEvent)

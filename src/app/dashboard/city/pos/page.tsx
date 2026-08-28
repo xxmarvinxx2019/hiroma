@@ -2,8 +2,18 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import PosInstallControl from "@/app/components/pos/PosInstallControl";
+import PosCloseShiftModal from "@/app/components/pos/PosCloseShiftModal";
 import { loadPosDeviceSettings } from "@/app/lib/posDeviceSettings";
-import { deleteQueuedSale, listQueuedSales, loadPosBootstrap, permanentReceiptNumber, PosQueuedSale, PosReceiptRange, savePosBootstrap, saveQueuedSale } from "@/app/lib/posOfflineQueue";
+import {
+  deleteQueuedSale,
+  listQueuedSales,
+  loadPosBootstrap,
+  permanentReceiptNumber,
+  PosQueuedSale,
+  PosReceiptRange,
+  savePosBootstrap,
+  saveQueuedSale,
+} from "@/app/lib/posOfflineQueue";
 
 type Bootstrap = {
   cashier: {
@@ -55,7 +65,12 @@ type CustomerType = "member" | "non_member";
 
 function extractMemberIdFromQr(value: string) {
   try {
-    return decodeURIComponent(value).trim().toUpperCase().match(/HRM-\d{4}-\d{6}/)?.[0] || "";
+    return (
+      decodeURIComponent(value)
+        .trim()
+        .toUpperCase()
+        .match(/HRM-\d{4}-\d{6}/)?.[0] || ""
+    );
   } catch {
     return "";
   }
@@ -83,15 +98,24 @@ function PosMemberQrScanner({
         return false;
       }
       try {
-        const response = await fetch(`/api/city/orders/reseller-orders?member_id=${encodeURIComponent(memberId)}`, { cache: "no-store" });
+        const response = await fetch(
+          `/api/city/orders/reseller-orders?member_id=${encodeURIComponent(memberId)}`,
+          { cache: "no-store" },
+        );
         const result = await response.json();
         if (!response.ok || !result.reseller || !result.scan_proof) {
-          throw new Error(result.error || "The reseller could not be verified.");
+          throw new Error(
+            result.error || "The reseller could not be verified.",
+          );
         }
         onVerified(result.reseller as Member, String(result.scan_proof));
         return true;
       } catch (reason) {
-        setScannerError(reason instanceof Error ? reason.message : "The reseller could not be verified.");
+        setScannerError(
+          reason instanceof Error
+            ? reason.message
+            : "The reseller could not be verified.",
+        );
         return false;
       }
     }
@@ -114,43 +138,95 @@ function PosMemberQrScanner({
           () => undefined,
         );
       } catch {
-        if (!disposed) setScannerError("Camera unavailable. Allow camera access and try again.");
+        if (!disposed)
+          setScannerError(
+            "Camera unavailable. Allow camera access and try again.",
+          );
       }
     }
 
     void startScanner();
     return () => {
       disposed = true;
-      if (scanner?.isScanning) void scanner.stop().then(() => scanner?.clear()).catch(() => undefined);
+      if (scanner?.isScanning)
+        void scanner
+          .stop()
+          .then(() => scanner?.clear())
+          .catch(() => undefined);
       else scanner?.clear();
     };
   }, [onVerified, scannerElementId]);
 
   return (
-    <div className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pos-member-scanner-title">
-      <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close Digital ID scanner" />
+    <div
+      className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pos-member-scanner-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        aria-label="Close Digital ID scanner"
+      />
       <section className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
         <header className="flex items-start justify-between border-b px-5 py-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#b98a16]">Secure member verification</p>
-            <h2 id="pos-member-scanner-title" className="mt-1 text-xl font-bold text-[#071638]">Scan Digital ID QR</h2>
-            <p className="mt-1 text-sm leading-6 text-gray-500">Ask the reseller to show the QR code from their Hiroma Digital ID.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#b98a16]">
+              Secure member verification
+            </p>
+            <h2
+              id="pos-member-scanner-title"
+              className="mt-1 text-xl font-bold text-[#071638]"
+            >
+              Scan Digital ID QR
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-500">
+              Ask the reseller to show the QR code from their Hiroma Digital ID.
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100" aria-label="Close scanner">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100"
+            aria-label="Close scanner"
+          >
+            ✕
+          </button>
         </header>
         <div className="flex-1 space-y-4 p-5">
           <div className="overflow-hidden rounded-2xl border border-[#d4af45]/50 bg-[#010521] p-2">
-            <div id={scannerElementId} className="min-h-[310px] overflow-hidden rounded-xl" />
+            <div
+              id={scannerElementId}
+              className="min-h-[310px] overflow-hidden rounded-xl"
+            />
           </div>
-          <p className="rounded-xl bg-blue-50 p-3 text-sm leading-6 text-blue-900">Member pricing unlocks only after a valid, active Digital ID is scanned. The verification is single-use and expires shortly.</p>
-          {scannerError ? <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{scannerError}</p> : null}
+          <p className="rounded-xl bg-blue-50 p-3 text-sm leading-6 text-blue-900">
+            Member pricing unlocks only after a valid, active Digital ID is
+            scanned. The verification is single-use and expires shortly.
+          </p>
+          {scannerError ? (
+            <p
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700"
+              role="alert"
+            >
+              {scannerError}
+            </p>
+          ) : null}
         </div>
       </section>
     </div>
   );
 }
 
-function PosProductScanner({ onClose, onDetected }: { onClose: () => void; onDetected: (barcode: string) => boolean }) {
+function PosProductScanner({
+  onClose,
+  onDetected,
+}: {
+  onClose: () => void;
+  onDetected: (barcode: string) => boolean;
+}) {
   const scannerElementId = `pos-product-code-${useId().replace(/:/g, "-")}`;
   const detectionLocked = useRef(false);
   const [scannerError, setScannerError] = useState("");
@@ -162,32 +238,89 @@ function PosProductScanner({ onClose, onDetected }: { onClose: () => void; onDet
         const { Html5Qrcode } = await import("html5-qrcode");
         if (disposed) return;
         scanner = new Html5Qrcode(scannerElementId);
-        await scanner.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 280, height: 180 } }, (decodedText) => {
-          if (detectionLocked.current) return;
-          detectionLocked.current = true;
-          const accepted = onDetected(decodedText.trim().toUpperCase());
-          if (!accepted) {
-            setScannerError("No active product matches this barcode.");
-            detectionLocked.current = false;
-          }
-        }, () => undefined);
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 12, qrbox: { width: 280, height: 180 } },
+          (decodedText) => {
+            if (detectionLocked.current) return;
+            detectionLocked.current = true;
+            const accepted = onDetected(decodedText.trim().toUpperCase());
+            if (!accepted) {
+              setScannerError("No active product matches this barcode.");
+              detectionLocked.current = false;
+            }
+          },
+          () => undefined,
+        );
       } catch {
-        if (!disposed) setScannerError("Camera unavailable. Use a USB/Bluetooth barcode scanner or enter the code below.");
+        if (!disposed)
+          setScannerError(
+            "Camera unavailable. Use a USB/Bluetooth barcode scanner or enter the code below.",
+          );
       }
     }
     void start();
     return () => {
       disposed = true;
-      if (scanner?.isScanning) void scanner.stop().then(() => scanner?.clear()).catch(() => undefined);
+      if (scanner?.isScanning)
+        void scanner
+          .stop()
+          .then(() => scanner?.clear())
+          .catch(() => undefined);
       else scanner?.clear();
     };
   }, [onDetected, scannerElementId]);
   return (
-    <div className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pos-product-scanner-title">
-      <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close product scanner" />
+    <div
+      className="fixed inset-0 z-[90] bg-[#010521]/70 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pos-product-scanner-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        aria-label="Close product scanner"
+      />
       <section className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-[-24px_0_70px_rgba(1,5,33,.3)]">
-        <header className="flex items-start justify-between border-b p-5"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b98a16]">Fast checkout</p><h2 id="pos-product-scanner-title" className="mt-1 text-xl font-bold text-[#071638]">Scan product barcode</h2><p className="mt-1 text-sm text-gray-500">The matched product is added to the cart using its official POS price.</p></div><button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100">✕</button></header>
-        <div className="space-y-4 p-5"><div className="overflow-hidden rounded-2xl border border-[#d4af45]/50 bg-[#010521] p-2"><div id={scannerElementId} className="min-h-[300px] overflow-hidden rounded-xl" /></div>{scannerError ? <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{scannerError}</p> : null}</div>
+        <header className="flex items-start justify-between border-b p-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[.18em] text-[#b98a16]">
+              Fast checkout
+            </p>
+            <h2
+              id="pos-product-scanner-title"
+              className="mt-1 text-xl font-bold text-[#071638]"
+            >
+              Scan product barcode
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              The matched product is added to the cart using its official POS
+              price.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="space-y-4 p-5">
+          <div className="overflow-hidden rounded-2xl border border-[#d4af45]/50 bg-[#010521] p-2">
+            <div
+              id={scannerElementId}
+              className="min-h-[300px] overflow-hidden rounded-xl"
+            />
+          </div>
+          {scannerError ? (
+            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+              {scannerError}
+            </p>
+          ) : null}
+        </div>
       </section>
     </div>
   );
@@ -345,13 +478,6 @@ function printThermalReceipt(
   window.setTimeout(cleanup, 60_000);
 }
 
-type ShiftClosingData = {
-  shift: { id: string; status: string } | null;
-  branch_closing: { required: boolean; inventory: Array<{ product_id: string; product_name: string }> };
-  server_sync_complete: boolean;
-  pending_sync_count: number;
-};
-
 export default function PointOfSalePage() {
   const [data, setData] = useState<Bootstrap | null>(null);
   const [error, setError] = useState("");
@@ -360,16 +486,6 @@ export default function PointOfSalePage() {
   const [openingCash, setOpeningCash] = useState("0");
   const [savingShift, setSavingShift] = useState(false);
   const [showCloseShift, setShowCloseShift] = useState(false);
-  const [loadingCloseShift, setLoadingCloseShift] = useState(false);
-  const [closingShift, setClosingShift] = useState(false);
-  const [closingData, setClosingData] = useState<ShiftClosingData | null>(null);
-  const [countedCash, setCountedCash] = useState("");
-  const [inventoryCounts, setInventoryCounts] = useState<Record<string, { counted: string; damaged: string; expired: string }>>({});
-  const [recountRequired, setRecountRequired] = useState(false);
-  const [recountMismatch, setRecountMismatch] = useState({ cash: false, inventory: false });
-  const [cashRecountExplanation, setCashRecountExplanation] = useState("");
-  const [inventoryRecountExplanation, setInventoryRecountExplanation] = useState("");
-  const [closingResult, setClosingResult] = useState<{ pendingApproval: boolean; message: string } | null>(null);
   const [customerType, setCustomerType] = useState<CustomerType>("non_member");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [memberScanProof, setMemberScanProof] = useState("");
@@ -386,6 +502,7 @@ export default function PointOfSalePage() {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [queuedSales, setQueuedSales] = useState<PosQueuedSale[]>([]);
   const transactionId = useRef("");
+  const closeShiftActionRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const updateConnection = () => {
@@ -408,15 +525,22 @@ export default function PointOfSalePage() {
     const platform = `${navigator.platform || "Web"} · ${navigator.userAgent.includes("Mobile") ? "Mobile" : "Desktop"}`;
     let receiptRange: PosReceiptRange | null = null;
     try {
-      receiptRange = JSON.parse(localStorage.getItem("hiroma_pos_receipt_range") || "null");
+      receiptRange = JSON.parse(
+        localStorage.getItem("hiroma_pos_receipt_range") || "null",
+      );
     } catch {
       localStorage.removeItem("hiroma_pos_receipt_range");
     }
     async function initializeTerminal() {
       if (!navigator.onLine) {
-        const cached = await loadPosBootstrap<Bootstrap>().catch(() => undefined);
+        const cached = await loadPosBootstrap<Bootstrap>().catch(
+          () => undefined,
+        );
         if (cached) setData(cached);
-        if (!cached) setError("This device has not completed its first online POS setup. Reconnect once to prepare offline checkout.");
+        if (!cached)
+          setError(
+            "This device has not completed its first online POS setup. Reconnect once to prepare offline checkout.",
+          );
         return;
       }
 
@@ -440,13 +564,21 @@ export default function PointOfSalePage() {
           }),
         });
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Unable to initialize POS.");
+        if (!response.ok)
+          throw new Error(result.error || "Unable to initialize POS.");
         setError("");
         setData(result);
         await savePosBootstrap(result);
-        localStorage.setItem("hiroma_pos_receipt_range", JSON.stringify(result.receipt_range));
+        localStorage.setItem(
+          "hiroma_pos_receipt_range",
+          JSON.stringify(result.receipt_range),
+        );
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Unable to initialize POS.");
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Unable to initialize POS.",
+        );
       }
     }
     void initializeTerminal();
@@ -456,98 +588,47 @@ export default function PointOfSalePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!data || data.open_shift) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("openShift") !== "1") return;
+    const timer = window.setTimeout(() => setShowOpenShift(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [data]);
+
   async function refreshQueue() {
-    setQueuedSales((await listQueuedSales()).sort((a, b) => a.created_at.localeCompare(b.created_at)));
+    setQueuedSales(
+      (await listQueuedSales()).sort((a, b) =>
+        a.created_at.localeCompare(b.created_at),
+      ),
+    );
   }
 
-  async function openCloseShiftModal() {
-    if (!data?.open_shift) return;
-    setShowCloseShift(true);
-    setLoadingCloseShift(true);
-    setClosingResult(null);
-    setRecountRequired(false);
-    setRecountMismatch({ cash: false, inventory: false });
-    setCashRecountExplanation("");
-    setInventoryRecountExplanation("");
-    setCountedCash("");
-    setInventoryCounts({});
-    setError("");
-    try {
-      const response = await fetch(`/api/city/pos/transactions?shift_id=${encodeURIComponent(data.open_shift.id)}`, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to prepare shift closing.");
-      setClosingData(result);
-      setInventoryCounts(Object.fromEntries(
-        result.branch_closing.inventory.map((item: { product_id: string }) => [item.product_id, { counted: "", damaged: "0", expired: "0" }]),
-      ));
-    } catch (reason) {
-      setClosingData(null);
-      setError(reason instanceof Error ? reason.message : "Unable to prepare shift closing.");
-    } finally {
-      setLoadingCloseShift(false);
-    }
+  function openCloseShiftModal() {
+    if (data?.open_shift) setShowCloseShift(true);
   }
 
-  async function submitCloseShift() {
-    if (!data?.open_shift || !closingData || !online || queuedSales.length > 0 || !closingData.server_sync_complete) return;
-    setClosingShift(true);
-    setError("");
-    try {
-      const response = await fetch("/api/city/pos/shifts", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shift_id: data.open_shift.id,
-          counted_cash: Number(countedCash),
-          recount_confirmed: recountRequired,
-          cash_explanation: cashRecountExplanation,
-          inventory_explanation: inventoryRecountExplanation,
-          inventory_counts: closingData.branch_closing.required
-            ? closingData.branch_closing.inventory.map((item) => ({
-                product_id: item.product_id,
-                counted_quantity: inventoryCounts[item.product_id]?.counted,
-                damaged_quantity: inventoryCounts[item.product_id]?.damaged || 0,
-                expired_quantity: inventoryCounts[item.product_id]?.expired || 0,
-              }))
-            : undefined,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        if (result.code === "SHIFT_RECOUNT_REQUIRED") {
-          setRecountRequired(true);
-          setRecountMismatch({
-            cash: result.mismatch_categories?.cash === true,
-            inventory: result.mismatch_categories?.inventory === true,
-          });
-          setError("");
-          return;
-        }
-        if (result.code === "SHIFT_EXPLANATION_REQUIRED") {
-          setRecountRequired(true);
-          setRecountMismatch({
-            cash: result.required_explanations?.cash === true,
-            inventory: result.required_explanations?.inventory === true,
-          });
-          setError("");
-          return;
-        }
-        throw new Error(result.error || "Unable to submit shift closing.");
-      }
-      const pendingApproval = result.pending_approval === true;
-      setClosingResult({
-        pendingApproval,
-        message: pendingApproval
-          ? "Your cash and inventory counts are locked and waiting for an independent manager review."
-          : "The shift was closed and finalized successfully.",
-      });
-      setData((current) => current ? { ...current, open_shift: null } : current);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to submit shift closing.");
-    } finally {
-      setClosingShift(false);
-    }
-  }
+  useEffect(() => {
+    closeShiftActionRef.current = openCloseShiftModal;
+  });
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("hiroma:pos-shift-state", {
+        detail: { open: Boolean(data?.open_shift) },
+      }),
+    );
+    const requestCloseShift = () => {
+      closeShiftActionRef.current();
+    };
+    window.addEventListener("hiroma:open-close-shift", requestCloseShift);
+    return () => {
+      window.removeEventListener("hiroma:open-close-shift", requestCloseShift);
+      window.dispatchEvent(
+        new CustomEvent("hiroma:pos-shift-state", { detail: { open: false } }),
+      );
+    };
+  }, [data?.open_shift]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refreshQueue(), 0);
@@ -572,13 +653,17 @@ export default function PointOfSalePage() {
             body: JSON.stringify(sale.payload),
           });
           const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "Synchronization needs attention.");
+          if (!response.ok)
+            throw new Error(result.error || "Synchronization needs attention.");
           await deleteQueuedSale(sale.client_transaction_id);
         } catch (reason) {
           await saveQueuedSale({
             ...sale,
             status: "needs_attention",
-            error: reason instanceof Error ? reason.message : "Synchronization needs attention.",
+            error:
+              reason instanceof Error
+                ? reason.message
+                : "Synchronization needs attention.",
           });
         }
       }
@@ -593,14 +678,23 @@ export default function PointOfSalePage() {
     };
   }, [online]);
 
-  const filteredProducts = useMemo(() => data?.catalog.filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase())) || [], [data?.catalog, productSearch]);
+  const filteredProducts = useMemo(
+    () =>
+      data?.catalog.filter((product) =>
+        product.name.toLowerCase().includes(productSearch.trim().toLowerCase()),
+      ) || [],
+    [data?.catalog, productSearch],
+  );
   const cartRows = useMemo(
     () =>
       data?.catalog
         .filter((product) => (cart[product.product_id] || 0) > 0)
         .map((product) => {
           const quantity = cart[product.product_id];
-          const unitPrice = customerType === "member" ? product.reseller_price : product.srp_price;
+          const unitPrice =
+            customerType === "member"
+              ? product.reseller_price
+              : product.srp_price;
           return {
             ...product,
             quantity,
@@ -610,29 +704,42 @@ export default function PointOfSalePage() {
         }) || [],
     [cart, customerType, data?.catalog],
   );
-  const total = useMemo(() => cartRows.reduce((sum, row) => sum + row.subtotal, 0), [cartRows]);
+  const total = useMemo(
+    () => cartRows.reduce((sum, row) => sum + row.subtotal, 0),
+    [cartRows],
+  );
   const received = Number(amountReceived) || 0;
   const isCash = paymentMethod === "cash";
-  const customerReady = customerType === "non_member" || Boolean(selectedMember && memberScanProof);
-  const paymentReady = isCash ? received >= total && total > 0 : total > 0 && paymentReference.trim().length > 0;
+  const customerReady =
+    customerType === "non_member" || Boolean(selectedMember && memberScanProof);
+  const paymentReady = isCash
+    ? received >= total && total > 0
+    : total > 0 && paymentReference.trim().length > 0;
 
   function setQuantity(productId: string, next: number) {
     const product = data?.catalog.find((item) => item.product_id === productId);
     if (!product) return;
-    const quantity = Math.max(0, Math.min(product.stock, Number.isFinite(next) ? Math.floor(next) : 0));
+    const quantity = Math.max(
+      0,
+      Math.min(product.stock, Number.isFinite(next) ? Math.floor(next) : 0),
+    );
     setCart((current) => ({ ...current, [productId]: quantity }));
   }
 
   function addProductByBarcode(rawBarcode: string) {
     const barcode = rawBarcode.trim().toUpperCase();
-    const product = data?.catalog.find((item) => item.barcode?.toUpperCase() === barcode);
+    const product = data?.catalog.find(
+      (item) => item.barcode?.toUpperCase() === barcode,
+    );
     if (!product) {
       setProductScanMessage("No active product matches that barcode.");
       return false;
     }
     const current = cart[product.product_id] || 0;
     if (current >= product.stock) {
-      setProductScanMessage(`${product.name} has no additional available stock.`);
+      setProductScanMessage(
+        `${product.name} has no additional available stock.`,
+      );
       return false;
     }
     setQuantity(product.product_id, current + 1);
@@ -659,10 +766,14 @@ export default function PointOfSalePage() {
         updateViaCache: "none",
       })
       .then(async (registered) => {
-        const assets = [...new Set(performance
-          .getEntriesByType("resource")
-          .map((entry) => new URL(entry.name).pathname)
-          .filter((path) => path.startsWith("/_next/static/")))];
+        const assets = [
+          ...new Set(
+            performance
+              .getEntriesByType("resource")
+              .map((entry) => new URL(entry.name).pathname)
+              .filter((path) => path.startsWith("/_next/static/")),
+          ),
+        ];
 
         // Save the authenticated POS shell before checking for a worker update.
         // A failed or delayed update must never prevent offline preparation.
@@ -670,16 +781,25 @@ export default function PointOfSalePage() {
           const [pageCache, runtimeCache, shellResponse] = await Promise.all([
             caches.open("hiroma-pos-pages-v5"),
             caches.open("hiroma-pos-runtime-v5"),
-            fetch("/dashboard/city/pos", { credentials: "include", cache: "no-store" }),
+            fetch("/dashboard/city/pos", {
+              credentials: "include",
+              cache: "no-store",
+            }),
           ]);
           const shellPath = new URL(shellResponse.url).pathname;
-          if (shellResponse.ok && shellPath.startsWith("/dashboard/city/pos") && shellResponse.headers.get("content-type")?.includes("text/html")) {
+          if (
+            shellResponse.ok &&
+            shellPath.startsWith("/dashboard/city/pos") &&
+            shellResponse.headers.get("content-type")?.includes("text/html")
+          ) {
             await pageCache.put("/dashboard/city/pos", shellResponse.clone());
           }
-          await Promise.all(assets.map(async (path) => {
-            const response = await fetch(path);
-            if (response.ok) await runtimeCache.put(path, response);
-          }));
+          await Promise.all(
+            assets.map(async (path) => {
+              const response = await fetch(path);
+              if (response.ok) await runtimeCache.put(path, response);
+            }),
+          );
         }
 
         // Updating is best-effort. The page shell above is already safe even if
@@ -689,7 +809,9 @@ export default function PointOfSalePage() {
         });
         registered.waiting?.postMessage({ type: "SKIP_WAITING" });
         const registration = await navigator.serviceWorker.ready;
-        (registration.active || navigator.serviceWorker.controller)?.postMessage({ type: "CACHE_POS_SHELL", assets });
+        (
+          registration.active || navigator.serviceWorker.controller
+        )?.postMessage({ type: "CACHE_POS_SHELL", assets });
       })
       .catch((reason) => {
         console.warn("[POS SERVICE WORKER]", reason);
@@ -710,35 +832,58 @@ export default function PointOfSalePage() {
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to open shift.");
-      setData((current) => (current ? { ...current, open_shift: result.shift } : current));
+      if (!response.ok)
+        throw new Error(result.error || "Unable to open shift.");
+      setData((current) =>
+        current ? { ...current, open_shift: result.shift } : current,
+      );
       setShowOpenShift(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to open shift.");
+      setError(
+        reason instanceof Error ? reason.message : "Unable to open shift.",
+      );
     } finally {
       setSavingShift(false);
     }
   }
 
   async function completeSale() {
-    if (!data?.open_shift || !customerReady || !paymentReady || cartRows.length === 0 || submittingSale) return;
+    if (
+      !data?.open_shift ||
+      !customerReady ||
+      !paymentReady ||
+      cartRows.length === 0 ||
+      submittingSale
+    )
+      return;
     if (!online && !isCash) {
       setPaymentMethod("cash");
       setPaymentReference("");
-      setError("Offline mode accepts cash only. Reconnect before accepting GCash, e-wallet, or bank payments.");
+      setError(
+        "Offline mode accepts cash only. Reconnect before accepting GCash, e-wallet, or bank payments.",
+      );
       return;
     }
     if (!transactionId.current) transactionId.current = crypto.randomUUID();
     const localCreatedAt = new Date().toISOString();
     const range = data.receipt_range;
     if (!range || range.next > range.end) {
-      setError("This terminal needs a new reserved receipt-number range. Reconnect and refresh the POS.");
+      setError(
+        "This terminal needs a new reserved receipt-number range. Reconnect and refresh the POS.",
+      );
       return;
     }
     const receiptSequence = range.next;
     const nextRange = { ...range, next: range.next + 1 };
-    const receiptNumber = permanentReceiptNumber(data.receipt_location_code, data.terminal.receipt_code, new Date(localCreatedAt), receiptSequence);
-    setData((current) => (current ? { ...current, receipt_range: nextRange } : current));
+    const receiptNumber = permanentReceiptNumber(
+      data.receipt_location_code,
+      data.terminal.receipt_code,
+      new Date(localCreatedAt),
+      receiptSequence,
+    );
+    setData((current) =>
+      current ? { ...current, receipt_range: nextRange } : current,
+    );
     localStorage.setItem("hiroma_pos_receipt_range", JSON.stringify(nextRange));
     const payload = {
       client_transaction_id: transactionId.current,
@@ -762,7 +907,9 @@ export default function PointOfSalePage() {
     };
     if (!online) {
       if (customerType === "member") {
-        setError("Offline member verification is not enabled yet. Reconnect or record this as a non-member cash sale.");
+        setError(
+          "Offline member verification is not enabled yet. Reconnect or record this as a non-member cash sale.",
+        );
         return;
       }
       const offlineReceipt: Receipt = {
@@ -800,8 +947,12 @@ export default function PointOfSalePage() {
           ? {
               ...current,
               catalog: current.catalog.map((product) => {
-                const sold = cartRows.find((row) => row.product_id === product.product_id);
-                return sold ? { ...product, stock: product.stock - sold.quantity } : product;
+                const sold = cartRows.find(
+                  (row) => row.product_id === product.product_id,
+                );
+                return sold
+                  ? { ...product, stock: product.stock - sold.quantity }
+                  : product;
               }),
             }
           : current,
@@ -822,7 +973,8 @@ export default function PointOfSalePage() {
         body: JSON.stringify(payload),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "The sale could not be completed.");
+      if (!response.ok)
+        throw new Error(result.error || "The sale could not be completed.");
       const nextReceipt = result.receipt as Receipt;
       setReceipt(nextReceipt);
       setData((current) =>
@@ -830,7 +982,9 @@ export default function PointOfSalePage() {
           ? {
               ...current,
               catalog: current.catalog.map((product) => {
-                const sold = nextReceipt.items.find((item) => item.product_id === product.product_id);
+                const sold = nextReceipt.items.find(
+                  (item) => item.product_id === product.product_id,
+                );
                 return sold ? { ...product, stock: sold.stock_after } : product;
               }),
             }
@@ -844,105 +998,151 @@ export default function PointOfSalePage() {
       setPaymentReference("");
       transactionId.current = "";
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The sale could not be completed safely.");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "The sale could not be completed safely.",
+      );
     } finally {
       setSubmittingSale(false);
     }
   }
 
-  const closingInventoryComplete = !closingData?.branch_closing.required || closingData.branch_closing.inventory.every((item) => {
-    const row = inventoryCounts[item.product_id];
-    if (!row || row.counted === "" || row.damaged === "" || row.expired === "") return false;
-    const counted = Number(row.counted);
-    const damaged = Number(row.damaged);
-    const expired = Number(row.expired);
-    return [counted, damaged, expired].every((value) => Number.isInteger(value) && value >= 0) && damaged + expired <= counted;
-  });
-  const missingClosingProducts = closingData?.branch_closing.required
-    ? closingData.branch_closing.inventory.filter((item) => inventoryCounts[item.product_id]?.counted === "").length
-    : 0;
-  const closingExplanationComplete = !recountRequired
-    || ((!recountMismatch.cash || cashRecountExplanation.trim().length >= 5)
-      && (!recountMismatch.inventory || inventoryRecountExplanation.trim().length >= 5));
-  const closeShiftReady = Boolean(
-    closingData && online && queuedSales.length === 0 && closingData.server_sync_complete && countedCash !== "" && Number(countedCash) >= 0 && closingInventoryComplete && closingExplanationComplete,
-  );
-
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
       <div className="mx-auto max-w-7xl">
         <header className="rounded-2xl bg-[#071638] p-5 text-white shadow-sm sm:p-7">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d4af45]">Hiroma Point of Sale</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d4af45]">
+            Hiroma Point of Sale
+          </p>
           <div className="mt-2 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div>
-              <h1 className="text-2xl font-bold">{data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || "Loading terminal…"}</h1>
-              <p className="mt-1 text-sm text-white/65">Dedicated cashier workspace · installable web POS · controlled offline queue</p>
+              <h1 className="text-2xl font-bold">
+                {data?.location?.distributor_profile?.fulfillment_outlet_name ||
+                  data?.location?.full_name ||
+                  "Loading terminal…"}
+              </h1>
+              <p className="mt-1 text-sm text-white/65">
+                Dedicated cashier workspace · installable web POS · controlled
+                offline queue
+              </p>
               {data?.cashier && (
-                <div className="mt-4 flex w-fit items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2" aria-label={`Logged-in cashier: ${data.cashier.full_name}`}>
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#d4af45] text-sm font-black text-[#071638]" aria-hidden="true">
-                    {data.cashier.full_name.trim().charAt(0).toUpperCase() || "C"}
+                <div
+                  className="mt-4 flex w-fit items-center gap-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2"
+                  aria-label={`Logged-in cashier: ${data.cashier.full_name}`}
+                >
+                  <span
+                    className="grid h-9 w-9 place-items-center rounded-full bg-[#d4af45] text-sm font-black text-[#071638]"
+                    aria-hidden="true"
+                  >
+                    {data.cashier.full_name.trim().charAt(0).toUpperCase() ||
+                      "C"}
                   </span>
                   <span>
-                    <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">Logged-in cashier</span>
-                    <b className="block text-sm text-white">{data.cashier.full_name}</b>
-                    <span className="block text-xs text-white/60">@{data.cashier.username}</span>
+                    <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-white/55">
+                      Logged-in cashier
+                    </span>
+                    <b className="block text-sm text-white">
+                      {data.cashier.full_name}
+                    </b>
+                    <span className="block text-xs text-white/60">
+                      @{data.cashier.username}
+                    </span>
                   </span>
                 </div>
               )}
             </div>
             <div className="flex flex-col items-start gap-2 sm:items-end">
-              <span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">{online ? "● Online" : "○ Offline"}</span>
-              {queuedSales.length > 0 && <span className="rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1.5 text-xs font-bold text-amber-200">{queuedSales.length} awaiting sync</span>}
+              <span className="w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold">
+                {online ? "● Online" : "○ Offline"}
+              </span>
+              {queuedSales.length > 0 && (
+                <span className="rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1.5 text-xs font-bold text-amber-200">
+                  {queuedSales.length} awaiting sync
+                </span>
+              )}
               <PosInstallControl />
             </div>
           </div>
         </header>
 
-        {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
+        {error && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            {error}
+          </div>
+        )}
         <section className="mt-5 grid gap-4 md:grid-cols-3">
           <article className="rounded-2xl border bg-white p-5">
-            <p className="text-xs font-bold uppercase text-gray-500">Terminal</p>
-            <p className="mt-2 text-lg font-bold text-[#071638]">{data?.terminal.name || "Initializing…"}</p>
-            <p className="mt-1 text-sm text-gray-500">Bound to this browser installation</p>
+            <p className="text-xs font-bold uppercase text-gray-500">
+              Terminal
+            </p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">
+              {data?.terminal.name || "Initializing…"}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              Bound to this browser installation
+            </p>
           </article>
           <article className="rounded-2xl border bg-white p-5">
-            <p className="text-xs font-bold uppercase text-gray-500">Catalog Snapshot</p>
-            <p className="mt-2 text-lg font-bold text-[#071638]">{data ? `${data.catalog.length} products` : "Loading…"}</p>
-            <p className="mt-1 text-sm text-gray-500">Admin prices remain read-only</p>
+            <p className="text-xs font-bold uppercase text-gray-500">
+              Catalog Snapshot
+            </p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">
+              {data ? `${data.catalog.length} products` : "Loading…"}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              Admin prices remain read-only
+            </p>
           </article>
           <article className="rounded-2xl border bg-white p-5">
             <p className="text-xs font-bold uppercase text-gray-500">Shift</p>
-            <p className="mt-2 text-lg font-bold text-[#071638]">{data?.open_shift ? "Open" : "Not opened"}</p>
-            <p className="mt-1 text-sm text-gray-500">{data?.cashier ? `Cashier: ${data.cashier.full_name}` : "Loading cashier identity…"}</p>
-            <p className="mt-1 text-xs text-gray-400">Final close requires successful sync</p>
+            <p className="mt-2 text-lg font-bold text-[#071638]">
+              {data?.open_shift ? "Open" : "Not opened"}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              {data?.cashier
+                ? `Cashier: ${data.cashier.full_name}`
+                : "Loading cashier identity…"}
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              Final close requires successful sync
+            </p>
           </article>
         </section>
 
-        <section className="mt-5 rounded-2xl border bg-white p-5 sm:p-7">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-lg font-bold text-[#071638]">{data?.open_shift ? "Shift is open" : "Start cashier operations"}</h2>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-                {data?.open_shift ? "This terminal is ready for the checkout workspace. Every sale will remain tied to this cashier shift." : "Enter the physical cash currently inside the drawer before accepting the first transaction."}
-              </p>
-            </div>
-            {data?.open_shift ? (
-              <button type="button" onClick={openCloseShiftModal} className="inline-flex items-center justify-center rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#10285e]">
-                Close Shift
-              </button>
-            ) : (
-              <button disabled={!data} onClick={() => setShowOpenShift(true)} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50">
+        {!data?.open_shift && (
+          <section className="mt-5 rounded-2xl border bg-white p-5 sm:p-7">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <h2 className="text-lg font-bold text-[#071638]">
+                  Start cashier operations
+                </h2>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+                  Enter the physical cash currently inside the drawer before
+                  accepting the first transaction.
+                </p>
+              </div>
+              <button
+                disabled={!data}
+                onClick={() => setShowOpenShift(true)}
+                className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 Open Shift
               </button>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        )}
 
         {data?.open_shift && (
           <section className="mt-5 overflow-hidden rounded-2xl border bg-white">
             <div className="border-b px-5 py-4 sm:px-6">
-              <h2 className="text-lg font-bold text-[#071638]">New walk-in sale</h2>
-              <p className="mt-1 text-sm text-gray-500">Choose the customer type first. Member sales use reseller price; non-member sales use SRP.</p>
+              <h2 className="text-lg font-bold text-[#071638]">
+                New walk-in sale
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Choose the customer type first. Member sales use reseller price;
+                non-member sales use SRP.
+              </p>
             </div>
             <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,.65fr)]">
               <div className="border-b p-5 lg:border-b-0 lg:border-r sm:p-6">
@@ -952,8 +1152,12 @@ export default function PointOfSalePage() {
                     onClick={() => selectCustomerType("member")}
                     className={`rounded-xl border p-4 text-left transition ${customerType === "member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}
                   >
-                    <b className="block text-sm text-[#071638]">Member / Reseller</b>
-                    <span className="mt-1 block text-xs text-gray-500">Identify member · reseller price</span>
+                    <b className="block text-sm text-[#071638]">
+                      Member / Reseller
+                    </b>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      Identify member · reseller price
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -961,7 +1165,9 @@ export default function PointOfSalePage() {
                     className={`rounded-xl border p-4 text-left transition ${customerType === "non_member" ? "border-[#d4af45] bg-[#fff9e8] ring-1 ring-[#d4af45]" : "hover:bg-gray-50"}`}
                   >
                     <b className="block text-sm text-[#071638]">Non-member</b>
-                    <span className="mt-1 block text-xs text-gray-500">Walk-in customer · SRP</span>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      Walk-in customer · SRP
+                    </span>
                   </button>
                 </div>
 
@@ -970,21 +1176,39 @@ export default function PointOfSalePage() {
                     {selectedMember ? (
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-green-300 bg-green-50 p-4">
                         <div>
-                          <span className="text-xs font-bold uppercase text-green-700">Digital ID verified</span>
-                          <b className="mt-1 block text-sm text-[#071638]">{selectedMember.full_name}</b>
+                          <span className="text-xs font-bold uppercase text-green-700">
+                            Digital ID verified
+                          </span>
+                          <b className="mt-1 block text-sm text-[#071638]">
+                            {selectedMember.full_name}
+                          </b>
                           <span className="text-xs text-gray-500">
                             @{selectedMember.username}
-                            {selectedMember.member_id ? ` · ${selectedMember.member_id}` : ""}
+                            {selectedMember.member_id
+                              ? ` · ${selectedMember.member_id}`
+                              : ""}
                           </span>
                         </div>
-                        <button onClick={() => { setSelectedMember(null); setMemberScanProof(""); setShowMemberScanner(true); }} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">
+                        <button
+                          onClick={() => {
+                            setSelectedMember(null);
+                            setMemberScanProof("");
+                            setShowMemberScanner(true);
+                          }}
+                          className="rounded-lg border bg-white px-3 py-2 text-xs font-bold"
+                        >
                           Scan another
                         </button>
                       </div>
                     ) : (
                       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                        <b className="block text-sm text-[#071638]">Verify the reseller before adding products</b>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">Scan the QR from their Hiroma Digital ID. A name or username alone does not unlock reseller pricing.</p>
+                        <b className="block text-sm text-[#071638]">
+                          Verify the reseller before adding products
+                        </b>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          Scan the QR from their Hiroma Digital ID. A name or
+                          username alone does not unlock reseller pricing.
+                        </p>
                         <button
                           type="button"
                           disabled={!online}
@@ -993,14 +1217,22 @@ export default function PointOfSalePage() {
                         >
                           ▣ Scan Digital ID QR
                         </button>
-                        {!online ? <p className="mt-2 text-xs font-semibold text-amber-700">Reconnect to verify a member. Offline sales are non-member cash sales only.</p> : null}
+                        {!online ? (
+                          <p className="mt-2 text-xs font-semibold text-amber-700">
+                            Reconnect to verify a member. Offline sales are
+                            non-member cash sales only.
+                          </p>
+                        ) : null}
                       </div>
                     )}
                   </div>
                 ) : (
                   <label className="mt-4 block">
                     <span className="text-xs font-bold text-[#071638]">
-                      Customer name <span className="font-normal text-gray-400">(optional)</span>
+                      Customer name{" "}
+                      <span className="font-normal text-gray-400">
+                        (optional)
+                      </span>
                     </span>
                     <input
                       value={customerName}
@@ -1013,18 +1245,58 @@ export default function PointOfSalePage() {
                 )}
 
                 <div className="mt-5 border-t pt-5">
-                  <div className="flex items-center justify-between gap-3"><label className="text-xs font-bold text-[#071638]">Products</label><button type="button" onClick={() => { setProductScanMessage(""); setShowProductScanner(true); }} className="rounded-lg bg-[#071638] px-3 py-2 text-xs font-bold text-white">▣ Scan barcode</button></div>
-                  <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && addProductByBarcode(productSearch)) setProductSearch(""); }} placeholder="Search products or scan/type barcode…" className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]" />
-                  {productScanMessage ? <p className={`mt-2 text-xs font-semibold ${productScanMessage.includes("added") ? "text-green-700" : "text-amber-700"}`}>{productScanMessage}</p> : null}
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-xs font-bold text-[#071638]">
+                      Products
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductScanMessage("");
+                        setShowProductScanner(true);
+                      }}
+                      className="rounded-lg bg-[#071638] px-3 py-2 text-xs font-bold text-white"
+                    >
+                      ▣ Scan barcode
+                    </button>
+                  </div>
+                  <input
+                    value={productSearch}
+                    onChange={(event) => setProductSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        addProductByBarcode(productSearch)
+                      )
+                        setProductSearch("");
+                    }}
+                    placeholder="Search products or scan/type barcode…"
+                    className="mt-2 w-full rounded-xl border bg-[#f7f8fb] px-4 py-3 text-sm outline-none focus:border-[#d4af45]"
+                  />
+                  {productScanMessage ? (
+                    <p
+                      className={`mt-2 text-xs font-semibold ${productScanMessage.includes("added") ? "text-green-700" : "text-amber-700"}`}
+                    >
+                      {productScanMessage}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="mt-3 space-y-2">
                   {filteredProducts.map((product) => {
-                    const price = customerType === "member" ? product.reseller_price : product.srp_price;
+                    const price =
+                      customerType === "member"
+                        ? product.reseller_price
+                        : product.srp_price;
                     const quantity = cart[product.product_id] || 0;
                     return (
-                      <article key={product.product_id} className="flex flex-col justify-between gap-3 rounded-xl border p-4 sm:flex-row sm:items-center">
+                      <article
+                        key={product.product_id}
+                        className="flex flex-col justify-between gap-3 rounded-xl border p-4 sm:flex-row sm:items-center"
+                      >
                         <div>
-                          <b className="text-sm text-[#071638]">{product.name}</b>
+                          <b className="text-sm text-[#071638]">
+                            {product.name}
+                          </b>
                           <p className="mt-1 text-xs text-gray-500">
                             ₱
                             {price.toLocaleString("en-PH", {
@@ -1034,7 +1306,13 @@ export default function PointOfSalePage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button disabled={quantity === 0} onClick={() => setQuantity(product.product_id, quantity - 1)} className="h-9 w-9 rounded-lg border font-bold disabled:opacity-30">
+                          <button
+                            disabled={quantity === 0}
+                            onClick={() =>
+                              setQuantity(product.product_id, quantity - 1)
+                            }
+                            className="h-9 w-9 rounded-lg border font-bold disabled:opacity-30"
+                          >
                             −
                           </button>
                           <input
@@ -1044,17 +1322,32 @@ export default function PointOfSalePage() {
                             max={product.stock}
                             value={quantity || ""}
                             placeholder="0"
-                            onChange={(event) => setQuantity(product.product_id, Number(event.target.value))}
+                            onChange={(event) =>
+                              setQuantity(
+                                product.product_id,
+                                Number(event.target.value),
+                              )
+                            }
                             className="h-9 w-16 rounded-lg border text-center text-sm font-bold outline-none focus:border-[#d4af45]"
                           />
-                          <button disabled={quantity >= product.stock} onClick={() => setQuantity(product.product_id, quantity + 1)} className="h-9 w-9 rounded-lg bg-[#071638] font-bold text-white disabled:opacity-30">
+                          <button
+                            disabled={quantity >= product.stock}
+                            onClick={() =>
+                              setQuantity(product.product_id, quantity + 1)
+                            }
+                            className="h-9 w-9 rounded-lg bg-[#071638] font-bold text-white disabled:opacity-30"
+                          >
                             +
                           </button>
                         </div>
                       </article>
                     );
                   })}
-                  {filteredProducts.length === 0 && <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No matching products.</p>}
+                  {filteredProducts.length === 0 && (
+                    <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">
+                      No matching products.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1063,7 +1356,10 @@ export default function PointOfSalePage() {
                 <div className="mt-4 min-h-32 flex-1 space-y-3">
                   {cartRows.length ? (
                     cartRows.map((row) => (
-                      <div key={row.product_id} className="rounded-xl border bg-white p-3">
+                      <div
+                        key={row.product_id}
+                        className="rounded-xl border bg-white p-3"
+                      >
                         <div className="flex justify-between gap-3">
                           <b className="text-sm text-[#071638]">{row.name}</b>
                           <b className="text-sm">
@@ -1082,7 +1378,9 @@ export default function PointOfSalePage() {
                       </div>
                     ))
                   ) : (
-                    <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">No items yet</p>
+                    <p className="rounded-xl border border-dashed p-8 text-center text-sm text-gray-400">
+                      No items yet
+                    </p>
                   )}
                 </div>
                 <div className="mt-5 border-t pt-5">
@@ -1107,16 +1405,28 @@ export default function PointOfSalePage() {
                       }}
                       className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]"
                     >
-                      {data.payment_methods.filter((method) => online || method.type === "cash").map((method) => (
-                        <option key={method.id} value={method.type === "cash" ? "cash" : method.id}>
-                          {method.type === "cash" ? "Cash" : `${method.type.toUpperCase()} · ${method.account_name}${method.account_number ? ` · ${method.account_number}` : ""}`}
-                        </option>
-                      ))}
+                      {data.payment_methods
+                        .filter((method) => online || method.type === "cash")
+                        .map((method) => (
+                          <option
+                            key={method.id}
+                            value={method.type === "cash" ? "cash" : method.id}
+                          >
+                            {method.type === "cash"
+                              ? "Cash"
+                              : `${method.type.toUpperCase()} · ${method.account_name}${method.account_number ? ` · ${method.account_number}` : ""}`}
+                          </option>
+                        ))}
                     </select>
                   </label>
                   {!online && (
-                    <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900" role="status">
-                      <b>Offline mode: Cash only.</b> GCash, e-wallet, and bank payments require an internet connection and independent verification before products can be released.
+                    <div
+                      className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"
+                      role="status"
+                    >
+                      <b>Offline mode: Cash only.</b> GCash, e-wallet, and bank
+                      payments require an internet connection and independent
+                      verification before products can be released.
                     </div>
                   )}
                   {isCash && (
@@ -1124,7 +1434,16 @@ export default function PointOfSalePage() {
                       Cash received
                       <div className="mt-2 flex items-center rounded-xl border bg-white px-3 focus-within:border-[#d4af45]">
                         <span className="font-bold text-gray-500">₱</span>
-                        <input value={amountReceived} onChange={(event) => setAmountReceived(event.target.value)} type="number" min="0" step="0.01" className="w-full bg-transparent px-2 py-3 text-sm font-bold outline-none" />
+                        <input
+                          value={amountReceived}
+                          onChange={(event) =>
+                            setAmountReceived(event.target.value)
+                          }
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="w-full bg-transparent px-2 py-3 text-sm font-bold outline-none"
+                        />
                       </div>
                     </label>
                   )}
@@ -1133,7 +1452,9 @@ export default function PointOfSalePage() {
                       Payment reference
                       <input
                         value={paymentReference}
-                        onChange={(event) => setPaymentReference(event.target.value)}
+                        onChange={(event) =>
+                          setPaymentReference(event.target.value)
+                        }
                         maxLength={160}
                         placeholder="Transaction or reference number"
                         className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm outline-none focus:border-[#d4af45]"
@@ -1148,13 +1469,29 @@ export default function PointOfSalePage() {
                       })}
                     </p>
                   )}
-                  {!customerReady && <p className="mt-3 text-xs font-semibold text-amber-700">Identify and verify the member before checkout.</p>}
+                  {!customerReady && (
+                    <p className="mt-3 text-xs font-semibold text-amber-700">
+                      Identify and verify the member before checkout.
+                    </p>
+                  )}
                   <button
-                    disabled={!customerReady || !paymentReady || cartRows.length === 0 || submittingSale || (!online && (!isCash || customerType === "member"))}
+                    disabled={
+                      !customerReady ||
+                      !paymentReady ||
+                      cartRows.length === 0 ||
+                      submittingSale ||
+                      (!online && (!isCash || customerType === "member"))
+                    }
                     onClick={completeSale}
                     className="mt-5 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {submittingSale ? "Saving safely…" : online ? (isCash ? "Complete Sale" : "Submit for Verification") : "Save Offline Sale"}
+                    {submittingSale
+                      ? "Saving safely…"
+                      : online
+                        ? isCash
+                          ? "Complete Sale"
+                          : "Submit for Verification"
+                        : "Save Offline Sale"}
                   </button>
                   <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">
                     {online
@@ -1168,106 +1505,58 @@ export default function PointOfSalePage() {
             </div>
           </section>
         )}
-        {showCloseShift && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#071638]/70 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="close-shift-title">
-            <div className="my-auto w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between gap-4 bg-[#071638] p-5 text-white sm:p-6">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[.18em] text-[#d4af45]">End-of-shift reconciliation</p>
-                  <h2 id="close-shift-title" className="mt-2 text-2xl font-bold">Close cashier shift</h2>
-                  <p className="mt-1 text-sm text-white/65">Count the drawer cash and every physical product. Expected values remain hidden for an honest blind count.</p>
-                </div>
-                <button type="button" onClick={() => setShowCloseShift(false)} className="rounded-full bg-white/10 px-3 py-2 text-sm font-bold" aria-label="Close">✕</button>
-              </div>
-
-              {loadingCloseShift ? (
-                <p className="p-10 text-center text-sm text-gray-500">Preparing the current shift…</p>
-              ) : closingResult ? (
-                <div className="p-6 sm:p-8">
-                  <div className={`rounded-2xl border p-6 ${closingResult.pendingApproval ? "border-amber-300 bg-amber-50" : "border-green-300 bg-green-50"}`}>
-                    <p className="text-xs font-bold uppercase tracking-[.15em] text-gray-500">Submission preview</p>
-                    <h3 className="mt-2 text-xl font-bold text-[#071638]">{closingResult.pendingApproval ? "Pending manager approval" : "Shift finalized"}</h3>
-                    <p className="mt-2 text-sm leading-6 text-gray-700">{closingResult.message}</p>
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Cash physically counted</p><b className="mt-1 block text-lg">₱{Number(countedCash).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</b></div>
-                      <div className="rounded-xl bg-white p-4"><p className="text-xs text-gray-500">Products counted</p><b className="mt-1 block text-lg">{closingData?.branch_closing.inventory.length || 0}</b></div>
-                    </div>
-                  </div>
-                  <div className="mt-5 flex justify-end"><button type="button" onClick={() => setShowCloseShift(false)} className="rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white">Done</button></div>
-                </div>
-              ) : closingData ? (
-                <div className="max-h-[72vh] overflow-y-auto p-5 sm:p-6">
-                  {(!online || queuedSales.length > 0 || !closingData.server_sync_complete) && (
-                    <p className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold leading-6 text-red-700">Closing is locked until this device is online and every transaction is fully synchronized. Pending on device: {queuedSales.length}; pending on server: {closingData.pending_sync_count}.</p>
-                  )}
-                  {error && <p className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
-                  {recountRequired && <div className="mb-5 space-y-2">
-                    {recountMismatch.cash && <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold leading-6 text-red-800"><b>Cash count does not match.</b> Recount all physical cash in the drawer, including the opening cash. The expected amount remains hidden.</p>}
-                    {recountMismatch.inventory && <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900"><b>Physical inventory does not match.</b> Recount every product, including damaged and expired units. Expected quantities remain hidden.</p>}
-                    {!recountMismatch.cash && !recountMismatch.inventory && <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">A difference was detected. Recount the cash and physical inventory before submitting again.</p>}
-                  </div>}
-
-                  <label className="block text-sm font-bold text-[#071638]">Physical cash in drawer <span className="text-red-600">*</span>
-                    <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]"><span className="font-bold text-gray-500">₱</span><input required disabled={!online} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="Enter total physical cash" className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none disabled:opacity-50" /></div>
-                    <span className="mt-2 block text-xs font-normal leading-5 text-gray-500">Enter the complete physical cash in the drawer, including the opening cash. This field cannot be left blank.</span>
-                  </label>
-
-                  {closingData.branch_closing.required && (
-                    <section className="mt-6 overflow-hidden rounded-2xl border">
-                      <div className="border-b bg-[#f7f8fb] p-4"><h3 className="font-bold text-[#071638]">Physical inventory count</h3><p className="mt-1 text-xs text-gray-500">Enter the quantity physically present. Do not rely on the POS stock display.</p></div>
-                      <div className="divide-y">
-                        {closingData.branch_closing.inventory.map((item) => {
-                          const row = inventoryCounts[item.product_id] || { counted: "", damaged: "0", expired: "0" };
-                          return <div key={item.product_id} className="grid gap-3 p-4 sm:grid-cols-[1fr_130px_110px_110px] sm:items-end">
-                            <p className="self-center text-sm font-bold text-[#071638]">{item.product_name}</p>
-                            {([['counted', 'Physical count *'], ['damaged', 'Damaged'], ['expired', 'Expired']] as const).map(([field, label]) => <label key={field} className="text-xs font-bold text-gray-600">{label}<input required type="number" min="0" step="1" value={row[field]} onChange={(event) => setInventoryCounts((current) => ({ ...current, [item.product_id]: { ...(current[item.product_id] || { counted: "", damaged: "0", expired: "0" }), [field]: event.target.value } }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-center text-sm outline-none focus:border-[#d4af45]" /></label>)}
-                          </div>;
-                        })}
-                      </div>
-                    </section>
-                  )}
-
-                  {recountRequired && <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    {recountMismatch.cash && <label className="block text-sm font-bold text-[#071638]">Cash recount explanation <span className="text-red-600">*</span><textarea value={cashRecountExplanation} onChange={(event) => setCashRecountExplanation(event.target.value)} maxLength={500} rows={3} placeholder="Explain how the drawer cash was recounted or why the difference may remain." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
-                    {recountMismatch.inventory && <label className="block text-sm font-bold text-[#071638]">Inventory recount explanation <span className="text-red-600">*</span><textarea value={inventoryRecountExplanation} onChange={(event) => setInventoryRecountExplanation(event.target.value)} maxLength={500} rows={3} placeholder="Explain how the products were recounted or why the difference may remain." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label>}
-                  </div>}
-                  {!closeShiftReady && (
-                    <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold leading-5 text-amber-900">
-                      {countedCash === "" ? <p>• Enter the physical cash in the drawer.</p> : null}
-                      {missingClosingProducts > 0 ? <p>• Enter the physical count for {missingClosingProducts} remaining product{missingClosingProducts === 1 ? "" : "s"}.</p> : null}
-                      {!closingInventoryComplete && missingClosingProducts === 0 ? <p>• Check the inventory values. Damaged plus expired units cannot exceed the physical count.</p> : null}
-                      {recountMismatch.cash && cashRecountExplanation.trim().length < 5 ? <p>• Enter a clear cash recount explanation.</p> : null}
-                      {recountMismatch.inventory && inventoryRecountExplanation.trim().length < 5 ? <p>• Enter a clear inventory recount explanation.</p> : null}
-                    </div>
-                  )}
-                  <div className="mt-6 flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end">
-                    <button type="button" onClick={() => setShowCloseShift(false)} className="rounded-xl border px-5 py-3 text-sm font-bold">Cancel</button>
-                    <button type="button" disabled={!closeShiftReady || closingShift} onClick={submitCloseShift} className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-40">{closingShift ? "Submitting safely…" : closingData.branch_closing.required ? "Submit Counts for Approval" : "Confirm & Close Shift"}</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-6"><p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error || "Unable to prepare this shift for closing."}</p></div>
-              )}
-            </div>
-          </div>
-        )}
+        <PosCloseShiftModal
+          open={showCloseShift}
+          shiftId={data?.open_shift?.id || null}
+          onClose={() => setShowCloseShift(false)}
+          onCompleted={() => window.location.reload()}
+        />
         {showOpenShift && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="open-shift-title">
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="open-shift-title"
+          >
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-              <h2 id="open-shift-title" className="text-xl font-bold text-[#071638]">
+              <h2
+                id="open-shift-title"
+                className="text-xl font-bold text-[#071638]"
+              >
                 Open cashier shift
               </h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">Count the cash already in the drawer. This becomes the shift’s opening cash—not a sale.</p>
-              <label className="mt-5 block text-sm font-bold text-[#071638]">Opening cash</label>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                Count the cash already in the drawer. This becomes the shift’s
+                opening cash—not a sale.
+              </p>
+              <label className="mt-5 block text-sm font-bold text-[#071638]">
+                Opening cash
+              </label>
               <div className="mt-2 flex items-center rounded-xl border bg-[#f7f8fb] px-4 focus-within:border-[#d4af45]">
                 <span className="font-bold text-gray-500">₱</span>
-                <input type="number" min="0" step="0.01" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none" />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={openingCash}
+                  onChange={(event) => setOpeningCash(event.target.value)}
+                  className="w-full bg-transparent px-3 py-3 text-lg font-bold outline-none"
+                />
               </div>
               <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setShowOpenShift(false)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">
+                <button
+                  type="button"
+                  onClick={() => setShowOpenShift(false)}
+                  className="rounded-xl border px-4 py-2.5 text-sm font-bold"
+                >
                   Cancel
                 </button>
-                <button type="button" disabled={savingShift || Number(openingCash) < 0} onClick={openShift} className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] disabled:opacity-50">
+                <button
+                  type="button"
+                  disabled={savingShift || Number(openingCash) < 0}
+                  onClick={openShift}
+                  className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] disabled:opacity-50"
+                >
                   {savingShift ? "Opening…" : "Confirm & Open"}
                 </button>
               </div>
@@ -1275,17 +1564,47 @@ export default function PointOfSalePage() {
           </div>
         )}
         {receipt && (
-          <div className="pos-print-overlay fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+          <div
+            className="pos-print-overlay fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#071638]/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="receipt-title"
+          >
             <div className="pos-print-receipt my-6 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <div className="text-center">
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">Hiroma Point of Sale</p>
-                <h2 id="receipt-title" className="mt-2 text-2xl font-bold text-[#071638]">
-                  {receipt.payment_status === "pending_verification" ? "Payment awaiting verification" : "Payment received"}
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#b18512]">
+                  Hiroma Point of Sale
+                </p>
+                <h2
+                  id="receipt-title"
+                  className="mt-2 text-2xl font-bold text-[#071638]"
+                >
+                  {receipt.payment_status === "pending_verification"
+                    ? "Payment awaiting verification"
+                    : "Payment received"}
                 </h2>
-                <p className="mt-1 text-xs text-gray-500">Receipt {receipt.receipt_number}</p>
-                {receipt.sync_status === "saved_offline" && <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800">Recorded offline · awaiting synchronization</p>}
-                {receipt.payment_status === "pending_verification" && <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">Pending independent verification. This is not yet a paid receipt; do not release products until an authorized approver confirms the payment.</p>}
-                {receipt.customer_type === "member" && <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">Member/Reseller purchase · Not eligible for void or refund because this transaction may include PU, rewards, commissions, rank progress, or wallet credits.</p>}
+                <p className="mt-1 text-xs text-gray-500">
+                  Receipt {receipt.receipt_number}
+                </p>
+                {receipt.sync_status === "saved_offline" && (
+                  <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800">
+                    Recorded offline · awaiting synchronization
+                  </p>
+                )}
+                {receipt.payment_status === "pending_verification" && (
+                  <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
+                    Pending independent verification. This is not yet a paid
+                    receipt; do not release products until an authorized
+                    approver confirms the payment.
+                  </p>
+                )}
+                {receipt.customer_type === "member" && (
+                  <p className="mx-auto mt-3 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
+                    Member/Reseller purchase · Not eligible for void or refund
+                    because this transaction may include PU, rewards,
+                    commissions, rank progress, or wallet credits.
+                  </p>
+                )}
               </div>
               <div className="mt-5 border-y py-4 text-sm">
                 <div className="flex justify-between gap-4">
@@ -1298,12 +1617,17 @@ export default function PointOfSalePage() {
                 </div>
                 <div className="mt-2 flex justify-between gap-4">
                   <span className="text-gray-500">Date</span>
-                  <b className="text-right">{new Date(receipt.created_at).toLocaleString("en-PH")}</b>
+                  <b className="text-right">
+                    {new Date(receipt.created_at).toLocaleString("en-PH")}
+                  </b>
                 </div>
               </div>
               <div className="my-4 space-y-3">
                 {receipt.items.map((item) => (
-                  <div key={item.product_id} className="flex justify-between gap-4 text-sm">
+                  <div
+                    key={item.product_id}
+                    className="flex justify-between gap-4 text-sm"
+                  >
                     <div>
                       <b>{item.name}</b>
                       <p className="text-xs text-gray-500">
@@ -1359,17 +1683,27 @@ export default function PointOfSalePage() {
               </div>
               <div className="pos-print-actions mt-5 grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => printThermalReceipt(receipt, {
-                    name: data?.receipt_outlet_name || data?.location?.distributor_profile?.fulfillment_outlet_name || data?.location?.full_name || "HIROMA POINT OF SALE",
-                    address: data?.receipt_address,
-                  })}
+                  onClick={() =>
+                    printThermalReceipt(receipt, {
+                      name:
+                        data?.receipt_outlet_name ||
+                        data?.location?.distributor_profile
+                          ?.fulfillment_outlet_name ||
+                        data?.location?.full_name ||
+                        "HIROMA POINT OF SALE",
+                      address: data?.receipt_address,
+                    })
+                  }
                   className="rounded-lg border px-3 py-2.5 text-sm font-semibold"
                 >
                   {receipt.payment_status === "pending_verification"
                     ? "Print pending slip"
                     : "Print receipt"}
                 </button>
-                <button onClick={() => setReceipt(null)} className="rounded-lg bg-[#d4af45] px-3 py-2.5 text-sm font-semibold text-[#071638]">
+                <button
+                  onClick={() => setReceipt(null)}
+                  className="rounded-lg bg-[#d4af45] px-3 py-2.5 text-sm font-semibold text-[#071638]"
+                >
                   New sale
                 </button>
               </div>
@@ -1388,7 +1722,12 @@ export default function PointOfSalePage() {
           }}
         />
       ) : null}
-      {showProductScanner ? <PosProductScanner onClose={() => setShowProductScanner(false)} onDetected={addProductByBarcode} /> : null}
+      {showProductScanner ? (
+        <PosProductScanner
+          onClose={() => setShowProductScanner(false)}
+          onDetected={addProductByBarcode}
+        />
+      ) : null}
     </main>
   );
 }

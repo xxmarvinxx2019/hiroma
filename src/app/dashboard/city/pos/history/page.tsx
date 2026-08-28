@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { listQueuedSales } from "@/app/lib/posOfflineQueue";
+import PosCloseShiftModal from "@/app/components/pos/PosCloseShiftModal";
 
 type History = {
   access: { can_audit: boolean; view: "mine" | "audit" };
@@ -41,6 +40,7 @@ type History = {
     count: number;
     amount: number | null;
     provider_verified: boolean;
+    pending_count: number;
   }>;
   transactions: Array<{
     id: string;
@@ -61,22 +61,33 @@ type History = {
   }>;
 };
 
+type CashManagement = {
+  access: { can_approve: boolean; view: "mine" | "audit" };
+  summary: { opening_cash: number; cash_sales: number; cash_refunds: number; paid_in: number; paid_out: number; pending_paid_out: number };
+  movements: Array<{ id: string; movement_type: "paid_in" | "paid_out"; status: string; amount: number; purpose: string; notes: string; reference: string | null; requested_at: string; requested_by_id: string; requested_by_name: string; reviewed_by_name: string | null }>;
+};
+
 const peso = (value: number) => value.toLocaleString("en-PH", { style: "currency", currency: "PHP" });
 
 export default function PosShiftHistoryPage() {
   const [data, setData] = useState<History | null>(null);
   const [view, setView] = useState<"mine" | "audit">("mine");
   const [selectedShiftId, setSelectedShiftId] = useState("");
-  const [receiptPage, setReceiptPage] = useState(1);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [countedCash, setCountedCash] = useState("");
-  const [inventoryCounts, setInventoryCounts] = useState<Record<string, { counted: string; damaged: string; expired: string }>>({});
-  const [recountRequired, setRecountRequired] = useState(false);
-  const [explanation, setExplanation] = useState("");
-  const [closing, setClosing] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
-  const [localPending, setLocalPending] = useState(0);
+  const [cashData, setCashData] = useState<CashManagement | null>(null);
+  const [cashModal, setCashModal] = useState(false);
+  const [closeShiftModal, setCloseShiftModal] = useState(false);
+  const [movementType, setMovementType] = useState<"paid_in" | "paid_out">("paid_in");
+  const [movementAmount, setMovementAmount] = useState("");
+  const [movementPurpose, setMovementPurpose] = useState("change_fund");
+  const [movementNotes, setMovementNotes] = useState("");
+  const [movementReference, setMovementReference] = useState("");
+  const [movementRequestId, setMovementRequestId] = useState("");
+  const [savingMovement, setSavingMovement] = useState(false);
+  const [reviewingId, setReviewingId] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
   const load = useCallback(async () => {
     try {
       const params = new URLSearchParams();
@@ -103,16 +114,30 @@ export default function PosShiftHistoryPage() {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+  const loadCash = useCallback(async (shiftId: string) => {
+    try {
+      const params = new URLSearchParams({ shift_id: shiftId });
+      if (view === "audit") params.set("view", "audit");
+      const response = await fetch(`/api/city/pos/cash-movements?${params}`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to load cash management.");
+      setCashData(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to load cash management.");
+    }
+  }, [view]);
   useEffect(() => {
-    const timer = window.setTimeout(
-      () =>
-        void listQueuedSales()
-          .then((rows) => setLocalPending(rows.length))
-          .catch(() => setLocalPending(1)),
-      0,
-    );
+    const shiftId = data?.shift?.id;
+    const timer = window.setTimeout(() => {
+      if (!shiftId) {
+        setCashData(null);
+        return;
+      }
+      void loadCash(shiftId);
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [data?.shift?.id, loadCash]);
+
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener("online", update);
@@ -123,52 +148,38 @@ export default function PosShiftHistoryPage() {
     };
   }, []);
 
-  async function closeShift() {
-    if (!online || localPending > 0 || !data?.shift || !["open", "needs_review"].includes(data.shift.status) || !data.server_sync_complete || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0) return;
-    setClosing(true);
-    setError("");
-    setNotice("");
+  async function submitCashMovement() {
+    if (!data?.shift || !online || !movementAmount || movementNotes.trim().length < 5) return;
+    setSavingMovement(true); setError(""); setNotice("");
     try {
-      const response = await fetch("/api/city/pos/shifts", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shift_id: data.shift.id,
-          counted_cash: Number(countedCash),
-          recount_confirmed: recountRequired,
-          explanation,
-          inventory_counts: data.branch_closing.required
-            ? data.branch_closing.inventory.map((item) => ({
-                product_id: item.product_id,
-                counted_quantity: inventoryCounts[item.product_id]?.counted,
-                damaged_quantity: inventoryCounts[item.product_id]?.damaged || 0,
-                expired_quantity: inventoryCounts[item.product_id]?.expired || 0,
-              }))
-            : undefined,
-        }),
-      });
+      const clientRequestId = movementRequestId || crypto.randomUUID();
+      if (!movementRequestId) setMovementRequestId(clientRequestId);
+      const response = await fetch("/api/city/pos/cash-movements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_request_id: clientRequestId, shift_id: data.shift.id, movement_type: movementType, amount: Number(movementAmount), purpose: movementPurpose, notes: movementNotes, reference: movementReference }) });
       const result = await response.json();
-      if (!response.ok) {
-        if (result.code === "SHIFT_RECOUNT_REQUIRED") setRecountRequired(true);
-        throw new Error(result.error || "Unable to close shift.");
-      }
-      setNotice(result.pending_approval ? "Cash and inventory counts were submitted. This shift is locked and waiting for an independent manager review." : "Shift closed successfully.");
-      await load();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to close shift.");
-    } finally {
-      setClosing(false);
-    }
+      if (!response.ok) throw new Error(result.error || "Unable to record cash movement.");
+      setNotice(movementType === "paid_in" ? "Paid-in cash was recorded in this shift ledger." : "Paid-out request submitted for independent approval. Do not remove cash until approved.");
+      setCashModal(false); setMovementAmount(""); setMovementNotes(""); setMovementReference(""); setMovementRequestId("");
+      await loadCash(data.shift.id);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to record cash movement."); }
+    finally { setSavingMovement(false); }
   }
 
-  const receiptsPerPage = 10;
-  const receiptPages = Math.max(1, Math.ceil((data?.transactions.length || 0) / receiptsPerPage));
-  const visibleTransactions = (data?.transactions || []).slice((receiptPage - 1) * receiptsPerPage, receiptPage * receiptsPerPage);
-  const inventoryCountComplete = !data?.branch_closing.required || data.branch_closing.inventory.every((item) => {
-    const row = inventoryCounts[item.product_id];
-    return row && row.counted !== "" && Number.isInteger(Number(row.counted)) && Number(row.counted) >= 0;
-  });
-  const explanationComplete = !data || data.shift?.status !== "needs_review" || explanation.trim().length >= 5;
+  async function reviewPaidOut(movementId: string, action: "approve" | "reject") {
+    if (reviewNotes.trim().length < 5) { setError("Enter a review note of at least 5 characters."); return; }
+    setReviewingId(movementId); setError("");
+    try {
+      const response = await fetch("/api/city/pos/cash-movements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ movement_id: movementId, action, notes: reviewNotes }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to review paid-out request.");
+      setReviewNotes(""); setNotice(`Paid-out request ${action === "approve" ? "approved" : "rejected"}.`);
+      if (data?.shift?.id) await loadCash(data.shift.id);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to review paid-out request."); }
+    finally { setReviewingId(""); }
+  }
+
+  const nonCashGroups = data?.payment_groups.filter((group) => group.method.toLowerCase() !== "cash") || [];
+  const approvedNonCashTotal = nonCashGroups.reduce((sum, group) => sum + Number(group.amount || 0), 0);
+  const pendingNonCashCount = nonCashGroups.reduce((sum, group) => sum + group.pending_count, 0);
 
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
@@ -176,18 +187,18 @@ export default function PosShiftHistoryPage() {
         <header className="flex flex-col justify-between gap-3 rounded-2xl bg-[#071638] p-6 text-white sm:flex-row sm:items-center">
           <div>
             <p className="text-xs font-bold uppercase tracking-[.2em] text-[#d4af45]">Cashier workspace</p>
-            <h1 className="mt-2 text-2xl font-bold">{view === "audit" ? "Cashier Shift Audit" : "Current Shift History"}</h1>
-            <p className="mt-1 text-sm text-white/65">{view === "audit" ? "Review one cashier and terminal shift at a time without mixing accountability." : "Your receipts and recorded payment destinations for this cashier shift."}</p>
+            <h1 className="mt-2 text-2xl font-bold">{view === "audit" ? "Cashier Shift Audit" : "Shift"}</h1>
+            <p className="mt-1 text-sm text-white/65">{view === "audit" ? "Review one cashier and terminal shift at a time without mixing accountability." : "Manage this cashier shift, drawer movements, and close-out safely."}</p>
           </div>
-          <Link href="/dashboard/city/pos" className="rounded-xl bg-[#d4af45] px-4 py-3 text-center text-sm font-bold text-[#071638]">
-            Return to POS
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {view === "mine" && data?.shift?.status === "open" ? <><button onClick={() => setCashModal(true)} className="rounded-xl border border-white/30 px-4 py-3 text-sm font-bold text-white">Cash Management</button><button onClick={() => setCloseShiftModal(true)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">Close Shift</button></> : null}
+          </div>
         </header>
         {view === "audit" && data?.access.can_audit ? (
           <section className="mt-4 rounded-2xl border bg-white p-5">
             <label className="block text-xs font-bold uppercase tracking-wide text-gray-500">
               Cashier and shift to audit
-              <select value={selectedShiftId || data.shift?.id || ""} onChange={(event) => { setSelectedShiftId(event.target.value); setReceiptPage(1); }} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm font-semibold text-[#071638] outline-none focus:border-[#d4af45]">
+              <select value={selectedShiftId || data.shift?.id || ""} onChange={(event) => { setSelectedShiftId(event.target.value); }} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm font-semibold text-[#071638] outline-none focus:border-[#d4af45]">
                 {data.audit_shifts.map((row) => (
                   <option key={row.id} value={row.id}>{row.cashier_name} · {row.terminal_name} · {new Date(row.opened_at).toLocaleString("en-PH")} · {row.status.replaceAll("_", " ")} · {row.receipt_count} receipt{row.receipt_count === 1 ? "" : "s"}</option>
                 ))}
@@ -220,118 +231,40 @@ export default function PosShiftHistoryPage() {
                 <p className="mt-1 text-xs text-gray-500">The cashier counts the drawer before seeing the expected cash.</p>
               </article>
             </section>
+            {cashData ? <section className="mt-5 rounded-2xl border bg-white p-5">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-bold text-[#071638]">Cash drawer activity</h2><p className="mt-1 text-xs text-gray-500">Every drawer movement has a named purpose and audit trail. Expected drawer cash remains hidden until blind count.</p></div>{view === "mine" && data.shift.status === "open" ? <button disabled={!online} onClick={() => setCashModal(true)} className="rounded-xl bg-[#071638] px-4 py-3 text-sm font-bold text-white disabled:opacity-40">Cash Management</button> : null}</div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{[["Starting cash", cashData.summary.opening_cash], ["Cash payments", cashData.summary.cash_sales], ["Cash refunds", cashData.summary.cash_refunds], ["Paid in", cashData.summary.paid_in], ["Paid out", cashData.summary.paid_out]].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-[#f7f8fb] p-4"><p className="text-xs text-gray-500">{label}</p><b className="mt-1 block text-base text-[#071638]">{peso(Number(value))}</b></div>)}</div>
+              {cashData.summary.pending_paid_out > 0 ? <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">{cashData.summary.pending_paid_out} paid-out request{cashData.summary.pending_paid_out === 1 ? " is" : "s are"} pending. Cash must stay in the drawer and the shift cannot close until reviewed.</p> : null}
+              {cashData.movements.length ? <div className="mt-4 overflow-hidden rounded-xl border"><div className="divide-y">{cashData.movements.map(row => <article key={row.id} className="flex flex-col justify-between gap-3 p-4 sm:flex-row"><div><b className="text-sm capitalize text-[#071638]">{row.movement_type.replace("_", " ")} · {row.purpose.replaceAll("_", " ")}</b><p className="mt-1 text-xs text-gray-500">{row.requested_by_name} · {new Date(row.requested_at).toLocaleString("en-PH")} · {row.notes}</p></div><div className="text-left sm:text-right"><b className="text-sm">{peso(row.amount)}</b><p className={`mt-1 text-xs font-bold capitalize ${row.status === "approved" || row.status === "applied" ? "text-green-700" : row.status === "pending" ? "text-amber-700" : "text-red-700"}`}>{row.status}</p></div>{view === "audit" && cashData.access.can_approve && row.movement_type === "paid_out" && row.status === "pending" ? <div className="w-full sm:w-72"><input value={reviewNotes} onChange={event => setReviewNotes(event.target.value)} placeholder="Independent review note" className="w-full rounded-lg border px-3 py-2 text-xs"/><div className="mt-2 flex gap-2"><button disabled={reviewingId === row.id} onClick={() => reviewPaidOut(row.id, "approve")} className="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white">Approve</button><button disabled={reviewingId === row.id} onClick={() => reviewPaidOut(row.id, "reject")} className="rounded-lg border border-red-300 px-3 py-2 text-xs font-bold text-red-700">Reject</button></div></div> : null}</article>)}</div></div> : <p className="mt-4 rounded-xl border border-dashed p-6 text-center text-sm text-gray-400">No paid-in or paid-out movement recorded.</p>}
+            </section> : null}
             <section className="mt-5 rounded-2xl border bg-white p-5">
-              <h2 className="font-bold text-[#071638]">How payments were recorded</h2>
-              <p className="mt-1 text-xs text-gray-500">Amounts remain hidden while the shift is open. Non-cash references are evidence only until an official provider webhook confirms settlement.</p>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {data.payment_groups.map((group) => (
-                  <article key={group.method} className="rounded-xl border bg-[#fafbfe] p-4">
-                    <div className="flex justify-between gap-3">
-                      <div>
+              <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+                <div>
+                  <h2 className="font-bold text-[#071638]">Non-cash payments</h2>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">Approved GCash, e-wallet, and bank payments for this shift. These amounts never form part of the physical cash drawer.</p>
+                </div>
+                <div className="rounded-xl bg-[#eef4ff] px-4 py-3 text-right">
+                  <p className="text-xs font-semibold text-gray-500">Approved total</p>
+                  <b className="mt-1 block text-lg text-[#071638]">{peso(approvedNonCashTotal)}</b>
+                </div>
+              </div>
+              {nonCashGroups.length ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {nonCashGroups.map((group) => (
+                    <article key={group.method} className="rounded-xl border bg-[#f7f8fb] p-4">
+                      <div className="flex items-center justify-between gap-2">
                         <b className="text-sm text-[#071638]">{group.method}</b>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {group.count} transaction
-                          {group.count === 1 ? "" : "s"}
-                        </p>
+                        <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${group.provider_verified ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{group.provider_verified ? "Approved" : "Pending"}</span>
                       </div>
-                      <b className="text-sm">{group.amount == null ? "Hidden" : peso(group.amount)}</b>
-                    </div>
-                    <p className={`mt-3 text-[11px] font-semibold ${group.provider_verified ? "text-green-700" : "text-amber-700"}`}>{group.provider_verified ? "Cash drawer reconciliation applies" : "Reference recorded · not provider-verified"}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-            <section className="mt-5 overflow-hidden rounded-2xl border bg-white">
-              <div className="border-b p-5">
-                <h2 className="font-bold text-[#071638]">Receipt history</h2>
-                <p className="mt-1 text-xs text-gray-500">Visible only to the cashier who opened this shift.</p>
-              </div>
-              <div className="divide-y">
-                {data.transactions.length ? (
-                  visibleTransactions.map((row) => (
-                    <article key={row.id} className="p-5">
-                      <div className="flex flex-col justify-between gap-2 sm:flex-row">
-                        <div>
-                          <b className="text-sm text-[#071638]">
-                            {row.receipt_number} · {row.customer_name_snapshot}
-                          </b>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {new Date(row.finalized_at || row.server_received_at).toLocaleString("en-PH")} · {row.transaction_type.replaceAll("_", " ")}
-                          </p>
-                        </div>
-                        <b className="text-lg text-[#071638]">{peso(row.total)}</b>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-600">{row.items.map((item) => `${item.quantity}× ${item.product_name_snapshot}`).join(" · ")}</p>
-                      <div className="mt-3 rounded-lg bg-[#f7f8fb] p-3 text-xs">
-                        <b>{row.payment_method_snapshot}</b>
-                        {row.payment_reference ? <span className="ml-2 text-gray-500">Ref: {row.payment_reference}</span> : null}
-                        <span className={`ml-2 rounded-full px-2 py-1 font-bold ${row.status === "finalized" ? "bg-green-100 text-green-700" : ["rejected", "voided", "refunded"].includes(row.status) ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{row.status === "finalized" ? "Paid" : row.status === "rejected" ? "Rejected" : row.status === "voided" ? "VOIDED" : row.status === "refunded" ? "REFUNDED" : "Pending verification"}</span>
-                      </div>
-                      {row.transaction_type === "member_sale" ? (
-                        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
-                          <b>Member/Reseller receipt · Not eligible for void or refund.</b> The purchase may include PU, rewards, commissions, rank progress, or wallet credits.
-                        </p>
-                      ) : (
-                        <p className="mt-3 text-xs font-semibold text-emerald-700">Non-member/SRP receipt · Eligible for an independently reviewed void or refund request.</p>
-                      )}
+                      <p className="mt-3 text-lg font-bold text-[#071638]">{peso(Number(group.amount || 0))}</p>
+                      <p className="mt-1 text-xs text-gray-500">{group.count} approved transaction{group.count === 1 ? "" : "s"}</p>
+                      {group.pending_count > 0 ? <p className="mt-2 text-xs font-semibold text-amber-800">{group.pending_count} pending independent verification</p> : null}
                     </article>
-                  ))
-                ) : (
-                  <p className="p-10 text-center text-sm text-gray-400">No completed sales in this shift.</p>
-                )}
-              </div>
-              {data.transactions.length > receiptsPerPage ? (
-                <div className="flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row">
-                  <p className="text-xs text-gray-500">Showing {(receiptPage - 1) * receiptsPerPage + 1}–{Math.min(receiptPage * receiptsPerPage, data.transactions.length)} of {data.transactions.length} receipts</p>
-                  <div className="flex items-center gap-2">
-                    <button disabled={receiptPage === 1} onClick={() => setReceiptPage((page) => Math.max(1, page - 1))} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Previous</button>
-                    <span className="px-2 text-xs font-semibold">Page {receiptPage} of {receiptPages}</span>
-                    <button disabled={receiptPage === receiptPages} onClick={() => setReceiptPage((page) => Math.min(receiptPages, page + 1))} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Next</button>
-                  </div>
+                  ))}
                 </div>
-              ) : null}
-            </section>
-            {view === "mine" && ["open", "needs_review"].includes(data.shift.status) ? (
-              <section className="mt-5 rounded-2xl border border-[#d4af45]/50 bg-[#fffaf0] p-5">
-                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                  <div>
-                    <h2 className="font-bold text-[#071638]">{data.shift.status === "needs_review" ? "Recount returned shift" : "Submit end-of-shift counts"}</h2>
-                    <p className="mt-1 text-sm text-gray-600">Count the physical cash and every Branch product without seeing the system&apos;s expected values. A manager independently reviews the committed count.</p>
-                  </div>
-                  <span className={`w-fit rounded-full px-3 py-1.5 text-xs font-bold ${online && data.server_sync_complete && localPending === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"}`}>{!online ? "Offline · close locked" : localPending > 0 ? `${localPending} saved on this device` : data.server_sync_complete ? "Online · fully synced" : `${data.pending_sync_count} awaiting sync`}</span>
-                </div>
-                {(!online || localPending > 0 || !data.server_sync_complete) && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold leading-5 text-red-700">Final shift closing is locked. Reconnect to the internet and synchronize every transaction first so today’s liquidation remains complete and accurate.</p>}
-                {recountRequired ? <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">A difference was detected. Recount the cash and physical inventory carefully. If a difference remains, explain what was checked before submitting for manager review.</p> : null}
-                <div className="mt-4">
-                  <label className="block text-xs font-bold">
-                    Counted drawer cash
-                    <input disabled={!online || localPending > 0 || !data.server_sync_complete} type="number" min="0" step=".01" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base outline-none disabled:cursor-not-allowed disabled:bg-gray-100" />
-                  </label>
-                </div>
-                {data.branch_closing.required ? (
-                  <div className="mt-5 overflow-hidden rounded-xl border bg-white">
-                    <div className="border-b p-4"><h3 className="text-sm font-bold text-[#071638]">Blind physical inventory count</h3><p className="mt-1 text-xs text-gray-500">Expected quantities are intentionally hidden. Enter the physical quantity currently present.</p></div>
-                    <div className="divide-y">
-                      {data.branch_closing.inventory.map((item) => {
-                        const count = inventoryCounts[item.product_id] || { counted: "", damaged: "", expired: "" };
-                        return <div key={item.product_id} className="grid gap-3 p-4 sm:grid-cols-[1fr_120px_110px_110px] sm:items-end">
-                          <p className="self-center text-sm font-bold text-[#071638]">{item.product_name}</p>
-                          {([['counted', 'Physical count'], ['damaged', 'Damaged'], ['expired', 'Expired']] as const).map(([field, label]) => <label key={field} className="text-xs font-bold text-gray-600">{label}<input disabled={!online || localPending > 0 || !data.server_sync_complete} type="number" min="0" step="1" value={count[field]} onChange={(event) => setInventoryCounts((current) => ({ ...current, [item.product_id]: { ...(current[item.product_id] || { counted: "", damaged: "", expired: "" }), [field]: event.target.value } }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-center text-sm outline-none focus:border-[#d4af45] disabled:bg-gray-100" /></label>)}
-                        </div>;
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-                {recountRequired || data.shift.status === "needs_review" ? <label className="mt-4 block text-xs font-bold text-gray-700">Recount explanation {recountRequired ? "(required if a difference remains)" : "(required)"}<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} placeholder="Describe the recount, missing/damaged items, cash issue, or corrective action taken." className="mt-2 w-full rounded-xl border bg-white p-3 text-sm font-normal outline-none focus:border-[#d4af45]" /></label> : null}
-                <div className="mt-5 flex flex-col items-end gap-2 border-t pt-4">
-                  {!inventoryCountComplete ? <p className="text-xs font-semibold text-amber-800">Enter a physical count for every product before submission.</p> : null}
-                  {!explanationComplete ? <p className="text-xs font-semibold text-amber-800">Enter at least 5 characters explaining the recount or unresolved difference.</p> : null}
-                  <button disabled={!online || localPending > 0 || !data.server_sync_complete || closing || countedCash === "" || Number(countedCash) < 0 || !inventoryCountComplete || !explanationComplete} onClick={closeShift} className="rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
-                    {closing ? "Submitting safely…" : "Submit Counts for Approval"}
-                  </button>
-                </div>
-              </section>
-            ) : view === "mine" && data.shift.status === "locally_closed" ? (
+              ) : <p className="mt-4 rounded-xl border border-dashed p-6 text-center text-sm text-gray-400">No non-cash payment was recorded in this shift.</p>}
+              {pendingNonCashCount > 0 ? <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">Pending payments are not included in the approved total and do not affect expected drawer cash.</p> : null}
+            </section>            {view === "mine" && data.shift.status === "locally_closed" ? (
               <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5">
                 <h2 className="font-bold text-amber-950">Pending independent manager review</h2>
                 <p className="mt-2 text-sm leading-6 text-amber-900">Your cash and inventory counts are locked. This terminal cannot open another shift until an authorized manager reviews and finalizes this submission.</p>
@@ -358,6 +291,17 @@ export default function PosShiftHistoryPage() {
           </>
         )}
       </div>
+      <PosCloseShiftModal
+        open={closeShiftModal}
+        shiftId={data?.shift?.id || null}
+        onClose={() => setCloseShiftModal(false)}
+        onCompleted={async () => {
+          const completedShiftId = data?.shift?.id;
+          await load();
+          if (completedShiftId) await loadCash(completedShiftId);
+        }}
+      />
+      {cashModal && data?.shift ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#071638]/70 p-4" role="dialog" aria-modal="true" aria-label="Cash management"><section className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b18416]">Cash management</p><h2 className="mt-1 text-xl font-bold text-[#071638]">Record drawer cash movement</h2></div><button onClick={() => setCashModal(false)} className="rounded-lg border px-3 py-2 text-xs font-bold">Close</button></div><p className="mt-3 rounded-xl bg-[#f7f8fb] p-3 text-xs leading-5 text-gray-600">Paid In adds actual cash to the drawer immediately. Paid Out is only a request; do not remove cash until an independent manager approves it.</p><div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => { setMovementType("paid_in"); setMovementPurpose("change_fund"); }} className={`rounded-xl border p-3 text-sm font-bold ${movementType === "paid_in" ? "bg-[#071638] text-white" : "bg-white"}`}>Paid In</button><button onClick={() => { setMovementType("paid_out"); setMovementPurpose("bank_deposit"); }} className={`rounded-xl border p-3 text-sm font-bold ${movementType === "paid_out" ? "bg-[#071638] text-white" : "bg-white"}`}>Paid Out</button></div><label className="mt-4 block text-xs font-bold">Amount<input type="number" min="0.01" step="0.01" value={movementAmount} onChange={event => setMovementAmount(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-base" /></label><label className="mt-4 block text-xs font-bold">Purpose<select value={movementPurpose} onChange={event => setMovementPurpose(event.target.value)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm">{(movementType === "paid_in" ? [["change_fund", "Additional change / coins"], ["cash_float", "Additional cash float"], ["correction", "Cash correction"], ["other", "Other"]] : [["bank_deposit", "Bank deposit / remittance"], ["petty_cash", "Petty cash expense"], ["supplier_payment", "Supplier payment"], ["correction", "Cash correction"], ["other", "Other"]]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="mt-4 block text-xs font-bold">Explanation<textarea rows={3} value={movementNotes} onChange={event => setMovementNotes(event.target.value)} placeholder="Who authorized it and why was cash added or requested for removal?" className="mt-2 w-full rounded-xl border p-3 text-sm" /></label><label className="mt-4 block text-xs font-bold">Reference or recipient (optional)<input value={movementReference} onChange={event => setMovementReference(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-sm" /></label>{!online ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">Cash management requires an online connection so its audit trail cannot be lost or duplicated.</p> : null}<div className="mt-5 flex justify-end gap-2"><button onClick={() => setCashModal(false)} className="rounded-xl border px-4 py-3 text-sm font-bold">Cancel</button><button disabled={!online || savingMovement || Number(movementAmount) <= 0 || movementNotes.trim().length < 5} onClick={submitCashMovement} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:opacity-40">{savingMovement ? "Saving…" : movementType === "paid_in" ? "Record Paid In" : "Submit Paid Out"}</button></div></section></div> : null}
     </main>
   );
 }

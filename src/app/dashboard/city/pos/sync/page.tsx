@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { deleteQueuedSale, listQueuedSales, PosQueuedSale, saveQueuedSale } from "@/app/lib/posOfflineQueue";
 
@@ -30,19 +29,25 @@ export default function PosSyncCenterPage() {
   const [synced, setSynced] = useState<SyncedTransaction[]>([]);
   const [error, setError] = useState("");
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [syncProgress, setSyncProgress] = useState<{ phase: "idle" | "checking" | "syncing" | "success" | "warning" | "failed"; processed: number; total: number; succeeded: number; failed: number; currentReceipt: string }>({ phase: "idle", processed: 0, total: 0, succeeded: 0, failed: 0, currentReceipt: "" });
 
   const load = useCallback(async () => {
     try {
       const localRows = (await listQueuedSales()).sort((a, b) => a.created_at.localeCompare(b.created_at));
       setQueue(localRows);
-      if (!navigator.onLine) return;
+      if (!navigator.onLine) return true;
       const response = await fetch("/api/city/pos/transactions", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to load synchronized transactions.");
       setSynced((result.transactions || []).slice(0, 20));
       setError("");
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load the synchronization center.");
+      return false;
     }
   }, []);
 
@@ -61,12 +66,8 @@ export default function PosSyncCenterPage() {
     };
   }, [load]);
 
-  async function retry(sale: PosQueuedSale) {
-    if (!online || retrying) return;
-    setRetrying(sale.client_transaction_id);
-    setError("");
+  async function synchronizeSale(sale: PosQueuedSale) {
     await saveQueuedSale({ ...sale, status: "syncing", error: undefined });
-    await load();
     try {
       const response = await fetch("/api/city/pos/transactions", {
         method: "POST",
@@ -76,22 +77,88 @@ export default function PosSyncCenterPage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Synchronization needs attention.");
       await deleteQueuedSale(sale.client_transaction_id);
+      return true;
     } catch (reason) {
       await saveQueuedSale({
         ...sale,
         status: "needs_attention",
         error: reason instanceof Error ? reason.message : "Synchronization needs attention.",
       });
-    } finally {
-      setRetrying(null);
-      await load();
+      return false;
     }
   }
 
-  async function retryAll() {
+  async function retry(sale: PosQueuedSale) {
     if (!online || retrying) return;
-    for (const sale of queue) await retry(sale);
+    setRetrying(sale.client_transaction_id);
+    setError("");
+    setNotice("");
+    const synchronized = await synchronizeSale(sale);
+    setRetrying(null);
+    await load();
+    setNotice(synchronized ? `${sale.receipt_number} was received safely by Hiroma.` : `${sale.receipt_number} still needs attention. Review its exact error below.`);
   }
+
+  async function syncNow() {
+    if (!online || retrying) return;
+    setRetrying("__all__");
+    setDisplayProgress(0);
+    setSyncModalOpen(true);
+    setError("");
+    setNotice("");
+    setSyncProgress({ phase: "checking", processed: 0, total: 0, succeeded: 0, failed: 0, currentReceipt: "" });
+    try {
+      const pending = (await listQueuedSales()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      setSyncProgress({ phase: "checking", processed: 0, total: pending.length, succeeded: 0, failed: 0, currentReceipt: pending[0]?.receipt_number || "" });
+      await new Promise((resolve) => window.setTimeout(resolve, 2800));
+      if (pending.length > 0) setSyncProgress({ phase: "syncing", processed: 0, total: pending.length, succeeded: 0, failed: 0, currentReceipt: pending[0].receipt_number });
+      let synchronized = 0;
+      let needsAttention = 0;
+      for (let index = 0; index < pending.length; index += 1) {
+        const sale = pending[index];
+        setDisplayProgress(Math.min(99, 90 + Math.round((index / pending.length) * 9)));
+        setSyncProgress({ phase: "syncing", processed: index, total: pending.length, succeeded: synchronized, failed: needsAttention, currentReceipt: sale.receipt_number });
+        if (await synchronizeSale(sale)) synchronized += 1;
+        else needsAttention += 1;
+        setDisplayProgress(Math.min(99, 90 + Math.round(((index + 1) / pending.length) * 9)));
+        setSyncProgress({ phase: "syncing", processed: index + 1, total: pending.length, succeeded: synchronized, failed: needsAttention, currentReceipt: sale.receipt_number });
+      }
+      const refreshed = await load();
+      if (!refreshed) {
+        setSyncProgress({ phase: "failed", processed: pending.length, total: pending.length, succeeded: synchronized, failed: needsAttention + 1, currentReceipt: "" });
+        return;
+      }
+      if (pending.length === 0) {
+        setDisplayProgress(100);
+        setNotice("Sync check complete. This device has no pending offline receipts, and the server confirmation list is refreshed.");
+        setSyncProgress({ phase: "success", processed: 0, total: 0, succeeded: 0, failed: 0, currentReceipt: "" });
+      } else if (needsAttention === 0) {
+        setDisplayProgress(100);
+        setNotice(`${synchronized} receipt${synchronized === 1 ? "" : "s"} synchronized successfully.`);
+        setSyncProgress({ phase: "success", processed: pending.length, total: pending.length, succeeded: synchronized, failed: 0, currentReceipt: "" });
+      } else {
+        setDisplayProgress(100);
+        setNotice(`${synchronized} synchronized; ${needsAttention} still need${needsAttention === 1 ? "s" : ""} attention. Review the exact receipt errors below.`);
+        setSyncProgress({ phase: "warning", processed: pending.length, total: pending.length, succeeded: synchronized, failed: needsAttention, currentReceipt: "" });
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Synchronization failed unexpectedly.");
+      setSyncProgress((current) => ({ ...current, phase: "failed", failed: current.failed + 1, currentReceipt: "" }));
+    } finally {
+      setRetrying(null);
+    }
+  }
+
+  useEffect(() => {
+    if (syncProgress.phase === "checking") {
+      const timer = window.setInterval(() => {
+        setDisplayProgress((current) => Math.min(90, current + 2));
+      }, 60);
+      return () => window.clearInterval(timer);
+    }
+  }, [syncProgress.phase]);
+
+  const progressPercent = displayProgress;
 
   return (
     <main className="min-h-full bg-[#f4f6fb] p-4 sm:p-6">
@@ -104,7 +171,6 @@ export default function PosSyncCenterPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <span className={`rounded-full px-3 py-2 text-xs font-bold ${online ? "bg-emerald-400/15 text-emerald-200" : "bg-red-400/15 text-red-200"}`}>{online ? "● Online" : "○ Offline"}</span>
-            <Link href="/dashboard/city/pos" className="rounded-xl bg-[#d4af45] px-4 py-2 text-sm font-bold text-[#071638]">Return to POS</Link>
           </div>
         </header>
 
@@ -135,7 +201,7 @@ export default function PosSyncCenterPage() {
               <h2 className="font-bold text-[#071638]">Offline transaction queue</h2>
               <p className="mt-1 text-xs text-gray-500">Receipt identity, queue status, and errors only. Running sales and expected cash are intentionally hidden.</p>
             </div>
-            <button disabled={!online || queue.length === 0 || Boolean(retrying)} onClick={() => void retryAll()} className="rounded-xl bg-[#071638] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{retrying ? "Synchronizing…" : "Retry all"}</button>
+            <button disabled={!online || Boolean(retrying)} onClick={() => void syncNow()} className="rounded-xl bg-[#071638] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{retrying === "__all__" ? "Synchronizing…" : "Sync now"}</button>
           </div>
           <div className="divide-y">
             {queue.length ? queue.map((sale) => (
@@ -172,6 +238,53 @@ export default function PosSyncCenterPage() {
           </div>
         </section>
       </div>
+      {syncModalOpen && syncProgress.phase !== "idle" && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#071638]/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="sync-progress-title">
+          <section className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <header className="bg-[#071638] p-5 text-white">
+              <p className="text-xs font-bold uppercase tracking-[.18em] text-[#d4af45]">Secure synchronization</p>
+              <h2 id="sync-progress-title" className="mt-2 text-xl font-bold">{syncProgress.phase === "checking" ? "Checking device and server..." : syncProgress.phase === "syncing" ? "Synchronizing receipts" : syncProgress.phase === "success" ? "Synchronization successful" : syncProgress.phase === "warning" ? "Some receipts need attention" : "Synchronization failed"}</h2>
+              <p className="mt-1 text-sm text-white/65">{syncProgress.phase === "checking" || syncProgress.phase === "syncing" ? "Keep this window open until the synchronization check is complete." : syncProgress.phase === "success" ? "The synchronization check is complete." : "Review the result below before closing this window."}</p>
+            </header>
+            <div className="p-5 sm:p-6">
+              {(syncProgress.phase === "checking" || syncProgress.phase === "syncing" || syncProgress.phase === "success") && (
+                <div className="flex gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-[#071638]">
+                  {syncProgress.phase === "success" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#071638] text-sm font-bold text-white" aria-hidden="true">✓</span> : <span className="mt-1 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[#075f91] border-t-transparent" aria-hidden="true" />}
+                  <div>
+                    <p className="text-sm font-bold">{syncProgress.phase === "checking" ? "Checking connection and pending records..." : syncProgress.phase === "syncing" ? `Processing ${syncProgress.processed + 1} of ${syncProgress.total}: ${syncProgress.currentReceipt}` : "This device is up to date"}</p>
+                    <p className="mt-1 text-sm leading-5 text-slate-600">{syncProgress.phase === "success" ? "There are no offline receipts waiting to be sent. The latest server confirmations have also been refreshed." : "Please wait while Hiroma securely verifies this device and the server."}</p>
+                  </div>
+                </div>
+              )}
+              <div className="mt-5 h-4 overflow-hidden rounded-full border border-slate-200 bg-slate-100 shadow-inner" role="progressbar" aria-label="Synchronization progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent}>
+                <div
+                  className="relative h-full overflow-hidden rounded-full transition-[width] duration-500 ease-out"
+                  style={{
+                    width: `${progressPercent}%`,
+                    background: syncProgress.phase === "failed" ? "#dc2626" : syncProgress.phase === "warning" ? "#d97706" : "linear-gradient(90deg, #071638 0%, #0369a1 55%, #38bdf8 100%)",
+                  }}
+                >
+                  {(syncProgress.phase === "checking" || syncProgress.phase === "syncing") && <span className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/55 to-transparent" aria-hidden="true" />}
+                </div>
+              </div>
+              <p className="mt-2 text-right text-xs font-bold text-gray-600">{progressPercent}%</p>
+              {syncProgress.total > 0 ? (
+                <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-gray-500">Processed</p><b className="mt-1 block text-lg text-[#071638]">{syncProgress.processed}/{syncProgress.total}</b></div>
+                  <div className="rounded-xl bg-green-50 p-3"><p className="text-xs text-green-700">Success</p><b className="mt-1 block text-lg text-green-800">{syncProgress.succeeded}</b></div>
+                  <div className="rounded-xl bg-red-50 p-3"><p className="text-xs text-red-700">Failed</p><b className="mt-1 block text-lg text-red-800">{syncProgress.failed}</b></div>
+                </div>
+              ) : null}
+
+              {(syncProgress.phase === "warning" || (syncProgress.phase === "success" && syncProgress.total > 0)) && notice ? <p className={`mt-5 rounded-xl border p-4 text-sm font-semibold ${syncProgress.phase === "warning" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-sky-200 bg-sky-50 text-[#071638]"}`}>{notice}</p> : null}
+              {syncProgress.phase === "failed" ? <p className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error || "Synchronization failed. Check the internet connection and try again."}</p> : null}
+              <div className="mt-6 flex justify-end">
+                <button type="button" disabled={syncProgress.phase === "checking" || syncProgress.phase === "syncing"} onClick={() => setSyncModalOpen(false)} className="rounded-xl bg-[#071638] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{syncProgress.phase === "checking" || syncProgress.phase === "syncing" ? "Please wait..." : "Done"}</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

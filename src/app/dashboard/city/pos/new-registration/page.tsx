@@ -324,11 +324,44 @@ export default function NewPosRegistrationPage() {
   const cashShortfall = selectedPackage
     ? Math.max(
         0,
-        selectedPackage.total -
-          (hasValidCashReceived ? parsedCashReceived : 0),
+        selectedPackage.total - (hasValidCashReceived ? parsedCashReceived : 0),
       )
     : 0;
 
+  const requiredApplicantFields = useMemo(
+    () =>
+      [
+        ["First name", applicant.first_name],
+        ["Middle name", applicant.no_middle_name || applicant.middle_name],
+        ["Last name", applicant.last_name],
+        ["Birthday", applicant.birthday],
+        ["Birthplace", applicant.birthplace],
+        ["Mobile", applicant.mobile],
+        ["Email", applicant.email],
+        ["Street address", applicant.street_address],
+        ["Barangay", applicant.barangay_name],
+        ["City or municipality", applicant.city_muni_name],
+        ["Province", applicant.province_name],
+        ["Region", applicant.region_name],
+        ["ZIP code", applicant.zip_code],
+        ["Direct sponsor full name", applicant.referrer_full_name],
+        ["Direct sponsor username", applicant.referrer_username],
+        ["Direct upline full name", applicant.upline_full_name],
+        ["Direct upline username", applicant.upline_username],
+        ["Preferred position", applicant.preferred_position],
+        ["Valid ID type", applicant.identity_document_type],
+        ["ID number", applicant.identity_document_reference],
+      ] as const,
+    [applicant],
+  );
+  const missingApplicantFields = requiredApplicantFields
+    .filter(([, value]) => !value)
+    .map(([label]) => label);
+  const completedApplicantFields =
+    requiredApplicantFields.length - missingApplicantFields.length;
+  const applicantCompletion = Math.round(
+    (completedApplicantFields / requiredApplicantFields.length) * 100,
+  );
   function change(name: keyof typeof emptyApplicant, value: string | boolean) {
     setApplicant((current) => {
       const next = { ...current, [name]: value };
@@ -471,34 +504,9 @@ export default function NewPosRegistrationPage() {
       return setError(
         "Verify every physical product and quantity included in the selected package before saving the registration.",
       );
-    const requiredFields = [
-      ["First name", applicant.first_name],
-      ["Middle name", applicant.no_middle_name || applicant.middle_name],
-      ["Last name", applicant.last_name],
-      ["Birthday", applicant.birthday],
-      ["Birthplace", applicant.birthplace],
-      ["Mobile", applicant.mobile],
-      ["Email", applicant.email],
-      ["Street address", applicant.street_address],
-      ["Barangay", applicant.barangay_name],
-      ["City or municipality", applicant.city_muni_name],
-      ["Province", applicant.province_name],
-      ["Region", applicant.region_name],
-      ["ZIP code", applicant.zip_code],
-      ["Direct sponsor full name", applicant.referrer_full_name],
-      ["Direct sponsor username", applicant.referrer_username],
-      ["Direct upline full name", applicant.upline_full_name],
-      ["Direct upline username", applicant.upline_username],
-      ["Preferred position", applicant.preferred_position],
-      ["Valid ID type", applicant.identity_document_type],
-      ["ID number", applicant.identity_document_reference],
-    ] as const;
-    const missingFields = requiredFields
-      .filter(([, value]) => !value)
-      .map(([label]) => label);
-    if (missingFields.length > 0) {
+    if (missingApplicantFields.length > 0) {
       return setError(
-        `Complete all required fields. Missing: ${missingFields.join(", ")}.`,
+        `Complete all required fields. Missing: ${missingApplicantFields.join(", ")}.`,
       );
     }
     if (!online && paymentMethod !== "cash")
@@ -684,11 +692,11 @@ export default function NewPosRegistrationPage() {
           <div className="mt-6 flex flex-wrap justify-center gap-2.5">
             <button
               onClick={() => {
-                 setApplicant(emptyApplicant);
-                 setPackageId("");
-                 setCashReceived("");
-                 setPaymentReference("");
-                 setVerifiedPackageItems({});
+                setApplicant(emptyApplicant);
+                setPackageId("");
+                setCashReceived("");
+                setPaymentReference("");
+                setVerifiedPackageItems({});
                 setSuccess(null);
               }}
               className="whitespace-nowrap rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-semibold text-[#071638]"
@@ -1110,16 +1118,39 @@ export default function NewPosRegistrationPage() {
             </label>
           </div>
         </section>
-        <aside className="rounded-2xl border border-slate-200 bg-white p-5">
+        <aside className="rounded-2xl border border-slate-200 bg-white p-5 lg:sticky lg:top-24 lg:self-start">
           <h2 className="font-bold text-[#071638]">Package and payment</h2>
+          <div
+            className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3"
+            aria-live="polite"
+          >
+            <div className="flex items-center justify-between gap-3 text-xs font-semibold">
+              <span className="text-[#071638]">Applicant details</span>
+              <span className="text-slate-600">
+                {completedApplicantFields} of {requiredApplicantFields.length}{" "}
+                complete
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className="h-full rounded-full bg-[#C9A84C] transition-[width] duration-300"
+                style={{ width: `${applicantCompletion}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-600">
+              {missingApplicantFields.length === 0
+                ? "All required applicant details are complete."
+                : `Next required: ${missingApplicantFields.slice(0, 3).join(", ")}${missingApplicantFields.length > 3 ? ` and ${missingApplicantFields.length - 3} more` : ""}.`}
+            </p>
+          </div>
           <label className="mt-4 block text-xs font-semibold text-slate-600">
             Registration package
             <select
               value={packageId}
               onChange={(event) => {
-                 setPackageId(event.target.value);
-                 setCashReceived("");
-                 setVerifiedPackageItems({});
+                setPackageId(event.target.value);
+                setCashReceived("");
+                setVerifiedPackageItems({});
                 setError("");
               }}
               disabled={!data?.registration_packages.length}
@@ -1320,22 +1351,79 @@ export default function NewPosRegistrationPage() {
             disabled={
               saving ||
               !data ||
-               !selectedPackage ||
-               !stockReady ||
-               (paymentMethod === "cash" && !hasEnoughCash) ||
-               Boolean(selectedPackage && !packageItemsVerified)
+              missingApplicantFields.length > 0 ||
+              !selectedPackage ||
+              !stockReady ||
+              (paymentMethod === "cash" && !hasEnoughCash) ||
+              Boolean(selectedPackage && !packageItemsVerified)
             }
             onClick={() => void submit()}
-            className="mt-5 w-full rounded-xl bg-[#C9A84C] px-4 py-3 font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-5 w-full rounded-xl bg-[#C9A84C] px-4 py-3 font-bold text-[#071638] transition-colors disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
           >
             {saving
-              ? "Saving…"
+              ? "Submitting registration…"
               : selectedPackage && !stockReady
                 ? "Package unavailable"
-                : "Save registration"}
+                : missingApplicantFields.length > 0
+                  ? `Complete ${missingApplicantFields.length} required field${missingApplicantFields.length === 1 ? "" : "s"}`
+                  : !selectedPackage
+                    ? "Choose a registration package"
+                    : !packageItemsVerified
+                      ? "Verify all package items"
+                      : paymentMethod === "cash" && !hasEnoughCash
+                        ? "Enter sufficient cash received"
+                        : "Submit registration"}{" "}
           </button>
         </aside>
       </div>
+      {data && !data.open_shift && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/75 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="registration-shift-required-title"
+        >
+          <section className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
+            <header className="relative bg-[#071638] p-6 pr-16 text-white">
+              <Link
+                href="/dashboard/city/pos/registrations"
+                aria-label="Close and return to Registration Center"
+                style={{ insetInlineEnd: "1.25rem", top: "1.25rem" }}
+                className="absolute z-10 grid h-9 w-9 place-items-center rounded-lg border border-white/25 text-xl font-semibold text-white transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af45]"
+              >
+                ×
+              </Link>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#d4af45]">
+                Cashier shift required
+              </p>
+              <h2
+                id="registration-shift-required-title"
+                className="mt-2 text-xl font-bold"
+              >
+                Open your shift first
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-white/70">
+                Registrations receive money and release package products, so
+                they must be recorded inside an open cashier shift.
+              </p>
+            </header>
+            <div className="p-6">
+              <p className="pos-info-panel rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                Count the cash currently inside the drawer, then open the shift
+                before starting this registration.
+              </p>
+              <div className="mt-5 flex justify-end">
+                <Link
+                  href="/dashboard/city/pos?openShift=1"
+                  className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638]"
+                >
+                  Open Shift
+                </Link>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

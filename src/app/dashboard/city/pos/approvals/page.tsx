@@ -80,11 +80,10 @@ export default function PosPaymentApprovalsPage() {
           <div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#d4af45]">Maker–approver control</p><h1 className="mt-2 text-2xl font-bold">Approval Center</h1><p className="mt-1 text-sm text-white/65">Confirm money in the official account before products, earnings, or member rewards are finalized.</p></div>
           <Link href="/dashboard/city/pos" className="rounded-xl bg-[#d4af45] px-4 py-3 text-center text-sm font-bold text-[#071638]">Return to POS</Link>
         </header>
-        <nav className="mt-4 grid gap-2 rounded-2xl border bg-white p-2 sm:grid-cols-4" aria-label="Approval type">
+        <nav className="mt-4 grid gap-2 rounded-2xl border bg-white p-2 sm:grid-cols-3" aria-label="Approval type">
           <Link href="/dashboard/city/pos/approvals" className="rounded-xl bg-[#071638] px-4 py-3 text-center text-sm font-bold text-white">Sales Payments</Link>
           <Link href="/dashboard/city/pos/registration-approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Registration Payments</Link>
           <Link href="/dashboard/city/pos/shift-approvals" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Shift Closings</Link>
-          <Link href="/dashboard/city/pos/adjustments" className="rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-600 hover:bg-slate-50">Void & Refunds</Link>
         </nav>
         {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
         {notice && <p className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-800">{notice}</p>}
