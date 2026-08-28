@@ -195,6 +195,7 @@ export async function GET(req: NextRequest) {
         finalized_at: true,
         server_received_at: true,
         order: { select: { id: true, order_number: true } },
+        adjustment_requests: { where: { status: 'approved', request_type: 'refund' }, select: { amount_snapshot: true } },
         items: {
           select: {
             product_name_snapshot: true,
@@ -226,20 +227,30 @@ export async function GET(req: NextRequest) {
         count: number
         amount: number
         provider_verified: boolean
+        pending_count: number
       }
     >()
     for (const row of transactions) {
+      if (['rejected', 'voided'].includes(row.status)) continue
+      const isCash = row.payment_method_snapshot.toLowerCase() === 'cash'
+      const isPending = row.status === 'synced_pending_review'
       const current = groups.get(row.payment_method_snapshot) || {
         method: row.payment_method_snapshot,
         count: 0,
         amount: 0,
-        provider_verified: row.payment_method_snapshot.toLowerCase() === 'cash',
+        provider_verified: isCash,
+        pending_count: 0,
       }
-      current.count += 1
-      current.amount += Number(row.total_snapshot)
+      if (isPending) {
+        current.pending_count += 1
+      } else {
+        current.count += 1
+        const refundedAmount = row.adjustment_requests.reduce((sum, request) => sum + Number(request.amount_snapshot), 0)
+        current.amount += Number(row.total_snapshot) - refundedAmount
+        current.provider_verified = true
+      }
       groups.set(row.payment_method_snapshot, current)
-    }
-    const closed = shift.status !== 'open'
+    }    const closed = shift.status !== 'open'
     const reconciliationVisible = auditRequested || shift.status === 'finalized'
     return NextResponse.json({
       shift: {
@@ -254,6 +265,8 @@ export async function GET(req: NextRequest) {
         payment_method_snapshot: row.payment_method_snapshot.toLowerCase() === 'cash' ? 'Cash' : row.payment_method_snapshot,
         receipt_number: row.receipt_number,
         total: Number(row.total_snapshot),
+        refunded_amount: row.adjustment_requests.reduce((sum, request) => sum + Number(request.amount_snapshot), 0),
+        net_total: Number(row.total_snapshot) - row.adjustment_requests.reduce((sum, request) => sum + Number(request.amount_snapshot), 0),
         amount_received: Number(row.amount_received_snapshot),
         change: Number(row.change_snapshot),
         items: row.items.map((item) => ({
@@ -265,7 +278,7 @@ export async function GET(req: NextRequest) {
       payment_groups: [...groups.values()].map((group) => ({
         ...group,
         method: group.method.toLowerCase() === 'cash' ? 'Cash' : group.method,
-        amount: closed ? group.amount : null,
+        amount: group.method.toLowerCase() === 'cash' && !closed ? null : group.amount,
       })),
       pending_sync_count: pendingSyncCount,
       server_sync_complete: pendingSyncCount === 0,

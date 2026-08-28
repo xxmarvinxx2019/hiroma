@@ -18,7 +18,7 @@ test('POS provides camera-based Digital ID and product scanning with clear fallb
 test('POS checkout and dialogs adapt from phones to larger screens', () => {
   assert.match(posPage, /w-full max-w-md/)
   assert.match(posPage, /lg:grid-cols-\[minmax\(0,1\.35fr\)_minmax\(340px,\.65fr\)\]/)
-  assert.match(posPage, /sm:grid-cols-\[1fr_130px_110px_110px\]/)
+  assert.match(posPage, /flex flex-col justify-between gap-3[^\n]*sm:flex-row sm:items-center/)
   assert.match(posPage, /flex flex-col-reverse gap-2[^\n]*sm:flex-row/)
 })
 

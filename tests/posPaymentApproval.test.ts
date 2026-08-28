@@ -77,14 +77,55 @@ test('POS product barcode is admin-controlled, unique, and scan-to-add', () => {
 test('cashier navigation exposes a POS-only sync center without financial totals', () => {
   const layout = read('src/app/dashboard/city/layout.tsx')
   const sync = read('src/app/dashboard/city/pos/sync/page.tsx')
-  assert.match(layout, /Sync Center.*\/dashboard\/city\/pos\/sync/)
-  assert.match(layout, /'\/dashboard\/city\/pos\/sync': 'pos'/)
+  assert.match(layout, /Sync Center[\s\S]*?\/dashboard\/city\/pos\/sync/)
+  assert.match(layout, /["']\/dashboard\/city\/pos\/sync["']:\s*["']pos["']/)
   assert.match(sync, /listQueuedSales/)
   assert.match(sync, /Retry sync/)
+  assert.match(sync, /Sync now/)
+  assert.match(sync, /async function syncNow/)
+  assert.match(sync, /for \(let index = 0; index < pending\.length; index \+= 1\)/)
+  assert.match(sync, /await synchronizeSale\(sale\)/)
+  assert.match(sync, /Sync check complete/)
+  assert.match(sync, /Checking device and server/)
+  assert.match(sync, /Processing \$\{syncProgress\.processed \+ 1\} of/)
+  assert.match(sync, /Synchronization successful/)
+  assert.match(sync, /Synchronization failed/)
+  assert.match(sync, /role="dialog"/)
+  assert.match(sync, /aria-labelledby="sync-progress-title"/)
+  assert.match(sync, /Secure synchronization/)
+  assert.match(sync, /Please wait/)
+  assert.match(sync, /setSyncModalOpen\(true\)/)
+  assert.match(sync, /progressPercent/)
+  assert.match(sync, /window\.setTimeout\(resolve, 2800\)/)
+  assert.match(sync, /setInterval/)
+  assert.match(sync, /Math\.min\(90, current \+ 2\)/)
+  assert.match(sync, /Math\.min\(99,\s*90 \+ Math\.round/)
+  assert.match(sync, /setDisplayProgress\(0\)/)
+  assert.match(sync, /role="progressbar"/)
+  assert.match(sync, /linear-gradient\(90deg, #071638 0%, #0369a1 55%, #38bdf8 100%\)/)
+  assert.match(sync, /This device is up to date/)
+  assert.match(sync, /syncProgress\.phase === "success" && syncProgress\.total > 0/)
+  assert.doesNotMatch(sync, /queue\.length === 0 \|\| Boolean\(retrying\)/)
   assert.match(sync, /Running sales and expected cash are intentionally hidden/)
   assert.doesNotMatch(sync, /expected_cash_snapshot|total_snapshot|payment_groups/)
 })
 
+test('POS appearance follows the device or a saved light and dark preference', () => {
+  const settings = read('src/app/dashboard/city/pos/settings/page.tsx')
+  const layout = read('src/app/dashboard/city/layout.tsx')
+  const appearance = read('src/app/lib/posAppearance.ts')
+  const globals = read('src/app/globals.css')
+
+  assert.match(settings, /Use device settings/)
+  assert.match(settings, /Manual theme/)
+  assert.match(settings, /\["light", "dark"\]/)
+  assert.match(settings, /savePosAppearance/)
+  assert.match(appearance, /hiroma-pos-appearance-v1/)
+  assert.match(layout, /prefers-color-scheme/)
+  assert.match(layout, /data-pos-theme=/)
+  assert.match(layout, /resolvePosTheme/)
+  assert.match(globals, /\[data-pos-theme="dark"\]/)
+})
 test('approver cannot review their own payment and rejection restores reserved stock', () => {
   const approvals = read('src/app/api/city/pos/approvals/route.ts')
   assert.match(approvals, /transaction\.cashier_id === actorId/)
@@ -102,17 +143,49 @@ test('payment account and reference are unique together', () => {
 
 test('shift recount explanations are required per mismatched category', () => {
   const shifts = read('src/app/api/city/pos/shifts/route.ts')
-  const page = read('src/app/dashboard/city/pos/page.tsx')
+  const page = read('src/app/components/pos/PosCloseShiftModal.tsx')
   assert.match(shifts, /body\.cash_explanation/)
   assert.match(shifts, /body\.inventory_explanation/)
   assert.match(shifts, /missingCashExplanation/)
   assert.match(shifts, /missingInventoryExplanation/)
-  assert.match(shifts, /required_explanations: \{ cash: result\.cash, inventory: result\.inventory \}/)
+  assert.match(shifts, /required_explanations:\s*\{\s*cash: result\.cash,\s*inventory: result\.inventory,?\s*\}/)
   assert.match(page, /Cash recount explanation/)
   assert.match(page, /Inventory recount explanation/)
-  assert.match(page, /cash_explanation: cashRecountExplanation/)
-  assert.match(page, /inventory_explanation: inventoryRecountExplanation/)
-  assert.match(page, /result\.code === "SHIFT_EXPLANATION_REQUIRED"/)
-  assert.match(page, /result\.required_explanations\?\.cash === true/)
-  assert.match(page, /result\.required_explanations\?\.inventory === true/)
+  assert.match(page, /cash_explanation:\s*cn/)
+  assert.match(page, /inventory_explanation:\s*inote/)
+  assert.match(page, /b\.code\s*===\s*["'']SHIFT_EXPLANATION_REQUIRED["'']/)
+  assert.match(page, /b\.required_explanations\?\.cash/)
+  assert.match(page, /b\.required_explanations\?\.inventory/)
+})
+
+
+test('registration payment approvals use the shared Approval Center shell', () => {
+  const page = read('src/app/dashboard/city/pos/registration-approvals/page.tsx')
+  assert.match(page, /Registration payment control/)
+  assert.match(page, /before releasing the registration for encoding/)
+  assert.match(page, /Return to POS/)
+  assert.match(page, /Registration payments awaiting review/)
+  assert.match(page, /min-h-full bg-\[#f4f6fb\]/)
+})
+
+
+test('Approval Center tabs exclude the dedicated Void and Refunds module', () => {
+  const pages = [
+    read('src/app/dashboard/city/pos/approvals/page.tsx'),
+    read('src/app/dashboard/city/pos/registration-approvals/page.tsx'),
+    read('src/app/dashboard/city/pos/shift-approvals/page.tsx'),
+  ]
+  for (const page of pages) {
+    assert.match(page, /sm:grid-cols-3/)
+    assert.doesNotMatch(page, /dashboard\/city\/pos\/adjustments/)
+    assert.doesNotMatch(page, /Void & Refunds/)
+  }
+})
+
+test("shift payment summary separates approved non-cash from pending verification", () => {
+  const transactions = read("src/app/api/city/pos/transactions/route.ts")
+  assert.match(transactions, /pending_count/)
+  assert.match(transactions, /row.status === 'synced_pending_review'/)
+  assert.match(transactions, /\['rejected', 'voided'\]\.includes\(row\.status\)/)
+  assert.match(transactions, /group\.method\.toLowerCase\(\) === 'cash' && !closed/)
 })

@@ -7,6 +7,7 @@ const worker = fs.readFileSync('public/sw-pos.js', 'utf8')
 const config = fs.readFileSync('next.config.ts', 'utf8')
 const offlineQueue = fs.readFileSync('src/app/lib/posOfflineQueue.ts', 'utf8')
 const posPage = fs.readFileSync('src/app/dashboard/city/pos/page.tsx', 'utf8')
+const cityLayout = fs.readFileSync('src/app/dashboard/city/layout.tsx', 'utf8')
 
 test('Hiroma POS manifest keeps authentication inside the standalone application', () => {
   assert.match(manifest, /name: 'Hiroma Point of Sale'/)
@@ -31,6 +32,14 @@ test('service worker is served with safe update and scope headers', () => {
   assert.match(config, /no-cache, no-store, must-revalidate/)
   assert.match(config, /Service-Worker-Allowed/)
   assert.match(config, /Service-Worker-Allowed', value: '\/'/)
+})
+
+
+test('local development removes stale POS service workers and caches', () => {
+  assert.match(cityLayout, /process\.env\.NODE_ENV === ["']production["']/)
+  assert.match(cityLayout, /navigator\.serviceWorker\s*\?\.getRegistrations\(\)/)
+  assert.match(cityLayout, /registration\.unregister\(\)/)
+  assert.match(cityLayout, /key\.startsWith\(["']hiroma-pos-["']\)/)
 })
 
 
