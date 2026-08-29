@@ -259,10 +259,34 @@ export async function PATCH(req: NextRequest, context: AuditRouteContext) {
         if (claimed.count !== 1) throw new InventoryAuditConflictError('This audit was already reviewed. Refresh to see its latest status.')
         await tx.inventoryAuditEvent.create({ data: { owner_id: user.id, actor_id: currentActor.id, actor_name_snapshot: currentActor.name, event_type: 'physical_count_rejected', reference_type: 'inventory_audit', reference_id: id, reason: notes, metadata: { reference_number: session.reference_number } } })
         if (session.pos_shift_id) {
-          await tx.posShift.updateMany({
+          const returnedShift = await tx.posShift.findFirst({
+            where: { id: session.pos_shift_id, owner_id: user.id, status: 'locally_closed' },
+            select: { id: true, opened_by_id: true },
+          })
+          const returned = await tx.posShift.updateMany({
             where: { id: session.pos_shift_id, owner_id: user.id, status: 'locally_closed' },
             data: { status: 'needs_review', closing_explanation: notes },
           })
+          if (returnedShift && returned.count === 1) {
+            await tx.notification.upsert({
+              where: { id: `pos-shift-recount:${returnedShift.id}` },
+              update: {
+                user_id: returnedShift.opened_by_id,
+                message: `Your manager returned this shift for recount. Note: ${notes}`,
+                action_url: '/dashboard/city/pos/history',
+              },
+              create: {
+                id: `pos-shift-recount:${returnedShift.id}`,
+                user_id: returnedShift.opened_by_id,
+                type: 'pos_shift_recount_required',
+                title: 'Shift returned for recount',
+                message: `Your manager returned this shift for recount. Note: ${notes}`,
+                entity_type: 'pos_shift',
+                entity_id: returnedShift.id,
+                action_url: '/dashboard/city/pos/history',
+              },
+            })
+          }
         }
       })
       return NextResponse.json({ success: true, status: 'rejected' })

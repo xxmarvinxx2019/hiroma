@@ -33,9 +33,11 @@ export default function RegistrationApprovalsPage() {
     const timer = window.setTimeout(() => void load().catch((reason) => setError(reason.message)), 0)
     return () => window.clearTimeout(timer)
   }, [])
-  async function decide(id: string, action: 'verify_payment' | 'reject_payment') {
-    const reason = action === 'reject_payment' ? window.prompt('Reason for rejecting this payment:')?.trim() : ''
-    if (action === 'reject_payment' && !reason) return
+  async function decide(id: string, action: 'verify_payment' | 'needs_correction' | 'reject_payment') {
+    const reason = action === 'verify_payment' ? '' : window.prompt(action === 'needs_correction'
+      ? 'Explain exactly what the cashier must correct:'
+      : 'Reason for permanently rejecting this payment:')?.trim()
+    if (action !== 'verify_payment' && !reason) return
     setBusy(id)
     try {
       const response = await fetch('/api/city/pos/registration-approvals', {
@@ -77,6 +79,7 @@ export default function RegistrationApprovalsPage() {
             </div>
             {row.status === 'pending_payment_verification' && <div className="flex items-end gap-2">
               <button disabled={busy === row.id} onClick={() => void decide(row.id, 'reject_payment')} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700">Reject</button>
+              <button disabled={busy === row.id} onClick={() => void decide(row.id, 'needs_correction')} className="rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800">Return for correction</button>
               <button disabled={busy === row.id} onClick={() => void decide(row.id, 'verify_payment')} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Money received · Verify</button>
             </div>}
           </div>

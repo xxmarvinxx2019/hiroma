@@ -5,7 +5,9 @@ import Link from "next/link";
 import {
   deleteQueuedRegistration,
   listQueuedRegistrations,
+  loadPosBootstrap,
   permanentReceiptNumber,
+  savePosBootstrap,
   saveQueuedRegistration,
   type PosQueuedRegistration,
   type PosReceiptRange,
@@ -14,6 +16,7 @@ import {
 type Bootstrap = {
   cashier: { full_name: string; username: string };
   terminal: { id: string; receipt_code: string };
+  location: { id: string } | null;
   receipt_location_code: string;
   receipt_range: PosReceiptRange;
   open_shift: { id: string } | null;
@@ -172,15 +175,13 @@ export default function NewPosRegistrationPage() {
     update();
     window.addEventListener("online", update);
     window.addEventListener("offline", update);
-    let cached: Bootstrap | null = null;
-    try {
-      cached = JSON.parse(
-        localStorage.getItem("hiroma_pos_bootstrap") || "null",
-      );
-    } catch {
-      /* ignore damaged cache */
+    if (!navigator.onLine) {
+      void loadPosBootstrap<Bootstrap>()
+        .then((cached) => {
+          if (cached) setData(cached);
+        })
+        .catch(() => undefined);
     }
-    if (cached) window.setTimeout(() => setData(cached), 0);
     const installationId = localStorage.getItem("hiroma_pos_installation_id");
     const receiptRange = JSON.parse(
       localStorage.getItem("hiroma_pos_receipt_range") || "null",
@@ -201,7 +202,7 @@ export default function NewPosRegistrationPage() {
           if (!response.ok)
             throw new Error(result.error || "Unable to load POS registration.");
           setData(result);
-          localStorage.setItem("hiroma_pos_bootstrap", JSON.stringify(result));
+          await savePosBootstrap(result);
           localStorage.setItem(
             "hiroma_pos_receipt_range",
             JSON.stringify(result.receipt_range),
@@ -601,7 +602,7 @@ export default function NewPosRegistrationPage() {
           }),
         };
         setData(adjusted);
-        localStorage.setItem("hiroma_pos_bootstrap", JSON.stringify(adjusted));
+        await savePosBootstrap(adjusted);
         setSuccess({
           receipt,
           offline: true,

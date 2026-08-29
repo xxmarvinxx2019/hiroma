@@ -1,20 +1,32 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
 }
 
+function subscribeToStandalone(callback: () => void) {
+  const displayMode = window.matchMedia('(display-mode: standalone)')
+  displayMode.addEventListener('change', callback)
+  return () => displayMode.removeEventListener('change', callback)
+}
+
+function getStandaloneSnapshot() {
+  return window.matchMedia('(display-mode: standalone)').matches
+}
+
+function subscribeToHydration() {
+  return () => undefined
+}
+
 export default function PosInstallControl() {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null)
-  const [standalone, setStandalone] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches,
-  )
-  const [ios] = useState(() =>
-    typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent),
-  )
+  const standalone = useSyncExternalStore(subscribeToStandalone, getStandaloneSnapshot, () => false)
+  const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false)
+  const ios = hydrated && /iPad|iPhone|iPod/.test(navigator.userAgent)
+  const [installed, setInstalled] = useState(false)
   const [message, setMessage] = useState('')
 
   useEffect(() => {
@@ -23,7 +35,7 @@ export default function PosInstallControl() {
       setPrompt(event as InstallPromptEvent)
     }
     const onInstalled = () => {
-      setStandalone(true)
+      setInstalled(true)
       setPrompt(null)
       setMessage('Hiroma POS is installed on this device.')
     }
@@ -43,7 +55,9 @@ export default function PosInstallControl() {
     setPrompt(null)
   }
 
-  if (standalone) return <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-100">✓ Installed app</span>
+  if (!hydrated) return <span className="h-8 w-28" aria-hidden="true" />
+
+  if (standalone || installed) return <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-100">✓ Installed app</span>
 
   return <div className="flex flex-col items-start gap-1 sm:items-end">
     {prompt && <button type="button" onClick={install} className="rounded-xl bg-[#d4af45] px-4 py-2.5 text-sm font-bold text-[#071638] shadow-sm hover:bg-[#e4c461]">Install Hiroma POS</button>}

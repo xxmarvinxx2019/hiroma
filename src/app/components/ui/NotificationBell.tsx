@@ -106,22 +106,22 @@ export default function NotificationBell({ userId, role }: { userId?: string; ro
                   const unread = !notification.read_at
                   return (
                     <button key={notification.id} onClick={() => openNotification(notification)}
-                      className={`flex w-full items-start gap-3 border-b border-[#0D1B3E]/5 px-4 py-3 text-left transition-colors ${
+                      className={`pos-notification-item flex w-full items-start gap-3 border-b border-[#0D1B3E]/5 px-4 py-3 text-left transition-colors ${
                         unread
-                          ? 'border-l-2 border-l-[#C9A84C] bg-[#fffbeb] hover:bg-[#fef3c7]'
-                          : 'bg-white hover:bg-[#f8f9fc]'
+                          ? 'pos-notification-unread border-l-2 border-l-[#C9A84C] bg-[#fffbeb] hover:bg-[#fef3c7]'
+                          : 'pos-notification-read bg-white hover:bg-[#f8f9fc]'
                       }`}>
                       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg ${
                         unread ? 'bg-[#C9A84C]/15' : 'bg-[#f1f5f9]'
                       }`}>{notificationIcon(notification.type)}</span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
-                          <span className={`truncate text-xs ${unread ? 'font-bold text-[#0D1B3E]' : 'font-medium text-gray-500'}`}>
+                          <span className={`pos-notification-title truncate text-xs ${unread ? 'font-bold text-[#0D1B3E]' : 'font-medium text-gray-500'}`}>
                             {notification.title}
                           </span>
-                          <span className="shrink-0 text-[9px] text-gray-400">{timeAgo(notification.created_at)}</span>
+                          <span className="pos-notification-time shrink-0 text-[9px] text-gray-400">{timeAgo(notification.created_at)}</span>
                         </span>
-                        <span className="mt-0.5 line-clamp-2 block text-[11px] text-gray-500">
+                        <span className="pos-notification-message mt-0.5 line-clamp-2 block text-[11px] text-gray-500">
                           {notification.message}
                         </span>
                       </span>

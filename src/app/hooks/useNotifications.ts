@@ -52,10 +52,12 @@ export function useNotifications(userId?: string, previewLimit = 5) {
     const timer = window.setInterval(loadNotifications, 15_000)
     const refreshOnFocus = () => loadNotifications()
     window.addEventListener('focus', refreshOnFocus)
+    window.addEventListener('hiroma:notifications-refresh', refreshOnFocus)
     return () => {
       window.clearTimeout(initialLoad)
       window.clearInterval(timer)
       window.removeEventListener('focus', refreshOnFocus)
+      window.removeEventListener('hiroma:notifications-refresh', refreshOnFocus)
     }
   }, [loadNotifications])
 

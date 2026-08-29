@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { sealPosOfflineScope } from '@/app/lib/posOfflineQueue'
 
 const INACTIVITY_TIMEOUT = 20 * 60 * 1000 // 20 minutes
 const WARNING_BEFORE     = 30 * 1000       // warn 30s before logout
@@ -26,6 +27,7 @@ export function useAutoLogout(options: UseAutoLogoutOptions = {}) {
     if (isLoggedOutRef.current) return
     isLoggedOutRef.current = true
     if (intervalRef.current) clearInterval(intervalRef.current)
+    sealPosOfflineScope()
     try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
     if (onLogout) onLogout()
     router.push('/login')

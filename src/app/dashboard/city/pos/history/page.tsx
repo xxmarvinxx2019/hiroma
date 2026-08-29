@@ -31,6 +31,7 @@ type History = {
     variance: number | null;
     opened_at: string;
     local_closed_at: string | null;
+    closing_explanation: string | null;
   };
   totals_hidden_until_close: boolean;
   pending_sync_count: number;
@@ -192,6 +193,7 @@ export default function PosShiftHistoryPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {view === "mine" && data?.shift?.status === "open" ? <><button onClick={() => setCashModal(true)} className="rounded-xl border border-white/30 px-4 py-3 text-sm font-bold text-white">Cash Management</button><button onClick={() => setCloseShiftModal(true)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">Close Shift</button></> : null}
+            {view === "mine" && data?.shift?.status === "needs_review" ? <button onClick={() => setCloseShiftModal(true)} className="rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638]">Recount Shift</button> : null}
           </div>
         </header>
         {view === "audit" && data?.access.can_audit ? (
@@ -264,7 +266,14 @@ export default function PosShiftHistoryPage() {
                 </div>
               ) : <p className="mt-4 rounded-xl border border-dashed p-6 text-center text-sm text-gray-400">No non-cash payment was recorded in this shift.</p>}
               {pendingNonCashCount > 0 ? <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">Pending payments are not included in the approved total and do not affect expected drawer cash.</p> : null}
-            </section>            {view === "mine" && data.shift.status === "locally_closed" ? (
+            </section>            {view === "mine" && data.shift.status === "needs_review" ? (
+              <section className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5">
+                <h2 className="font-bold text-amber-950">Shift returned for recount</h2>
+                <p className="mt-2 text-sm font-semibold leading-6 text-amber-950">Manager note: {data.shift.closing_explanation || "Please recount the drawer and every physical product."}</p>
+                <p className="mt-1 text-sm leading-6 text-amber-900">Update the cash and inventory counts, then resubmit this same shift for independent review.</p>
+                <button onClick={() => setCloseShiftModal(true)} className="mt-4 rounded-xl bg-[#071638] px-4 py-3 text-sm font-bold text-white">Recount & Resubmit</button>
+              </section>
+            ) : view === "mine" && data.shift.status === "locally_closed" ? (
               <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5">
                 <h2 className="font-bold text-amber-950">Pending independent manager review</h2>
                 <p className="mt-2 text-sm leading-6 text-amber-900">Your cash and inventory counts are locked. This terminal cannot open another shift until an authorized manager reviews and finalizes this submission.</p>

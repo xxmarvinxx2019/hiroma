@@ -14,6 +14,7 @@ import {
   PosAppearanceSettings,
   resolvePosTheme,
 } from "@/app/lib/posAppearance";
+import { sealPosOfflineScope } from "@/app/lib/posOfflineQueue";
 
 // ============================================================
 // NAV ITEMS
@@ -520,6 +521,7 @@ export default function CityLayout({
   }, [user?.id]);
 
   const handleLogout = async () => {
+    sealPosOfflineScope();
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   };

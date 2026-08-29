@@ -439,6 +439,38 @@
   color: #fca5a5 !important;
 }
 
+/* Notifications keep an obvious unread state without placing light text on a light card. */
+[data-pos-theme="dark"] .pos-notification-unread {
+  border-bottom-color: #4b3d22 !important;
+  border-left-color: #e8c657 !important;
+  background-color: #352b18 !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-unread:hover {
+  background-color: #40331b !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-unread .pos-notification-title {
+  color: #fff7d6 !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-unread .pos-notification-message {
+  color: #e8dcc1 !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-unread .pos-notification-time {
+  color: #d8bd72 !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-read .pos-notification-title {
+  color: #f8fafc !important;
+}
+
+[data-pos-theme="dark"] .pos-notification-read .pos-notification-message,
+[data-pos-theme="dark"] .pos-notification-read .pos-notification-time {
+  color: var(--pos-muted) !important;
+}
+
 /* Gold is an action color; navy text stays readable in both themes. */
 [data-pos-theme="dark"] [class~="bg-[#C9A84C]"],
 [data-pos-theme="dark"] [class~="bg-[#d4af45]"],

@@ -31,7 +31,18 @@ test('POS service worker does not cache login redirects as the cashier shell', (
 test('service worker is served with safe update and scope headers', () => {
   assert.match(config, /no-cache, no-store, must-revalidate/)
   assert.match(config, /Service-Worker-Allowed/)
-  assert.match(config, /Service-Worker-Allowed', value: '\/'/)
+  assert.match(config, /Service-Worker-Allowed["'], value: ["']\/["']/)
+})
+
+test('all application responses receive baseline browser security headers', () => {
+  assert.match(config, /source: "\/:path\*"/)
+  assert.match(config, /poweredByHeader: false/)
+  assert.match(config, /Content-Security-Policy/)
+  assert.match(config, /frame-ancestors 'none'/)
+  assert.match(config, /object-src 'none'/)
+  assert.match(config, /Referrer-Policy[^\n]+strict-origin-when-cross-origin/)
+  assert.match(config, /X-Content-Type-Options[^\n]+nosniff/)
+  assert.match(config, /X-Frame-Options[^\n]+DENY/)
 })
 
 
@@ -48,5 +59,5 @@ test('a blocked IndexedDB upgrade cannot leave the POS bootstrap loading forever
   assert.match(offlineQueue, /setTimeout\([\s\S]*3000\)/)
   assert.match(offlineQueue, /db\.onversionchange = \(\) => db\.close\(\)/)
   assert.match(posPage, /if \(!navigator\.onLine\) \{[\s\S]*await loadPosBootstrap/)
-  assert.match(posPage, /void loadPosBootstrap<Bootstrap>\(\)/)
+  assert.doesNotMatch(posPage, /void loadPosBootstrap<Bootstrap>\(\)/)
 })

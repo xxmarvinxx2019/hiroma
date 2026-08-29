@@ -20,6 +20,7 @@ type Receipt = {
   customer_name_snapshot: string | null
   payment_method_snapshot: string
   payment_reference?: string | null
+  review_notes?: string | null
   total: number
   finalized_at: string | null
   server_received_at?: string | null
@@ -223,6 +224,8 @@ export default function PosAdjustmentsPage() {
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [correctionReference, setCorrectionReference] = useState('')
+  const [correctionSaving, setCorrectionSaving] = useState(false)
   const [printIdentity, setPrintIdentity] = useState<ReceiptPrintIdentity>({ name: 'Hiroma Point of Sale', address: '', cashierName: 'POS Cashier' })
 
   useEffect(() => {
@@ -309,7 +312,30 @@ export default function PosAdjustmentsPage() {
     setShowCorrectionForm(false)
     setReason('')
     setRequestType('void')
+    setCorrectionReference(receipt.payment_reference || '')
     setRefundLines(Object.fromEntries(receipt.items.map((item) => [item.id, { quantity: '', disposition: 'resellable' as const }])))
+  }
+
+  async function resubmitPaymentCorrection() {
+    if (!selectedReceipt || correctionReference.trim().length < 3) return
+    setCorrectionSaving(true)
+    setError('')
+    try {
+      const response = await fetch('/api/city/pos/approvals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_id: selectedReceipt.id, payment_reference: correctionReference }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Unable to resubmit the corrected payment.')
+      setNotice(`${selectedReceipt.receipt_number} was corrected and resubmitted for independent review.`)
+      setSelectedReceipt(null)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to resubmit the corrected payment.')
+    } finally {
+      setCorrectionSaving(false)
+    }
   }
 
   async function submitRequest() {
@@ -482,6 +508,19 @@ export default function PosAdjustmentsPage() {
                 {selectedReceipt.sync_error && <p className="mt-2 font-semibold text-red-700">{selectedReceipt.sync_error}</p>}
                 {selectedReceipt.adjustment_requests?.[0] && <p className="mt-2 text-amber-800">{selectedReceipt.adjustment_requests[0].request_type.toUpperCase()} request is {selectedReceipt.adjustment_requests[0].status}. Reason: {selectedReceipt.adjustment_requests[0].reason}</p>}
               </div>
+
+              {selectedReceipt.status === 'needs_correction' && (
+                <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                  <h3 className="font-bold">Payment returned for correction</h3>
+                  <p className="mt-1 text-xs leading-5"><b>Manager note:</b> {selectedReceipt.review_notes || 'Review the official payment record and correct the reference.'}</p>
+                  <label className="mt-3 block text-xs font-bold">
+                    Correct payment reference
+                    <input value={correctionReference} onChange={(event) => setCorrectionReference(event.target.value)} maxLength={160} className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-sm text-[#071638] outline-none focus:border-[#d4af45]" placeholder="Enter the verified GCash, e-wallet, or bank reference" />
+                  </label>
+                  <p className="mt-2 text-[11px] leading-4">Confirm this against the official receiving account. Resubmitting sends it back to an independent manager; it does not create a second sale.</p>
+                  <button type="button" disabled={correctionSaving || correctionReference.trim().length < 3} onClick={resubmitPaymentCorrection} className="mt-3 w-full rounded-xl bg-[#d4af45] px-4 py-3 text-sm font-bold text-[#071638] disabled:opacity-40">{correctionSaving ? 'Resubmitting...' : 'Resubmit for manager review'}</button>
+                </div>
+              )}
 
               {selectedReceipt.local_only ? (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-900"><b>Correction requests become available after synchronization.</b> The manager cannot review this receipt yet. <Link href="/dashboard/city/pos/sync" className="font-bold underline">Open Sync Center</Link>.</div>

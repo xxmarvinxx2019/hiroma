@@ -64,6 +64,26 @@ test('cashier bootstrap does not expose confidential acquisition costs', () => {
   assert.doesNotMatch(bootstrap, /cost_price:\s*true/)
 })
 
+test('disabled POS terminals cannot silently reactivate during bootstrap', () => {
+  const bootstrap = fs.readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
+  const inactiveGuard = bootstrap.indexOf('existing && !existing.is_active')
+  const existingUpdate = bootstrap.indexOf('prisma.posTerminal.update')
+
+  assert.match(bootstrap, /existing && !existing\.is_active/)
+  assert.match(bootstrap, /POS terminal has been disabled/)
+  assert.match(bootstrap, /status: 403/)
+  assert.ok(inactiveGuard >= 0 && inactiveGuard < existingUpdate)
+  assert.doesNotMatch(bootstrap, /data:\s*\{\s*platform,\s*is_active:\s*true\s*\}/)
+})
+
+test('active and new POS terminals retain their bootstrap lifecycle', () => {
+  const bootstrap = fs.readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
+
+  assert.match(bootstrap, /prisma\.posTerminal\.update/)
+  assert.match(bootstrap, /data:\s*\{\s*platform\s*\}/)
+  assert.match(bootstrap, /prisma\.posTerminal\.create/)
+})
+
 
 test('cashier inventory response excludes management financials and uses current shift totals', () => {
   const inventoryApi = fs.readFileSync('src/app/api/city/inventory/route.ts', 'utf8')
