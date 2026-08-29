@@ -7,6 +7,7 @@ import Link from 'next/link'
 import styles from './login.module.css'
 import { startAuthentication } from '@simplewebauthn/browser'
 import { getPasskeySignInError } from '@/app/lib/passkeyError'
+import { sealPosOfflineScope } from '@/app/lib/posOfflineQueue'
 
 type LoginPageProps = { portal?: 'member' | 'distributor' | 'admin' | 'legacy' }
 const portalCopy = {
@@ -94,6 +95,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
       }
 
       // Redirect to the correct dashboard based on role
+      sealPosOfflineScope()
       router.push(data.redirect)
     } catch {
       setError('Something went wrong. Please try again.')
@@ -124,6 +126,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
       })
       const result = await finish.json()
       if (!finish.ok) throw new Error(result.error || 'Passkey sign-in failed.')
+      sealPosOfflineScope()
       router.push(result.redirect)
     } catch (error) {
       setError(getPasskeySignInError(error))
@@ -150,6 +153,7 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
         setLoading(false)
         return
       }
+      sealPosOfflineScope()
       router.push(data.redirect)
     } catch {
       setError('Something went wrong. Please try again.')

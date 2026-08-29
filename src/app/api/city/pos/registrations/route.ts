@@ -6,6 +6,11 @@ import { releasePosRegistrationPackage } from "@/app/lib/posRegistration";
 import { InsufficientStockError } from "@/app/lib/inventoryReservation";
 import { validateIdentityDocument } from "@/app/lib/identityDocument";
 import { notifyPosReviewers } from "@/app/lib/posNotifications";
+import {
+  createRequiredAuditLog,
+  formatMemberId,
+  getClientInfo,
+} from "@/app/lib/auditLog";
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -96,6 +101,140 @@ export async function GET() {
     select: selection,
   });
   return NextResponse.json({ registrations: rows.map(responseRow) });
+}
+
+export async function PATCH(req: NextRequest) {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "city")
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+  const actorId = user.actor_id || user.id;
+  try {
+    const body = await req.json();
+    const intakeId = clean(body.id, 36);
+    const paymentReference = clean(body.payment_reference, 160);
+    if (!UUID.test(intakeId) || paymentReference.length < 3) {
+      return NextResponse.json(
+        { error: "Enter the corrected official payment reference." },
+        { status: 400 },
+      );
+    }
+
+    const registration = await prisma.$transaction(
+      async (tx) => {
+        const intake = await tx.posRegistrationIntake.findFirst({
+          where: {
+            id: intakeId,
+            owner_id: user.id,
+            cashier_id: actorId,
+            status: "needs_correction",
+          },
+          select: {
+            id: true,
+            receipt_number: true,
+            applicant_full_name: true,
+          },
+        });
+        if (!intake) throw new Error("POS_REGISTRATION_CORRECTION_STALE");
+
+        const claimed = await tx.posRegistrationIntake.updateMany({
+          where: { id: intake.id, status: "needs_correction" },
+          data: {
+            status: "pending_payment_verification",
+            payment_reference: paymentReference,
+            payment_verified_at: null,
+            approver_id: null,
+            exception_reason: null,
+          },
+        });
+        if (claimed.count !== 1)
+          throw new Error("POS_REGISTRATION_CORRECTION_STALE");
+
+        await tx.posRegistrationEvent.create({
+          data: {
+            intake_id: intake.id,
+            actor_id: actorId,
+            from_status: "needs_correction",
+            to_status: "pending_payment_verification",
+            action: "payment_correction_resubmitted",
+            metadata: { cashier_id: actorId },
+          },
+        });
+
+        const client = getClientInfo(req);
+        await createRequiredAuditLog(tx, {
+          user_id: actorId,
+          user_name: user.actor_name || user.full_name || user.username,
+          user_role: user.is_staff ? "staff" : user.role,
+          member_id: formatMemberId(
+            actorId,
+            user.is_staff ? "staff" : user.role,
+          ),
+          activity_type: "pos_registration_payment_correction_resubmitted",
+          category: "order",
+          description: `${intake.receipt_number} payment reference was corrected and resubmitted for independent review.`,
+          metadata: {
+            pos_registration_id: intake.id,
+            cashier_id: actorId,
+          },
+          ...client,
+          status: "completed",
+        });
+        return intake;
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 20_000,
+      },
+    );
+
+    await notifyPosReviewers({
+      ownerId: user.id,
+      actorId,
+      permission: "pos_approve",
+      type: "pos_registration_correction_resubmitted",
+      title: "Corrected registration payment needs review",
+      message: `${registration.applicant_full_name}'s corrected payment is ready for another review. Receipt ${registration.receipt_number}.`,
+      entityType: "pos_registration",
+      entityId: registration.id,
+      actionUrl: "/dashboard/city/pos/approvals",
+    });
+
+    return NextResponse.json({
+      success: true,
+      status: "pending_payment_verification",
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "That payment reference is already used. Check the official receipt and enter the correct unique reference.",
+        },
+        { status: 409 },
+      );
+    }
+    if (
+      error instanceof Error &&
+      error.message === "POS_REGISTRATION_CORRECTION_STALE"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "This registration is no longer waiting for your correction. Refresh the registration list.",
+        },
+        { status: 409 },
+      );
+    }
+    console.error("[POS REGISTRATION CORRECTION]", error);
+    return NextResponse.json(
+      { error: "The corrected registration could not be resubmitted safely." },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {

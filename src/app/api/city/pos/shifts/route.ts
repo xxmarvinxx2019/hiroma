@@ -46,6 +46,28 @@ export async function POST(req: Request) {
         { error: "This POS terminal is not assigned to your location." },
         { status: 403 },
       );
+    const blockingShift = await prisma.posShift.findFirst({
+      where: {
+        owner_id: user.id,
+        terminal_id: terminal.id,
+        opened_by_id: actorId,
+        status: { in: ["locally_closed", "needs_review"] },
+      },
+      orderBy: { opened_at: "desc" },
+      select: { id: true, status: true, opened_at: true, closing_explanation: true },
+    });
+    if (blockingShift) {
+      return NextResponse.json(
+        {
+          error: blockingShift.status === "needs_review"
+            ? "Your previous shift was returned for recount. Review the manager note and resubmit that shift before opening another one."
+            : "Your previous shift is still awaiting independent manager review. You cannot open another shift yet.",
+          code: "SHIFT_REVIEW_PENDING",
+          blocking_shift: blockingShift,
+        },
+        { status: 409 },
+      );
+    }
     try {
       const shift = await prisma.posShift.create({
         data: {

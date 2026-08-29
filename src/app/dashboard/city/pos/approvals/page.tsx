@@ -25,7 +25,7 @@ export default function PosPaymentApprovalsPage() {
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Approval | null>(null)
-  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null)
+  const [decision, setDecision] = useState<'approve' | 'needs_correction' | 'reject' | null>(null)
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -50,7 +50,7 @@ export default function PosPaymentApprovalsPage() {
   }, [load])
 
   async function submitDecision() {
-    if (!selected || !decision || (decision === 'reject' && notes.trim().length < 5)) return
+    if (!selected || !decision || (decision !== 'approve' && notes.trim().length < 5)) return
     setSaving(true)
     setError('')
     try {
@@ -61,7 +61,11 @@ export default function PosPaymentApprovalsPage() {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Unable to save the payment decision.')
-      setNotice(decision === 'approve' ? `${selected.receipt_number} is verified and finalized.` : `${selected.receipt_number} was rejected and its reserved stock was restored.`)
+      setNotice(decision === 'approve'
+        ? `${selected.receipt_number} is verified and finalized.`
+        : decision === 'needs_correction'
+          ? `${selected.receipt_number} was returned to the cashier for correction.`
+          : `${selected.receipt_number} was rejected and its reserved stock was restored.`)
       setSelected(null)
       setDecision(null)
       setNotes('')
@@ -95,12 +99,12 @@ export default function PosPaymentApprovalsPage() {
                 <div><b className="text-[#071638]">{row.receipt_number}</b><p className="mt-1 text-xs text-gray-500">Cashier: {row.cashier.full_name || row.cashier.username} · {new Date(row.server_received_at).toLocaleString('en-PH')}</p><p className="mt-2 text-sm">{row.customer_name_snapshot} · {row.items.map((item) => `${item.quantity}× ${item.product_name_snapshot}`).join(' · ')}</p></div>
                 <div className="lg:text-right"><b className="text-xl text-[#071638]">{peso(row.total)}</b><p className="mt-1 text-xs font-semibold text-amber-700">{row.payment_method_snapshot}</p><p className="mt-1 text-xs text-gray-600">Reference: <b>{row.payment_reference}</b></p></div>
               </div>
-              <div className="mt-4 flex flex-wrap justify-end gap-2">{row.can_review ? <><button onClick={() => { setSelected(row); setDecision('reject'); setNotes('') }} className="rounded-xl border border-red-200 px-4 py-2 text-xs font-bold text-red-700">Reject</button><button onClick={() => { setSelected(row); setDecision('approve'); setNotes('') }} className="rounded-xl bg-[#187443] px-4 py-2 text-xs font-bold text-white">Verify & Approve</button></> : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">You recorded this payment. A different authorized approver must review it.</p>}</div>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">{row.can_review ? <><button onClick={() => { setSelected(row); setDecision('reject'); setNotes('') }} className="rounded-xl border border-red-200 px-4 py-2 text-xs font-bold text-red-700">Reject permanently</button><button onClick={() => { setSelected(row); setDecision('needs_correction'); setNotes('') }} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">Return for correction</button><button onClick={() => { setSelected(row); setDecision('approve'); setNotes('') }} className="rounded-xl bg-[#187443] px-4 py-2 text-xs font-bold text-white">Verify & Approve</button></> : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">You recorded this payment. A different authorized approver must review it.</p>}</div>
             </article>
           ))}</div>}
         </section>
       </div>
-      {selected && decision && <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/70 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 className="text-xl font-bold text-[#071638]">{decision === 'approve' ? 'Verify this payment?' : 'Reject this payment?'}</h2><p className="mt-2 text-sm leading-6 text-gray-600">{decision === 'approve' ? 'Confirm only after seeing the exact amount in the official receiving account. Approval finalizes the sale and eligible rewards.' : 'Rejection cancels the pending sale and restores its reserved seller stock.'}</p><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder={decision === 'reject' ? 'Rejection reason (required)' : 'Approval note (optional)'} className="mt-4 w-full rounded-xl border p-3 text-sm outline-none focus:border-[#d4af45]" />{decision === 'reject' && notes.trim().length > 0 && notes.trim().length < 5 && <p className="mt-1 text-xs text-red-600">Enter at least 5 characters.</p>}<div className="mt-5 flex justify-end gap-2"><button disabled={saving} onClick={() => setSelected(null)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">Go Back</button><button disabled={saving || (decision === 'reject' && notes.trim().length < 5)} onClick={submitDecision} className={`rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40 ${decision === 'approve' ? 'bg-[#187443]' : 'bg-red-600'}`}>{saving ? 'Saving…' : decision === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}</button></div></div></div>}
+      {selected && decision && <div className="fixed inset-0 z-50 grid place-items-center bg-[#071638]/70 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 className="text-xl font-bold text-[#071638]">{decision === 'approve' ? 'Verify this payment?' : decision === 'needs_correction' ? 'Return this payment for correction?' : 'Reject this payment permanently?'}</h2><p className="mt-2 text-sm leading-6 text-gray-600">{decision === 'approve' ? 'Confirm only after seeing the exact amount in the official receiving account. Approval finalizes the sale and eligible rewards.' : decision === 'needs_correction' ? 'The sale stays on hold. The cashier receives your note and can correct the payment information before resubmitting it.' : 'Permanent rejection cancels the pending sale and restores its reserved seller stock.'}</p><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder={decision === 'approve' ? 'Approval note (optional)' : decision === 'needs_correction' ? 'Exact correction needed (required)' : 'Permanent rejection reason (required)'} className="mt-4 w-full rounded-xl border p-3 text-sm outline-none focus:border-[#d4af45]" />{decision !== 'approve' && notes.trim().length > 0 && notes.trim().length < 5 && <p className="mt-1 text-xs text-red-600">Enter at least 5 characters.</p>}<div className="mt-5 flex justify-end gap-2"><button disabled={saving} onClick={() => setSelected(null)} className="rounded-xl border px-4 py-2.5 text-sm font-bold">Go Back</button><button disabled={saving || (decision !== 'approve' && notes.trim().length < 5)} onClick={submitDecision} className={`rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40 ${decision === 'approve' ? 'bg-[#187443]' : decision === 'needs_correction' ? 'bg-amber-600' : 'bg-red-600'}`}>{saving ? 'Saving…' : decision === 'approve' ? 'Confirm Approval' : decision === 'needs_correction' ? 'Return to Cashier' : 'Confirm Permanent Rejection'}</button></div></div></div>}
     </main>
   )
 }

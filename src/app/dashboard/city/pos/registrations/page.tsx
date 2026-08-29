@@ -20,6 +20,7 @@ type Intake = {
   preferred_position: string | null;
   payment_method_snapshot: string;
   payment_reference: string | null;
+  exception_reason: string | null;
   amount: number;
   released_at: string | null;
   package: { name: string };
@@ -52,6 +53,9 @@ export default function PosRegistrationsPage() {
   const [busy, setBusy] = useState("");
   const [canEncode, setCanEncode] = useState(false);
   const [reviewing, setReviewing] = useState<Intake | null>(null);
+  const [correctionReferences, setCorrectionReferences] = useState<
+    Record<string, string>
+  >({});
 
   function field(value: unknown) {
     return typeof value === "string" && value.trim() ? value : "Not provided";
@@ -85,6 +89,42 @@ export default function PosRegistrationsPage() {
     if (!response.ok)
       throw new Error(result.error || "Unable to load POS registrations.");
     setRows(result.registrations || []);
+  }
+
+  async function resubmitCorrection(row: Intake) {
+    const paymentReference = (
+      correctionReferences[row.id] ??
+      row.payment_reference ??
+      ""
+    ).trim();
+    if (paymentReference.length < 3) {
+      setError("Enter the corrected official payment reference.");
+      return;
+    }
+    setBusy(row.id);
+    setError("");
+    try {
+      const response = await fetch("/api/city/pos/registrations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: row.id,
+          payment_reference: paymentReference,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to resubmit correction.");
+      await load();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to resubmit correction.",
+      );
+    } finally {
+      setBusy("");
+    }
   }
   useEffect(() => {
     const refresh = () =>
@@ -264,10 +304,41 @@ export default function PosRegistrationsPage() {
                       </p>
                     )}
                     {row.status === "needs_correction" && (
-                      <p className="mt-1 text-sm leading-6 text-amber-800">
-                        <strong>Review the registration details.</strong>{" "}
-                        Correct the reported issue before continuing.
-                      </p>
+                      <div className="mt-2 space-y-3">
+                        <p className="text-sm leading-6 text-amber-800">
+                          <strong>Returned by the manager.</strong>{" "}
+                          {row.exception_reason ||
+                            "Correct the reported payment issue before continuing."}
+                        </p>
+                        <label className="block text-sm font-semibold text-slate-700">
+                          Correct official payment reference
+                          <input
+                            value={
+                              correctionReferences[row.id] ??
+                              row.payment_reference ??
+                              ""
+                            }
+                            onChange={(event) =>
+                              setCorrectionReferences((current) => ({
+                                ...current,
+                                [row.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="Enter the corrected reference"
+                            className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-[#C9A84C]"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={busy === row.id}
+                          onClick={() => void resubmitCorrection(row)}
+                          className="rounded-xl bg-[#C9A84C] px-5 py-3 text-sm font-bold text-[#071638] disabled:opacity-50"
+                        >
+                          {busy === row.id
+                            ? "Resubmitting..."
+                            : "Resubmit for payment review"}
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="flex shrink-0 flex-col gap-2 sm:flex-row">

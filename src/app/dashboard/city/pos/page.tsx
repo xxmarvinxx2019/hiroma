@@ -29,6 +29,7 @@ type Bootstrap = {
   receipt_address?: string;
   receipt_address_source?: "physical_outlet" | "registered_address";
   location: {
+    id: string;
     full_name: string;
     distributor_profile?: {
       dist_level: string;
@@ -53,6 +54,13 @@ type Bootstrap = {
     bank_name?: string | null;
   }>;
   open_shift: { id: string; opened_at: string; opening_cash?: number } | null;
+  blocking_shift: {
+    id: string;
+    status: "locally_closed" | "needs_review";
+    opened_at: string;
+    closing_submitted_at: string | null;
+    closing_explanation: string | null;
+  } | null;
 };
 
 type Member = {
@@ -544,14 +552,6 @@ export default function PointOfSalePage() {
         return;
       }
 
-      // A stale installed POS window can temporarily block an IndexedDB
-      // upgrade. Cached data is useful, but it must not delay online startup.
-      void loadPosBootstrap<Bootstrap>()
-        .then((cached) => {
-          if (cached) setData((current) => current || cached);
-        })
-        .catch(() => undefined);
-
       try {
         const response = await fetch("/api/city/pos/bootstrap", {
           method: "POST",
@@ -569,6 +569,7 @@ export default function PointOfSalePage() {
         setError("");
         setData(result);
         await savePosBootstrap(result);
+        window.dispatchEvent(new Event("hiroma:notifications-refresh"));
         localStorage.setItem(
           "hiroma_pos_receipt_range",
           JSON.stringify(result.receipt_range),
@@ -589,7 +590,7 @@ export default function PointOfSalePage() {
   }, []);
 
   useEffect(() => {
-    if (!data || data.open_shift) return;
+    if (!data || data.open_shift || data.blocking_shift) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("openShift") !== "1") return;
     const timer = window.setTimeout(() => setShowOpenShift(true), 0);
@@ -1097,7 +1098,13 @@ export default function PointOfSalePage() {
           <article className="rounded-2xl border bg-white p-5">
             <p className="text-xs font-bold uppercase text-gray-500">Shift</p>
             <p className="mt-2 text-lg font-bold text-[#071638]">
-              {data?.open_shift ? "Open" : "Not opened"}
+              {data?.open_shift
+                ? "Open"
+                : data?.blocking_shift?.status === "needs_review"
+                  ? "Recount required"
+                  : data?.blocking_shift
+                    ? "Pending review"
+                    : "Not opened"}
             </p>
             <p className="mt-1 text-sm text-gray-500">
               {data?.cashier
@@ -1115,19 +1122,34 @@ export default function PointOfSalePage() {
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <h2 className="text-lg font-bold text-[#071638]">
-                  Start cashier operations
+                  {data?.blocking_shift?.status === "needs_review"
+                    ? "Shift returned for recount"
+                    : data?.blocking_shift
+                      ? "Waiting for manager review"
+                      : "Start cashier operations"}
                 </h2>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-                  Enter the physical cash currently inside the drawer before
-                  accepting the first transaction.
+                  {data?.blocking_shift?.status === "needs_review"
+                    ? `Manager note: ${data.blocking_shift.closing_explanation || "Please recount the drawer and inventory, then resubmit this same shift."}`
+                    : data?.blocking_shift
+                      ? "Your submitted count is locked while an authorized manager reviews it. A new shift cannot be opened yet."
+                      : "Enter the physical cash currently inside the drawer before accepting the first transaction."}
                 </p>
               </div>
               <button
                 disabled={!data}
-                onClick={() => setShowOpenShift(true)}
+                onClick={() =>
+                  data?.blocking_shift
+                    ? window.location.assign("/dashboard/city/pos/history")
+                    : setShowOpenShift(true)
+                }
                 className="rounded-xl bg-[#d4af45] px-5 py-3 text-sm font-bold text-[#071638] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Open Shift
+                {data?.blocking_shift?.status === "needs_review"
+                  ? "Review & Recount"
+                  : data?.blocking_shift
+                    ? "View Shift"
+                    : "Open Shift"}
               </button>
             </div>
           </section>

@@ -132,6 +132,7 @@ export async function GET(req: NextRequest) {
       variance_snapshot: true,
       opened_at: true,
       local_closed_at: true,
+      closing_explanation: true,
       opened_by: { select: { id: true, full_name: true, username: true } },
       terminal: { select: { id: true, name: true, receipt_code: true } },
     } as const

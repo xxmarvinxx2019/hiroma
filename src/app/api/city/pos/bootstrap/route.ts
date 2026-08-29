@@ -39,13 +39,21 @@ export async function POST(req: Request) {
         { status: 409 },
       )
     }
+    if (existing && !existing.is_active) {
+      return NextResponse.json(
+        {
+          error: 'This POS terminal has been disabled. Ask the branch owner to reactivate it before continuing.',
+        },
+        { status: 403 },
+      )
+    }
 
     const actorId = user.actor_id || user.id
     const terminalId = existing?.id || randomUUID()
     const terminal = existing
       ? await prisma.posTerminal.update({
           where: { id: existing.id },
-          data: { platform, is_active: true },
+          data: { platform },
         })
       : await prisma.posTerminal.create({
           data: {
@@ -58,7 +66,7 @@ export async function POST(req: Request) {
           },
         })
 
-    const [owner, inventory, paymentMethods, openShift, registrationPackages] = await Promise.all([
+    const [owner, inventory, paymentMethods, openShift, blockingShift, registrationPackages] = await Promise.all([
       prisma.user.findUnique({
         where: { id: user.id },
         select: {
@@ -124,6 +132,21 @@ export async function POST(req: Request) {
         },
         select: { id: true, opened_at: true, opening_cash: true },
       }),
+      prisma.posShift.findFirst({
+        where: {
+          terminal_id: terminal.id,
+          opened_by_id: actorId,
+          status: { in: ['locally_closed', 'needs_review'] },
+        },
+        orderBy: { opened_at: 'desc' },
+        select: {
+          id: true,
+          status: true,
+          opened_at: true,
+          closing_submitted_at: true,
+          closing_explanation: true,
+        },
+      }),
       prisma.package.findMany({
         where: { is_active: true },
         orderBy: { name: 'asc' },
@@ -140,6 +163,34 @@ export async function POST(req: Request) {
         },
       }),
     ])
+
+    if (blockingShift?.status === 'needs_review') {
+      const existingRecountNotification = await prisma.notification.findFirst({
+        where: {
+          user_id: actorId,
+          type: 'pos_shift_recount_required',
+          entity_type: 'pos_shift',
+          entity_id: blockingShift.id,
+        },
+        select: { id: true },
+      })
+      if (!existingRecountNotification) {
+        await prisma.notification.upsert({
+          where: { id: `pos-shift-recount:${blockingShift.id}` },
+          update: {},
+          create: {
+            id: `pos-shift-recount:${blockingShift.id}`,
+            user_id: actorId,
+            type: 'pos_shift_recount_required',
+            title: 'Shift returned for recount',
+            message: `Your manager returned this shift for recount. Note: ${blockingShift.closing_explanation || 'Please recount the drawer and inventory, then resubmit this shift.'}`,
+            entity_type: 'pos_shift',
+            entity_id: blockingShift.id,
+            action_url: '/dashboard/city/pos/history',
+          },
+        })
+      }
+    }
 
     await prisma.posTerminal.update({
       where: { id: terminal.id },
@@ -205,6 +256,7 @@ export async function POST(req: Request) {
       receipt_address_source: hasPhysicalOutlet ? "physical_outlet" : "registered_address",
       location: owner,
       open_shift: openShift,
+      blocking_shift: blockingShift,
       catalog: inventory.map((row) => ({
         product_id: row.product_id,
         barcode: row.product.barcode,

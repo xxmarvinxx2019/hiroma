@@ -189,3 +189,23 @@ test("shift payment summary separates approved non-cash from pending verificatio
   assert.match(transactions, /\['rejected', 'voided'\]\.includes\(row\.status\)/)
   assert.match(transactions, /group\.method\.toLowerCase\(\) === 'cash' && !closed/)
 })
+
+test('returned POS payments notify the exact cashier and can be safely corrected and resubmitted', () => {
+  const approvals = read('src/app/api/city/pos/approvals/route.ts')
+  const adjustments = read('src/app/api/city/pos/adjustments/route.ts')
+  const page = read('src/app/dashboard/city/pos/adjustments/page.tsx')
+
+  assert.match(approvals, /action !== 'approve'/)
+  assert.match(approvals, /correction or rejection reason of at least 5 characters/i)
+  assert.match(approvals, /pos_payment_needs_correction/)
+  assert.match(approvals, /user_id:\s*transaction\.cashier_id/)
+  assert.match(approvals, /export async function PUT/)
+  assert.match(approvals, /cashier_id:\s*actorId/)
+  assert.match(approvals, /status:\s*'needs_correction'/)
+  assert.match(approvals, /status:\s*'pending_sync'/)
+  assert.match(approvals, /payment_correction_resubmitted/)
+  assert.match(adjustments, /review_notes/)
+  assert.match(page, /Manager note/)
+  assert.match(page, /Correct payment reference/)
+  assert.match(page, /Resubmit for manager review/)
+})

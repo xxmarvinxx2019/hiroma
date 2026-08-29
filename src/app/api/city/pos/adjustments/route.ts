@@ -42,7 +42,7 @@ export async function GET() {
       take: 50,
       select: {
         id: true, client_transaction_id: true, receipt_number: true, transaction_type: true, customer_name_snapshot: true,
-        payment_method_snapshot: true, payment_reference: true, total_snapshot: true, finalized_at: true, server_received_at: true, status: true,
+        payment_method_snapshot: true, payment_reference: true, total_snapshot: true, finalized_at: true, server_received_at: true, status: true, review_notes: true,
         adjustment_requests: {
           orderBy: { requested_at: 'desc' },
           select: {

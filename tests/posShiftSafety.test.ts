@@ -7,6 +7,8 @@ const migration = fs.readFileSync('prisma/migrations/20260825123000_guard_single
 const route = fs.readFileSync('src/app/api/city/pos/shifts/route.ts', 'utf8')
 const posPage = fs.readFileSync('src/app/dashboard/city/pos/page.tsx', 'utf8')
 const cityLayout = fs.readFileSync('src/app/dashboard/city/layout.tsx', 'utf8')
+const bootstrap = fs.readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
+const historyPage = fs.readFileSync('src/app/dashboard/city/pos/history/page.tsx', 'utf8')
 
 test('database atomically limits a terminal to one open shift', () => {
   assert.match(schema, /active_terminal_key\s+String\?\s+@unique/)
@@ -56,4 +58,14 @@ test('concurrent shift closes are serialized and return a safe retry response', 
   assert.match(route, /timeout:\s*20_000/)
   assert.match(route, /error\.code === ["']P2034["']/)
   assert.match(route, /SHIFT_CLOSE_CONFLICT/)
+})
+
+test('returned shifts block a new shift and guide the cashier through recount', () => {
+  assert.match(route, /status: \{ in: \["locally_closed", "needs_review"\] \}/)
+  assert.match(route, /SHIFT_REVIEW_PENDING/)
+  assert.match(bootstrap, /blocking_shift: blockingShift/)
+  assert.match(posPage, /Shift returned for recount/)
+  assert.match(posPage, /Review & Recount/)
+  assert.match(historyPage, /Manager note:/)
+  assert.match(historyPage, /Recount & Resubmit/)
 })
