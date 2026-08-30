@@ -91,6 +91,11 @@ export default function CityInventoryPage() {
   const [saving, setSaving]               = useState(false)
 
   useEffect(() => {
+    const requestedStock = new URL(window.location.href).searchParams.get('stock')
+    if (requestedStock === 'low' || requestedStock === 'out' || requestedStock === 'ok') setStockFilter(requestedStock)
+  }, [])
+
+  useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 400)
     return () => clearTimeout(t)
   }, [searchInput])

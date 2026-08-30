@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const search   = searchParams.get('search')   || ''
     const position = searchParams.get('position') || 'all' // left | right | all
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
 
     // Get this reseller's tree node
     const myNode = await prisma.binaryTreeNode.findUnique({

@@ -40,8 +40,8 @@ export async function GET(req: NextRequest) {
 
     let stockWhere: Record<string, unknown> = {}
     if (stockParam === 'out') stockWhere = { quantity: { equals: 0 } }
-    if (stockParam === 'low') stockWhere = { quantity: { gt: 0 } }
-    if (stockParam === 'ok')  stockWhere = { quantity: { gt: 0 } }
+    if (stockParam === 'low') stockWhere = { quantity: { gt: 0, lte: prisma.inventory.fields.low_stock_threshold } }
+    if (stockParam === 'ok')  stockWhere = { quantity: { gt: prisma.inventory.fields.low_stock_threshold } }
 
     const where: Record<string, unknown> = {
       owner_id: user.id,

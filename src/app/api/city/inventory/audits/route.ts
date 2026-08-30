@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
+import { canViewCityDashboardFinancials } from '@/app/lib/cityDashboardAccess'
 import prisma from '@/app/lib/prisma'
 
 function actor(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireCity()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const canViewFinancials = canViewCityDashboardFinancials(user)
 
     const limit = Math.min(50, Math.max(1, Number(req.nextUrl.searchParams.get('limit') || 20)))
     const sessions = await prisma.inventoryAuditSession.findMany({
@@ -61,12 +63,21 @@ export async function GET(req: NextRequest) {
         approval_notes: session.approval_notes,
         verified_at: verifiedBy.get(session.id)?.created_at || null,
         verified_by: verifiedBy.get(session.id)?.actor_name_snapshot || null,
-        totals: { products: session.items.length, counted, variance_units: varianceUnits, variance_value: varianceValue },
+        totals: {
+          products: session.items.length,
+          counted,
+          variance_units: varianceUnits,
+          variance_value: canViewFinancials ? varianceValue : null,
+        },
       }
     })
 
     const canApprove = user.is_staff !== true || user.permissions?.includes('pos_approve') === true
-    return NextResponse.json({ sessions: data, can_approve: canApprove })
+    return NextResponse.json({
+      sessions: data,
+      can_approve: canApprove,
+      access: { can_view_financials: canViewFinancials },
+    })
   } catch (error) {
     console.error('[INVENTORY AUDITS GET]', error)
     return NextResponse.json({ error: 'Unable to load inventory audits.' }, { status: 500 })

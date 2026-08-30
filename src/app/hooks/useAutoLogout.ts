@@ -18,7 +18,7 @@ export function useAutoLogout(options: UseAutoLogoutOptions = {}) {
   const router = useRouter()
   const { onWarning, onActive, onLogout, timeout = INACTIVITY_TIMEOUT } = options
 
-  const logoutAtRef    = useRef(Date.now() + timeout)
+  const logoutAtRef    = useRef(0)
   const isWarningRef   = useRef(false)
   const isLoggedOutRef = useRef(false)
   const intervalRef    = useRef<NodeJS.Timeout | null>(null)
@@ -41,6 +41,7 @@ export function useAutoLogout(options: UseAutoLogoutOptions = {}) {
   }, [timeout, onActive])
 
   useEffect(() => {
+    logoutAtRef.current = Date.now() + timeout
     // Reset logout time on ANY user activity — including during warning
     const handleActivity = () => {
       logoutAtRef.current  = Date.now() + timeout

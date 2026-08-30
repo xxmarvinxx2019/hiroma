@@ -229,7 +229,7 @@ export async function GET(req: NextRequest) {
     })
 
     // Fetch rank/total_pu via raw SQL
-    let rankMap = new Map<string, { rank: string; total_pu: number }>()
+    const rankMap = new Map<string, { rank: string; total_pu: number }>()
     try {
       const rankRows = await prisma.$queryRaw<{ user_id: string; rank: string; total_pu: number }[]>`
         SELECT user_id::text, COALESCE(rank, 'default') as rank, COALESCE(total_pu, 0) as total_pu

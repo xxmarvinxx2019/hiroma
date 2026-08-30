@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { canViewCityDashboardFinancials } from '@/app/lib/cityDashboardAccess'
 import prisma from '@/app/lib/prisma'
 
 type LedgerRow = {
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'city') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const canViewFinancials = canViewCityDashboardFinancials(user)
     const params = req.nextUrl.searchParams
     const page = Math.max(1, Number(params.get('page') || 1))
     const pageSize = Math.min(100, Math.max(10, Number(params.get('pageSize') || 25)))
@@ -40,7 +42,7 @@ export async function GET(req: NextRequest) {
 
     const [events, transfers, orders, registrations, upgrades, products] = await Promise.all([
       prisma.inventoryAuditEvent.findMany({
-        where: { owner_id: user.id, ...(from || to ? { created_at: dateWhere } : {}) },
+        where: { owner_id: user.id, reference_type: { not: 'branch_cash_deposit' }, ...(from || to ? { created_at: dateWhere } : {}) },
         orderBy: { created_at: 'desc' },
         take: 1000,
       }),
@@ -172,17 +174,25 @@ export async function GET(req: NextRequest) {
     }).sort((a, b) => b.occurred_at.getTime() - a.occurred_at.getTime())
 
     const start = (page - 1) * pageSize
+    const pageRows = filtered.slice(start, start + pageSize).map((row) => ({
+      ...row,
+      unit_cost: canViewFinancials ? row.unit_cost : null,
+      total_value: canViewFinancials ? row.total_value : null,
+    }))
     const latestApproved = await prisma.inventoryAuditSession.findFirst({ where: { owner_id: user.id, status: 'approved' }, orderBy: { approved_at: 'desc' }, select: { reference_number: true, approved_at: true } })
     const submitted = await prisma.inventoryAuditSession.count({ where: { owner_id: user.id, status: 'submitted' } })
     return NextResponse.json({
-      rows: filtered.slice(start, start + pageSize),
+      rows: pageRows,
       meta: { total: filtered.length, page, pageSize, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) },
+      access: { can_view_financials: canViewFinancials },
       summary: {
         stock_in_units: filtered.filter((row) => row.direction === 'in').reduce((sum, row) => sum + row.quantity, 0),
         stock_out_units: filtered.filter((row) => row.direction === 'out').reduce((sum, row) => sum + row.quantity, 0),
         adjustment_units: filtered.filter((row) => row.event_type === 'physical_count_adjustment').reduce((sum, row) => sum + Math.abs(row.quantity), 0),
         net_movement_units: filtered.reduce((sum, row) => sum + (row.direction === 'in' ? row.quantity : row.direction === 'out' ? -row.quantity : 0), 0),
-        total_movement_value: filtered.reduce((sum, row) => sum + Math.abs(row.total_value), 0),
+        total_movement_value: canViewFinancials
+          ? filtered.reduce((sum, row) => sum + Math.abs(row.total_value), 0)
+          : null,
         movement_count: filtered.length,
         pending_approval: submitted,
         latest_approved_audit: latestApproved,

@@ -823,7 +823,7 @@ function CityRegisterResellerPageInner() {
                 Enter the PIN code
               </h3>
               <p className="text-xs text-gray-400">
-                Enter the unused PIN code for the new reseller's package.
+                Enter the unused PIN code for the new reseller&apos;s package.
               </p>
             </div>
             <div>
@@ -873,7 +873,7 @@ function CityRegisterResellerPageInner() {
                 Reseller Location
               </h3>
               <p className="text-xs text-gray-400">
-                Select the reseller's location in the Philippines.
+                Select the reseller&apos;s location in the Philippines.
               </p>
             </div>
 
@@ -1106,7 +1106,7 @@ function CityRegisterResellerPageInner() {
 
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
-                Referrer's username <span className="text-[#C9A84C]">*</span>
+                Referrer&apos;s username <span className="text-[#C9A84C]">*</span>
               </label>
               <div className="flex gap-2">
                 <input
@@ -1557,7 +1557,7 @@ function CityRegisterResellerPageInner() {
 
             {/* Terms & Conditions */}
             <p className="text-[11px] text-gray-400 -mt-2">
-              Generated from the member's name initials plus six random digits.
+              Generated from the member&apos;s name initials plus six random digits.
               It is included in the welcome SMS.
             </p>
             <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg p-3">

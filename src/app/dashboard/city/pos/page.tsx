@@ -566,9 +566,10 @@ export default function PointOfSalePage() {
         const result = await response.json();
         if (!response.ok)
           throw new Error(result.error || "Unable to initialize POS.");
+        // Establish the protected offline scope before queue effects can run.
+        await savePosBootstrap(result);
         setError("");
         setData(result);
-        await savePosBootstrap(result);
         window.dispatchEvent(new Event("hiroma:notifications-refresh"));
         localStorage.setItem(
           "hiroma_pos_receipt_range",
@@ -632,44 +633,54 @@ export default function PointOfSalePage() {
   }, [data?.open_shift]);
 
   useEffect(() => {
+    if (!data?.terminal.id) return;
     const timer = window.setTimeout(() => void refreshQueue(), 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [data?.terminal.id]);
 
   useEffect(() => {
-    if (!online) return;
+    if (!online || !data?.terminal.id) return;
     let cancelled = false;
     let active = false;
     async function synchronize() {
       if (active) return;
       active = true;
-      const queue = await listQueuedSales();
-      for (const sale of queue) {
-        if (cancelled) return;
-        await saveQueuedSale({ ...sale, status: "syncing", error: undefined });
-        try {
-          const response = await fetch("/api/city/pos/transactions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(sale.payload),
-          });
-          const result = await response.json();
-          if (!response.ok)
-            throw new Error(result.error || "Synchronization needs attention.");
-          await deleteQueuedSale(sale.client_transaction_id);
-        } catch (reason) {
+      try {
+        const queue = await listQueuedSales();
+        for (const sale of queue) {
+          if (cancelled) return;
           await saveQueuedSale({
             ...sale,
-            status: "needs_attention",
-            error:
-              reason instanceof Error
-                ? reason.message
-                : "Synchronization needs attention.",
+            status: "syncing",
+            error: undefined,
           });
+          try {
+            const response = await fetch("/api/city/pos/transactions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(sale.payload),
+            });
+            const result = await response.json();
+            if (!response.ok)
+              throw new Error(
+                result.error || "Synchronization needs attention.",
+              );
+            await deleteQueuedSale(sale.client_transaction_id);
+          } catch (reason) {
+            await saveQueuedSale({
+              ...sale,
+              status: "needs_attention",
+              error:
+                reason instanceof Error
+                  ? reason.message
+                  : "Synchronization needs attention.",
+            });
+          }
         }
+        if (!cancelled) await refreshQueue();
+      } finally {
+        active = false;
       }
-      if (!cancelled) await refreshQueue();
-      active = false;
     }
     void synchronize();
     const timer = window.setInterval(() => void synchronize(), 15_000);
@@ -677,7 +688,7 @@ export default function PointOfSalePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [online]);
+  }, [online, data?.terminal.id]);
 
   const filteredProducts = useMemo(
     () =>

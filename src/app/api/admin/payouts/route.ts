@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
     ])
 
     // Fetch new columns separately via raw SQL (safe if columns don't exist yet)
-    let extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; notes: string | null }> = {}
+    const extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; notes: string | null }> = {}
     try {
       const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
         SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})

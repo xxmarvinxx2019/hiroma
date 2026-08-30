@@ -7,6 +7,8 @@ export const STAFF_PERMISSIONS = [
   { key: 'orders', label: 'Orders / Sales', description: 'Create walk-in sales and manage orders.' },
   { key: 'pos', label: 'Point of Sale', description: 'Use the assigned POS terminal, shifts, offline sales, and sync queue.' },
   { key: 'pos_approve', label: 'Operations Approver', description: 'Independently verify POS non-cash payments and submitted inventory counts. Cannot approve an action created or submitted by the same account.' },
+  { key: 'deposit_submit', label: 'Deposit Submitter', description: 'Submit official branch bank deposits and respond when a deposit is returned for correction.' },
+  { key: 'deposit_confirm', label: 'Deposit Confirmer', description: 'Independently confirm submitted branch deposits against the official bank record. Cannot confirm a deposit submitted by the same account.' },
   { key: 'reports', label: 'Reports', description: 'View branch or distributor reports and operational reconciliation records.' },
   { key: 'payment_methods', label: 'Payment Methods', description: 'View and manage payment methods.' },
   { key: 'pin_requests', label: 'PIN Requests', description: 'View and submit PIN requests.' },
@@ -116,6 +118,7 @@ export function firstCityStaffRoute(permissions: readonly string[]): string {
   if (permissions.includes('dashboard')) return '/dashboard/city'
   if (permissions.includes('pos')) return '/dashboard/city/pos'
   if (permissions.includes('pos_approve')) return '/dashboard/city/pos/approvals'
+  if (permissions.includes('deposit_submit') || permissions.includes('deposit_confirm')) return '/dashboard/city/deposits'
   const routes: ReadonlyArray<[StaffPermission, string]> = [
     ['resellers', '/dashboard/city/resellers'], ['pins', '/dashboard/city/pins'],
     ['inventory', '/dashboard/city/inventory'], ['orders', '/dashboard/city/orders'], ['reports', '/dashboard/city/reports'],

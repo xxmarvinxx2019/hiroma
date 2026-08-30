@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { escapeHtmlText } from '@/app/lib/html'
 
 interface OrderDetail {
   id:                string
@@ -103,10 +104,15 @@ export default function OrderDetailPage() {
     if (!order) return
     const printWindow = window.open('', '_blank', 'width=800,height=900')
     if (!printWindow) return
+    try { printWindow.opener = null } catch { /* browser may expose a read-only opener */ }
+
+    const receiptNumber = escapeHtmlText(order.order_number || '#' + order.id.slice(0, 8).toUpperCase())
+    const receiptDate = escapeHtmlText(new Date(order.created_at).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }))
+    const receiptStatus = escapeHtmlText(order.status.charAt(0).toUpperCase() + order.status.slice(1))
 
     const items = order.items.map((item: any) => `
       <tr>
-        <td style="padding:8px;border-bottom:1px solid #eee;">${item.product?.name || '—'}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtmlText(item.product?.name || '—')}</td>
         <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
         <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">₱${Number(item.unit_price).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
         <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">₱${Number(item.subtotal).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
@@ -116,7 +122,7 @@ export default function OrderDetailPage() {
     const html = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Receipt - ${order.order_number || order.id}</title>
+  <title>Receipt - ${receiptNumber}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; font-size: 13px; color: #111; padding: 32px; }
@@ -150,9 +156,9 @@ export default function OrderDetailPage() {
     <p>Official Order Receipt</p>
   </div>
   <div class="order-no">
-    <div><div class="label">Order Number</div><div class="value">${order.order_number || '#' + order.id.slice(0,8).toUpperCase()}</div></div>
-    <div style="text-align:center;"><div class="label">Date</div><div class="value">${new Date(order.created_at).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</div></div>
-    <div style="text-align:right;"><span class="badge">${order.status.charAt(0).toUpperCase() + order.status.slice(1)}</span></div>
+    <div><div class="label">Order Number</div><div class="value">${receiptNumber}</div></div>
+    <div style="text-align:center;"><div class="label">Date</div><div class="value">${receiptDate}</div></div>
+    <div style="text-align:right;"><span class="badge">${receiptStatus}</span></div>
   </div>
   <table>
     <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
@@ -162,28 +168,28 @@ export default function OrderDetailPage() {
   <div class="info-grid">
     <div class="info-box">
       <div class="title">Buyer</div>
-      <div class="name">${order.buyer?.full_name || '—'}</div>
-      <div class="sub">@${order.buyer?.username || ''}</div>
-      <div class="sub">${order.buyer?.mobile || ''}</div>
+      <div class="name">${escapeHtmlText(order.buyer?.full_name || '—')}</div>
+      <div class="sub">@${escapeHtmlText(order.buyer?.username || '')}</div>
+      <div class="sub">${escapeHtmlText(order.buyer?.mobile || '')}</div>
     </div>
     <div class="info-box">
       <div class="title">Seller</div>
-      <div class="name">${order.seller?.full_name || '—'}</div>
-      <div class="sub">@${order.seller?.username || ''}</div>
-      <div class="sub">${order.seller?.mobile || ''}</div>
+      <div class="name">${escapeHtmlText(order.seller?.full_name || '—')}</div>
+      <div class="sub">@${escapeHtmlText(order.seller?.username || '')}</div>
+      <div class="sub">${escapeHtmlText(order.seller?.mobile || '')}</div>
     </div>
   </div>
   <div class="payment-box">
-    <div class="payment-row"><span>Payment Method</span><span>${order.payment_method || 'Cash'}</span></div>
-    <div class="payment-row"><span>Payment Status</span><span>${order.payment_status || 'Pending'}</span></div>
-    ${order.payment_reference ? '<div class="payment-row"><span>Reference</span><span>' + order.payment_reference + '</span></div>' : ''}
+    <div class="payment-row"><span>Payment Method</span><span>${escapeHtmlText(PAYMENT_METHOD_LABELS[order.payment_method] || order.payment_method || 'Cash')}</span></div>
+    <div class="payment-row"><span>Payment Status</span><span>${escapeHtmlText(order.payment_status || 'Pending')}</span></div>
+    ${order.payment_reference ? '<div class="payment-row"><span>Reference</span><span>' + escapeHtmlText(order.payment_reference) + '</span></div>' : ''}
     <div class="payment-row total"><span>Total</span><span>₱${Number(order.total_amount).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></div>
   </div>
   <div class="footer"><p>Thank you for your business!</p><p style="margin-top:4px;">This is an official receipt from Hiroma.</p></div>
-  <script>window.onload = () => { window.print(); }</script>
 </body>
 </html>`
 
+    printWindow.onload = () => printWindow.print()
     printWindow.document.write(html)
     printWindow.document.close()
   }

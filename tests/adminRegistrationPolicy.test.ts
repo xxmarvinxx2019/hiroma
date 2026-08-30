@@ -15,7 +15,7 @@ test('Admin reseller registration is blocked by the API and removed from the Adm
 })
 
 test('legacy Admin registration page is redirected while City and Branch workflow remains available', () => {
-  const middleware = read('src/middleware.ts')
+  const middleware = read('src/proxy.ts')
   const cityPage = read('src/app/dashboard/city/resellers/page.tsx')
   const cityRoute = read('src/app/api/city/resellers/route.ts')
 

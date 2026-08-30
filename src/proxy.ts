@@ -36,6 +36,9 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
   if (adminPermission !== null) return adminPermission
   if (pathname.startsWith('/dashboard/city/support-center') || pathname.startsWith('/dashboard/admin/support-center') || pathname.startsWith('/api/admin/support-requests') || pathname.startsWith('/api/support/tickets')) return 'support_center'
   if (pathname.startsWith('/dashboard/city/staff') || pathname.startsWith('/api/city/staff')) return '__owner_only__'
+  // Staff must be able to replace their own temporary password. The handler
+  // resolves the authenticated actor and never exposes the owner profile.
+  if (pathname === '/api/city/profile/password') return null
   if (pathname.startsWith('/dashboard/city/profile') || pathname.startsWith('/api/city/profile')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/city/resellers/register')) return 'register_reseller'
   if (pathname === '/api/city/resellers' && method !== 'GET') return 'register_reseller'
@@ -50,7 +53,8 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
   if (pathname.startsWith('/dashboard/city/pos/shift-approvals') || pathname.startsWith('/api/city/pos/shift-approvals')) return 'pos_approve'
   if (pathname.startsWith('/api/city/pos/registration-encoding')) return 'register_reseller'
   if (pathname.startsWith('/dashboard/city/pos') || pathname.startsWith('/api/city/pos')) return 'pos'
-  if (pathname.startsWith('/dashboard/city/reports') || pathname.startsWith('/api/city/reports')) return 'reports|orders'
+  if (pathname.startsWith('/dashboard/city/deposits') || pathname.startsWith('/api/city/deposits')) return 'reports|deposit_submit|deposit_confirm'
+  if (pathname.startsWith('/dashboard/city/reports') || pathname.startsWith('/api/city/reports')) return 'reports'
   if (pathname.startsWith('/dashboard/city/payment-methods') || pathname.startsWith('/api/payment-methods')) return 'payment_methods'
   if (pathname.startsWith('/dashboard/city/pin-requests') || pathname.startsWith('/api/pin-requests')) return 'pin_requests'
   if (pathname.startsWith('/api/city/products')) return 'inventory|orders'
@@ -63,7 +67,7 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
 // MIDDLEWARE
 // ============================================================
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // ── Allow public routes ──
@@ -130,9 +134,9 @@ export async function middleware(req: NextRequest) {
         const fallback = role === 'admin' ? firstAdminStaffRoute(permissions) : firstCityStaffRoute(permissions)
         return NextResponse.redirect(new URL(fallback, req.url))
       }
-      // Admin staff permissions are reloaded from the database by getCurrentUser
-      // on every API request. This makes removals and deactivation immediate and
-      // prevents a stale JWT from authorizing a mutation.
+      // Staff permissions are reloaded from the database by getCurrentUser on
+      // every mapped API request. Proxy remains the optimistic navigation gate;
+      // the route-side check makes removals and deactivation immediate.
       if (role !== 'admin' && !hasPermission) {
         if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Your staff account does not have permission for this action.' }, { status: 403 })
         return NextResponse.redirect(new URL(firstCityStaffRoute(permissions), req.url))
@@ -143,7 +147,7 @@ export async function middleware(req: NextRequest) {
       const requestHeaders = new Headers(req.headers)
       const requiredPermission = requiredStaffPermission(pathname, req.method)
       requestHeaders.delete('x-hiroma-staff-permission')
-      if (payload.is_staff === true && role === 'admin' && requiredPermission) {
+      if (payload.is_staff === true && requiredPermission) {
         requestHeaders.set('x-hiroma-staff-permission', requiredPermission)
       }
       return NextResponse.next({ request: { headers: requestHeaders } })

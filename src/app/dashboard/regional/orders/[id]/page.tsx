@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { escapeHtmlTextValues } from '@/app/lib/html'
 
 interface OrderDetail {
   id:                string
@@ -101,6 +102,9 @@ export default function OrderDetailPage() {
 
   const handlePrint = () => {
     if (!order) return
+    const rawOrder = order
+    {
+    const order = escapeHtmlTextValues(rawOrder)
     const printWindow = window.open('', '_blank', 'width=800,height=900')
     if (!printWindow) return
 
@@ -186,6 +190,7 @@ export default function OrderDetailPage() {
 
     printWindow.document.write(html)
     printWindow.document.close()
+    }
   }
   return (
     <div className="max-w-5xl mx-auto">

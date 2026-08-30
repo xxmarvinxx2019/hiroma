@@ -7,7 +7,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 test('POS maker and approver permissions are separate', () => {
   const permissions = read('src/app/lib/staffPermissions.ts')
-  const middleware = read('src/middleware.ts')
+  const middleware = read('src/proxy.ts')
   assert.match(permissions, /key: 'pos_approve'/)
   assert.match(middleware, /pos\/approvals[\s\S]*return 'pos_approve'/)
   assert.match(middleware, /pos\/shift-approvals[\s\S]*return 'pos_approve'/)

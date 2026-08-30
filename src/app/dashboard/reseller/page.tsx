@@ -73,15 +73,14 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
     </div>
   )
 
-  let cumulative = 0
   const radius = 54; const cx = 64; const cy = 64
   const circumference = 2 * Math.PI * radius
 
-  const slices = data.map((d) => {
+  const slices = data.map((d, index) => {
+    const cumulative = data.slice(0, index).reduce((sum, item) => sum + (item.value / total), 0)
     const pct   = d.value / total
     const offset = circumference * (1 - cumulative - pct)
     const dash   = circumference * pct
-    cumulative  += pct
     return { ...d, pct, dash, offset }
   })
 
