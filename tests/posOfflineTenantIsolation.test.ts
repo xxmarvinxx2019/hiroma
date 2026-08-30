@@ -29,6 +29,18 @@ test('account transitions seal the active offline scope without deleting durable
 
 test('legacy records are claimed only when the cached bootstrap matches the authenticated scope', () => {
   assert.match(queue, /sameLegacyScope/)
-  assert.match(queue, /if \(sameLegacyScope\) await migrateLegacyRows\(scope\)/)
+  assert.match(queue, /migrateLegacyRows\(scope, Boolean\(sameLegacyScope\)\)/)
+  assert.match(queue, /!registration\.offline_scope_id && claimUnscoped/)
+  assert.match(queue, /!sale\.offline_scope_id && claimUnscoped/)
   assert.match(queue, /localStorage\.getItem\(SEALED_SCOPE_KEY\) !== '1'/)
+})
+
+test('offline payloads and bootstrap are encrypted with a non-exportable terminal-scoped key', () => {
+  assert.match(queue, /crypto\.subtle\.generateKey\([\s\S]*'AES-GCM'[\s\S]*false,[\s\S]*\['encrypt', 'decrypt'\]/)
+  assert.match(queue, /navigator\.locks\.request/)
+  assert.match(queue, /encrypted_payload: await encryptOfflineValue/)
+  assert.match(queue, /protectedBootstrap = await encryptOfflineValue/)
+  assert.match(queue, /crypto\.subtle\.decrypt/)
+  assert.doesNotMatch(queue, /store\.put\(\{ \.\.\.sale, offline_scope_id:/)
+  assert.doesNotMatch(queue, /store\.put\(\{ \.\.\.row, offline_scope_id:/)
 })

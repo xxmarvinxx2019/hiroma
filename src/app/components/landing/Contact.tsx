@@ -75,8 +75,8 @@ export default function Contact() {
           Contact Hiroma
         </h2>
         <p className="text-sm text-white/50 text-center leading-relaxed max-w-lg mx-auto mb-12">
-          Whether you're interested in becoming a reseller, a distributor, or
-          simply want to know more about our products — we'd love to hear from
+          Whether you&apos;re interested in becoming a reseller, a distributor, or
+          simply want to know more about our products — we&apos;d love to hear from
           you.
         </p>
 
@@ -85,7 +85,7 @@ export default function Contact() {
           {/* Left — Info */}
           <div>
             <h3 className="text-white font-semibold text-lg mb-3">
-              We're here to help
+              We&apos;re here to help
             </h3>
             <p className="text-white/50 text-sm leading-relaxed mb-8">
               Fill out the form and our team will get back to you as soon as

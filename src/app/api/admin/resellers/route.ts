@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const search   = searchParams.get('search') || ''
     const status   = searchParams.get('status') || 'all'
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
 
     const where: any = {
       role: 'reseller',

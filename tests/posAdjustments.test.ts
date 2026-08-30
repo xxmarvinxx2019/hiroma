@@ -99,7 +99,7 @@ test('approved partial refunds reduce shift reporting and expected cash only', (
 })
 
 test('POS adjustment routes retain cashier and approver permissions', () => {
-  const middleware = read('src/middleware.ts')
+  const middleware = read('src/proxy.ts')
   const layout = read('src/app/dashboard/city/layout.tsx')
   assert.match(middleware, /pos\/adjustments[\s\S]*return 'pos\|pos_approve'/)
   assert.match(layout, /Receipts/)

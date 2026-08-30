@@ -8,6 +8,9 @@ export async function GET(req: NextRequest) {
     if (!user || user.role !== 'city') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    if (user.is_staff && !user.permissions?.includes('reports')) {
+      return NextResponse.json({ error: 'Reports permission is required.' }, { status: 403 })
+    }
 
     const selectedPeriod = resolveCityReportPeriod(req.nextUrl.searchParams, 'today')
     const dateFilter = selectedPeriod.start && selectedPeriod.end

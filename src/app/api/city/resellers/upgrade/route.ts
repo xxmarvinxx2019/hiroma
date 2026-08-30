@@ -14,6 +14,8 @@ import { recordInventoryOutEvents } from "@/app/lib/inventoryEvent";
 
 const BINARY_POINT_TO_PESO = 0.5;
 
+class ResellerUpgradeConflictError extends Error {}
+
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser();
@@ -199,6 +201,20 @@ export async function PATCH(req: NextRequest) {
     const upgradeProductMap = new Map(upgradeProducts.map((product) => [product.id, product]));
 
     await prisma.$transaction(async (tx) => {
+      const claimedProfile = await tx.resellerProfile.updateMany({
+        where: {
+          user_id: reseller_id,
+          city_dist_id: user.id,
+          package_id: resellerProfile.package_id,
+        },
+        data: { package_id: pin.package_id },
+      });
+      if (claimedProfile.count !== 1) {
+        throw new ResellerUpgradeConflictError(
+          "This reseller's package changed while the upgrade was being processed. Refresh and verify the Upgrade PIN again.",
+        );
+      }
+
       const now = await claimUnusedPin(tx, pin.id, reseller_id);
       const financial = await tx.upgradeFinancial.create({
         data: {
@@ -253,10 +269,6 @@ export async function PATCH(req: NextRequest) {
           allocated_at: now,
         },
       });
-      await tx.resellerProfile.update({
-        where: { user_id: reseller_id },
-        data: { package_id: pin.package_id },
-      });
       for (const item of extraProducts)
         await tx.inventory.update({
           where: {
@@ -304,6 +316,9 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (error) {
     if (error instanceof PinAlreadyClaimedError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof ResellerUpgradeConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error("[UPGRADE ERROR]", error);

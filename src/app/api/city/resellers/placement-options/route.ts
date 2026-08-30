@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 
 export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user || user.role !== 'city') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(req.url)
 
     const referrer = searchParams.get('referrer')

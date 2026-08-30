@@ -11,6 +11,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const accountId = user.is_staff ? user.actor_id : user.id
+    if (!accountId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { current_password, new_password } = await req.json()
 
     if (!current_password || !new_password) {
@@ -31,7 +36,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const dbUser = await prisma.user.findUnique({
-      where: { id: user.id },
+      where: { id: accountId },
       select: { password_hash: true, password_change_required: true },
     })
 
@@ -50,7 +55,7 @@ export async function PATCH(req: NextRequest) {
     const newHash = await hashPassword(new_password)
     const changedAt = new Date()
     await prisma.user.update({
-      where: { id: user.id },
+      where: { id: accountId },
       data:  {
         password_hash: newHash,
         password_changed_at: changedAt,
@@ -63,14 +68,14 @@ export async function PATCH(req: NextRequest) {
     })
     const client = getClientInfo(req)
     createAuditLog({
-      user_id: user.id,
-      user_name: user.full_name,
-      user_role: user.role,
-      member_id: formatMemberId(user.id, user.role),
+      user_id: accountId,
+      user_name: user.actor_name || user.full_name,
+      user_role: user.is_staff ? 'staff' : user.role,
+      member_id: formatMemberId(accountId, user.is_staff ? 'staff' : user.role),
       activity_type: dbUser.password_change_required ? 'temporary_password_changed' : 'password_changed',
       category: 'auth',
-      description: `${user.full_name} changed their account password`,
-      metadata: { was_temporary: dbUser.password_change_required, changed_at: changedAt.toISOString() },
+      description: `${user.actor_name || user.full_name} changed their account password`,
+      metadata: { was_temporary: dbUser.password_change_required, changed_at: changedAt.toISOString(), owner_id: user.is_staff ? user.id : null },
       ...client,
       risk_level: 'medium',
       status: 'completed',

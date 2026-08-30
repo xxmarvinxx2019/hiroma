@@ -80,8 +80,8 @@ const approver = await prisma.user.upsert({
 })
 await prisma.staffProfile.upsert({
   where: { user_id: approver.id },
-  update: { owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve'], is_active: true, staff_type: 'custom' },
-  create: { user_id: approver.id, owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve'], is_active: true, staff_type: 'custom' },
+  update: { owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve', 'deposit_confirm'], is_active: true, staff_type: 'custom' },
+  create: { user_id: approver.id, owner_id: city.id, permissions: ['inventory', 'reports', 'pos_approve', 'deposit_confirm'], is_active: true, staff_type: 'custom' },
 })
 
 await prisma.user.upsert({

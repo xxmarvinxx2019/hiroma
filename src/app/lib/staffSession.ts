@@ -18,5 +18,9 @@ export function isFreshStaffSessionAuthorized(
   if (!tokenOwnerId || !snapshot) return false
   if (!snapshot.is_active || snapshot.user_status !== 'active' || snapshot.user_role !== 'staff' || snapshot.user_login_disabled || snapshot.owner_status !== 'active') return false
   if (snapshot.owner_id !== tokenOwnerId || snapshot.owner_role !== tokenRole) return false
-  return !requiredPermission || snapshot.permissions.includes(requiredPermission)
+  if (!requiredPermission) return true
+  if (requiredPermission === '__owner_only__') return false
+  return requiredPermission
+    .split('|')
+    .some((permission) => snapshot.permissions.includes(permission))
 }

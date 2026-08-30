@@ -61,3 +61,16 @@ test('a blocked IndexedDB upgrade cannot leave the POS bootstrap loading forever
   assert.match(posPage, /if \(!navigator\.onLine\) \{[\s\S]*await loadPosBootstrap/)
   assert.doesNotMatch(posPage, /void loadPosBootstrap<Bootstrap>\(\)/)
 })
+
+test('automatic POS synchronization waits until the protected terminal scope is active', () => {
+  assert.match(
+    posPage,
+    /await savePosBootstrap\(result\);\s*setError\(""\);\s*setData\(result\)/,
+  )
+  assert.match(posPage, /if \(!online \|\| !data\?\.terminal\.id\) return;/)
+  assert.match(
+    posPage,
+    /if \(!data\?\.terminal\.id\) return;[\s\S]*void refreshQueue\(\)/,
+  )
+  assert.match(posPage, /\} finally \{\s*active = false;/)
+})

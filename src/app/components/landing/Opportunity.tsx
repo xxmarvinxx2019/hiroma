@@ -86,7 +86,7 @@ export default function Opportunity() {
           Earn while you share
         </h2>
         <p className="text-sm text-white/50 text-center leading-relaxed max-w-lg mx-auto mb-12">
-          Join Hiroma's exclusive reseller network and earn through multiple
+          Join Hiroma&apos;s exclusive reseller network and earn through multiple
           income streams — all from sharing premium fragrances you love.
         </p>
 

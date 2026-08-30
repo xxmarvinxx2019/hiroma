@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { resolveCityReportPeriod } from '@/app/lib/city-report-period'
+import { canViewCityDashboardFinancials, toCityDashboardDto } from '@/app/lib/cityDashboardAccess'
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,6 +15,15 @@ export async function GET(req: NextRequest) {
       select: { dist_level: true },
     })
     const isBranch = profile?.dist_level === 'branch'
+    const canViewFinancials = canViewCityDashboardFinancials(user)
+    const actorId = user.actor_id || user.id
+    const canUseOrders = !user.is_staff || user.permissions?.includes('orders') === true
+    const canUseInventory = !user.is_staff || user.permissions?.includes('inventory') === true
+    const canUsePos = !user.is_staff || user.permissions?.includes('pos') === true
+    const canApprovePos = !user.is_staff || user.permissions?.includes('pos_approve') === true
+    const canMonitorPos = !user.is_staff || canApprovePos
+    const canSubmitDeposits = isBranch && (!user.is_staff || user.permissions?.includes('deposit_submit') === true)
+    const canConfirmDeposits = isBranch && (!user.is_staff || user.permissions?.includes('deposit_confirm') === true)
     const selectedPeriod = resolveCityReportPeriod(req.nextUrl.searchParams, 'all_time')
     const dateFilter = selectedPeriod.start && selectedPeriod.end
       ? { gte: selectedPeriod.start, lt: selectedPeriod.end }
@@ -99,8 +109,53 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const lowStockItems = inventory.filter(i => i.quantity <= i.low_stock_threshold).length
+    const lowStockItems = inventory.filter(i => i.quantity > 0 && i.quantity <= i.low_stock_threshold).length
+    const outOfStockItems = inventory.filter(i => i.quantity === 0).length
     const totalStock    = inventory.reduce((s, i) => s + i.quantity, 0)
+    const [
+      pendingCustomerOrders,
+      pendingInventoryTransfers,
+      pendingPaymentApprovals,
+      pendingTransactionApprovals,
+      pendingShiftApprovals,
+      pendingAdjustments,
+      syncAttention,
+      openShifts,
+      depositConfirmations,
+      depositCorrections,
+      depositsAwaitingAreaReview,
+      activeTerminals,
+      approvedRefunds,
+    ] = await Promise.all([
+      canUseOrders ? prisma.order.count({ where: { seller_id: user.id, status: 'pending' } }) : 0,
+      canUseInventory ? prisma.inventoryTransfer.count({ where: { recipient_id: user.id, status: 'in_transit' } }) : 0,
+      canApprovePos ? prisma.posRegistrationIntake.count({ where: { owner_id: user.id, status: 'pending_payment_verification' } }) : 0,
+      canApprovePos ? prisma.posTransaction.count({ where: { owner_id: user.id, status: 'synced_pending_review' } }) : 0,
+      canApprovePos ? prisma.inventoryAuditSession.count({ where: { owner_id: user.id, scope: 'shift_closing', status: 'submitted' } }) : 0,
+      canApprovePos ? prisma.posAdjustmentRequest.count({ where: { owner_id: user.id, status: 'pending' } }) : 0,
+      canUsePos ? prisma.posTransaction.count({ where: { owner_id: user.id, ...(user.is_staff ? { cashier_id: actorId } : {}), status: { in: ['pending_sync', 'syncing', 'needs_correction'] } } }) : 0,
+      canMonitorPos ? prisma.posShift.count({ where: { owner_id: user.id, status: { in: ['open', 'needs_review'] } } }) : 0,
+      canConfirmDeposits ? prisma.branchCashDeposit.count({ where: { branch_id: user.id, status: 'submitted', submitted_by: { not: actorId } } }) : 0,
+      canSubmitDeposits ? prisma.branchCashDeposit.count({ where: { branch_id: user.id, status: 'needs_explanation', submitted_by: actorId } }) : 0,
+      canSubmitDeposits || canConfirmDeposits ? prisma.branchCashDeposit.count({ where: { branch_id: user.id, status: 'confirmed' } }) : 0,
+      canMonitorPos ? prisma.posTerminal.findMany({ where: { owner_id: user.id, is_active: true }, select: { last_synced_at: true } }) : [],
+      canViewFinancials ? prisma.posAdjustmentRequest.aggregate({
+        where: {
+          owner_id: user.id,
+          status: 'approved',
+          request_type: 'refund',
+          ...(dateFilter ? { reviewed_at: dateFilter } : {}),
+          transaction: { order: { status: 'delivered' } },
+        },
+        _sum: { amount_snapshot: true },
+      }) : { _sum: { amount_snapshot: null } },
+    ])
+    const pendingPosApprovals = pendingPaymentApprovals + pendingTransactionApprovals + pendingShiftApprovals
+    let lastPosSyncAt: Date | null = null
+    for (const terminal of activeTerminals as Array<{ last_synced_at: Date | null }>) {
+      if (terminal.last_synced_at && (!lastPosSyncAt || terminal.last_synced_at > lastPosSyncAt)) lastPosSyncAt = terminal.last_synced_at
+    }
+    const approvedRefundAmount = Number(approvedRefunds._sum.amount_snapshot || 0)
     const acquisitionByProduct = new Map<string, { units: number; cost: number }>()
     for (const movement of acquisitionMovements) {
       const receivedUnits = movement.order_id ? movement.quantity : (movement.accepted_quantity ?? 0)
@@ -321,7 +376,7 @@ export async function GET(req: NextRequest) {
       package_name_snapshot: row.package_name_snapshot,
       package_units_snapshot: row.package_units_snapshot,
     }))
-    let ledgerFormulaMismatches = registrationRows.filter((row) =>
+    const ledgerFormulaMismatches = registrationRows.filter((row) =>
       Math.abs(row.registration_profit - (row.reseller_value - row.product_acquisition_cost)) > 0.009
     ).length
     let legacyRegistrationRows = 0
@@ -520,8 +575,7 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => Number(b.user.wallet?.total_earned || 0) - Number(a.user.wallet?.total_earned || 0))
       .slice(0, 5)
 
-    return NextResponse.json({
-      stats: {
+    const stats = {
         financialIntegrity: {
           ledger_rows: registrationSnapshots.length,
           legacy_reconstructed_rows: legacyRegistrationRows,
@@ -539,6 +593,23 @@ export async function GET(req: NextRequest) {
         accountType: profile?.dist_level || 'city',
         isStaff: Boolean(user.is_staff),
         staffPermissions: user.permissions || [],
+        generatedAt: new Date().toISOString(),
+        actionSummary: {
+          pendingStockOrders: canUseOrders ? pendingOrders : 0,
+          pendingCustomerOrders,
+          pendingInventoryTransfers,
+          lowStockItems: canUseInventory ? lowStockItems : 0,
+          outOfStockItems: canUseInventory ? outOfStockItems : 0,
+          pendingPosApprovals,
+          pendingAdjustments,
+          syncAttention,
+          openShifts,
+          depositConfirmations,
+          depositCorrections,
+          depositsAwaitingAreaReview,
+          activeTerminals: activeTerminals.length,
+          lastPosSyncAt: lastPosSyncAt?.toISOString() || null,
+        },
         // Today
         salesRevenueToday,
         salesRevenueYesterday,
@@ -564,11 +635,14 @@ export async function GET(req: NextRequest) {
         totalOrders,
         pendingOrders,
         lowStockItems,
+        outOfStockItems,
         totalInventoryItems: inventory.length,
         totalStock,
         totalInventoryCost,
         // Revenue
         totalRevenue,
+        approvedRefundAmount,
+        netSalesAfterAdjustments: totalRevenue - approvedRefundAmount,
         totalCost,
         totalProfit,
         totalUnitsSold,
@@ -604,8 +678,8 @@ export async function GET(req: NextRequest) {
           package_name: r.package?.name || '—',
         })),
         inventoryItems: inventory.map(i => ({ name: i.product.name, quantity: i.quantity, low: i.low_stock_threshold })),
-      },
-    })
+      }
+    return NextResponse.json({ stats: toCityDashboardDto(stats, canViewFinancials) })
   } catch (error) {
     console.error('[CITY STATS ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

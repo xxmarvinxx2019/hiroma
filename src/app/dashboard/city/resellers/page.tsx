@@ -1033,7 +1033,7 @@ export default function CityResellersPage() {
 
                   {/* Referral input */}
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1.5">Referrer's username <span className="text-[#C9A84C]">*</span></label>
+                    <label className="block text-xs text-gray-400 mb-1.5">Referrer&apos;s username <span className="text-[#C9A84C]">*</span></label>
                     <div className="flex gap-2">
                       <input
                         value={referralInput}

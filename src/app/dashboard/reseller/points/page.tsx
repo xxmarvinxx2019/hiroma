@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
 // ============================================================
@@ -33,8 +33,8 @@ function fmt(n: number) {
   return '₱' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function daysUntil(dateStr: string) {
-  const diff = new Date(dateStr).getTime() - Date.now()
+function daysUntil(dateStr: string, now: number) {
+  const diff = new Date(dateStr).getTime() - now
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
 }
 
@@ -48,7 +48,7 @@ export default function ResellerPointsPage() {
   const [meta, setMeta]           = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]     = useState(true)
   const [page, setPage]           = useState(1)
-  const [runningTotals, setRunningTotals] = useState<number[]>([])
+  const [renderedAt]              = useState(() => Date.now())
 
   const fetchData = useCallback(() => {
     setLoading(true)
@@ -65,28 +65,12 @@ export default function ResellerPointsPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Compute running accumulated totals per page
-  // Start from all_time_points minus points earned before this page
-  useEffect(() => {
-    if (!summary || logs.length === 0) return
-    // Calculate the total points AFTER this page (older entries)
-    const pointsOnThisPage = logs.reduce((s, l) => s + Number(l.points || 0), 0)
-    // For page 1: running total starts at all_time total and decreases
-    // We compute descending running total per row
-    let running = summary.all_time_points
-    // Subtract points from pages before this one
-    // We don't have exact count but approximate via page offset
-    // Simpler: just show cumulative from top of current view
-    const totals: number[] = []
-    let acc = 0
-    for (const log of logs) {
-      acc += Number(log.points || 0)
-      totals.push(acc)
-    }
-    setRunningTotals(totals)
-  }, [logs, summary])
+  const runningTotals = useMemo(
+    () => logs.map((_, index) => logs.slice(0, index + 1).reduce((sum, log) => sum + Number(log.points || 0), 0)),
+    [logs],
+  )
 
-  const daysLeft = summary?.next_reset ? daysUntil(summary.next_reset) : null
+  const daysLeft = summary?.next_reset ? daysUntil(summary.next_reset, renderedAt) : null
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -162,7 +146,7 @@ export default function ResellerPointsPage() {
           <div className="w-full bg-[#F0F2F8] rounded-full h-2">
             {(() => {
               const totalMs  = summary.reset_days * 24 * 60 * 60 * 1000
-              const elapsedMs = Date.now() - new Date(summary.points_reset_at).getTime()
+              const elapsedMs = renderedAt - new Date(summary.points_reset_at).getTime()
               const pct = Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100))
               return (
                 <div

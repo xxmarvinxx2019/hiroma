@@ -945,7 +945,7 @@ export default function ResellerOrdersPage() {
         ) : orders.length === 0 ? (
           <div className="px-4 py-12 text-center">
             <p className="text-gray-400 text-sm">No orders yet.</p>
-            <p className="text-gray-300 text-xs mt-1">Click "+ New Order" to place your first order.</p>
+            <p className="text-gray-300 text-xs mt-1">Click &quot;+ New Order&quot; to place your first order.</p>
           </div>
         ) : (
           orders.map((order) => (

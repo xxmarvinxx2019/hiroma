@@ -6,9 +6,27 @@ import Link from 'next/link'
 interface Stats {
   period: { value: CityStatsPeriod; label: string; start: string | null; end: string | null }
   financialIntegrity: { ledger_rows: number; legacy_reconstructed_rows: number; unclassified_used_pins: number; ledger_formula_mismatches: number; order_cost_fallback_rows: number; package_unit_fallback_rows: number }
+  canViewFinancials: boolean
   accountType: string
   isStaff: boolean
   staffPermissions: string[]
+  generatedAt: string
+  actionSummary: {
+    pendingStockOrders: number
+    pendingCustomerOrders: number
+    pendingInventoryTransfers: number
+    lowStockItems: number
+    outOfStockItems: number
+    pendingPosApprovals: number
+    pendingAdjustments: number
+    syncAttention: number
+    openShifts: number
+    depositConfirmations: number
+    depositCorrections: number
+    depositsAwaitingAreaReview: number
+    activeTerminals: number
+    lastPosSyncAt: string | null
+  }
   salesRevenueToday: number
   salesRevenueYesterday: number
   registrationProfitToday: number
@@ -32,10 +50,13 @@ interface Stats {
   totalOrders: number
   pendingOrders: number
   lowStockItems: number
+  outOfStockItems: number
   totalInventoryItems: number
   totalStock: number
   totalInventoryCost: number
   totalRevenue: number
+  approvedRefundAmount: number
+  netSalesAfterAdjustments: number
   totalCost: number
   totalProfit: number
   totalUnitsSold: number
@@ -112,6 +133,57 @@ function StatCard({ label, value, sub, color, icon, badge }: {
     </div>
   )
 }
+
+function ManagerActionCenter({ stats }: { stats: Stats }) {
+  const actions = [
+    { label: 'Stock orders awaiting supplier', count: stats.actionSummary.pendingStockOrders, href: '/dashboard/city/orders', detail: 'Branch purchase orders' },
+    { label: 'Customer orders to fulfill', count: stats.actionSummary.pendingCustomerOrders, href: '/dashboard/city/orders', detail: 'Orders where this branch is the seller' },
+    { label: 'Incoming stock to receive', count: stats.actionSummary.pendingInventoryTransfers, href: '/dashboard/city/inventory', detail: 'Confirm quantities or discrepancies' },
+    { label: 'POS approvals', count: stats.actionSummary.pendingPosApprovals, href: '/dashboard/city/pos/approvals', detail: 'Payments, sales, or submitted shift counts' },
+    { label: 'Refund or void requests', count: stats.actionSummary.pendingAdjustments, href: '/dashboard/city/pos/adjustments', detail: 'Independent decision required' },
+    { label: 'POS sync corrections', count: stats.actionSummary.syncAttention, href: '/dashboard/city/pos/sync', detail: 'Pending sync or needs correction' },
+    { label: 'Deposits to confirm', count: stats.actionSummary.depositConfirmations, href: '/dashboard/city/deposits', detail: 'Excludes deposits submitted by this account' },
+    { label: 'Returned deposits to correct', count: stats.actionSummary.depositCorrections, href: '/dashboard/city/deposits', detail: 'Original submitter must respond' },
+    { label: 'Out-of-stock products', count: stats.actionSummary.outOfStockItems, href: '/dashboard/city/inventory?stock=out', detail: 'Immediate replenishment required' },
+    { label: 'Low-stock products', count: stats.actionSummary.lowStockItems, href: '/dashboard/city/inventory?stock=low', detail: 'At or below the reorder threshold' },
+  ].filter((item) => item.count > 0)
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[#0D1B3E]/10 bg-white">
+      <div className="flex flex-col gap-1 border-b border-[#0D1B3E]/8 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-extrabold text-[#0D1B3E]">Manager Action Center</p>
+          <p className="mt-0.5 text-xs text-gray-500">Only work available to this account is shown.</p>
+        </div>
+        <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-bold ${actions.length ? 'bg-[#fff4df] text-[#9A6F1E]' : 'bg-[#e8f7ef] text-[#1a7a4a]'}`}>
+          {actions.length ? `${actions.reduce((sum, item) => sum + item.count, 0)} item(s) need attention` : 'No pending action'}
+        </span>
+      </div>
+      {actions.length ? (
+        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+          {actions.map((item) => (
+            <Link key={item.label} href={item.href} className="group flex items-center gap-3 rounded-xl border border-[#0D1B3E]/8 bg-[#fbfcfe] p-4 hover:border-[#C9A84C]/60 hover:bg-[#fffaf0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A84C]">
+              <span className="flex h-10 min-w-10 items-center justify-center rounded-xl bg-[#010521] text-sm font-extrabold text-white">{item.count > 99 ? '99+' : item.count}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-[#0D1B3E] group-hover:text-[#9A6F1E]">{item.label}</span>
+                <span className="mt-0.5 block text-xs text-gray-500">{item.detail}</span>
+              </span>
+              <span aria-hidden="true" className="text-[#C9A84C]">→</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-gray-500">All current approvals, corrections, deposits, transfers, and stock alerts are clear.</p>
+      )}
+      <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-[#0D1B3E]/8 bg-[#f8f9fc] px-5 py-3 text-xs text-gray-500">
+        <span><strong className="text-[#0D1B3E]">{stats.actionSummary.openShifts}</strong> open or review shift(s)</span>
+        <span><strong className="text-[#0D1B3E]">{stats.actionSummary.activeTerminals}</strong> active POS terminal(s)</span>
+        <span>Latest POS sync: <strong className="text-[#0D1B3E]">{stats.actionSummary.lastPosSyncAt ? new Date(stats.actionSummary.lastPosSyncAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'No sync recorded'}</strong></span>
+        {stats.actionSummary.depositsAwaitingAreaReview > 0 && <span><strong className="text-[#0D1B3E]">{stats.actionSummary.depositsAwaitingAreaReview}</strong> deposit(s) awaiting Area Manager review</span>}
+      </div>
+    </section>
+  )
+}
 type ReportTab = 'overview' | 'sales' | 'products' | 'packages' | 'pins' | 'inventory'
 type CityStatsPeriod = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'this_year' | 'all_time' | 'custom'
 
@@ -124,19 +196,35 @@ export default function CityDashboardPage() {
   const [customEnd, setCustomEnd] = useState('')
   const [showSalesBreakdown, setShowSalesBreakdown] = useState(false)
   const [showCostBreakdown, setShowCostBreakdown] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
-useEffect(() => {
+  useEffect(() => {
     const query = new URLSearchParams({ period: period === 'custom' && (!customStart || !customEnd) ? 'all_time' : period })
     if (period === 'custom' && customStart && customEnd) {
       query.set('start', customStart)
       query.set('end', customEnd)
     }
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/city/stats?${query.toString()}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => setStats(d.stats))
-      .finally(() => setLoading(false))
-  }, [period, customStart, customEnd])
+    setError(null)
+    void (async () => {
+      try {
+        const response = await fetch(`/api/city/stats?${query.toString()}`, { cache: 'no-store', signal: controller.signal })
+        const data = await response.json()
+        if (!response.ok || !data?.stats) throw new Error(data?.error || 'Unable to load the dashboard right now.')
+        setStats(data.stats)
+        setLastUpdatedAt(data.stats.generatedAt || new Date().toISOString())
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === 'AbortError') return
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load the dashboard right now.')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    })()
+    return () => controller.abort()
+  }, [period, customStart, customEnd, refreshKey])
 
   const selectPeriod = (nextPeriod: CityStatsPeriod) => {
     if (nextPeriod === 'custom' && (!customStart || !customEnd)) {
@@ -147,7 +235,7 @@ useEffect(() => {
     setPeriod(nextPeriod)
   }
 
-  if (loading) return (
+  if (loading && !stats) return (
     <div className="flex items-center justify-center h-64">
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-[#C9A84C] border-t-transparent rounded-full animate-spin" />
@@ -156,23 +244,38 @@ useEffect(() => {
     </div>
   )
 
-  if (!stats) return <p className="text-center text-gray-400 py-20">Failed to load dashboard.</p>
+  if (!stats) return (
+    <div className="mx-auto mt-16 max-w-md rounded-2xl border border-[#e8b3b3] bg-white p-6 text-center shadow-sm">
+      <p className="font-bold text-[#9d3030]">Dashboard data is temporarily unavailable</p>
+      <p className="mt-2 text-sm text-gray-500">{error || 'Check the connection and try again.'}</p>
+      <button type="button" onClick={() => setRefreshKey((key) => key + 1)} className="mt-4 rounded-xl bg-[#010521] px-4 py-2 text-sm font-bold text-white hover:bg-[#1A2F5E]">Retry</button>
+    </div>
+  )
 
-  const today = new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const today = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const accountLabel = stats.accountType === 'branch' ? 'Branch' : 'City Distributor'
+  const canOpenOrders = !stats.isStaff || stats.staffPermissions.includes('orders')
+  const canOpenInventory = !stats.isStaff || stats.staffPermissions.includes('inventory')
 
   return (
     <div className="w-full space-y-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold text-[#0D1B3E]">
             {stats.accountType === 'branch' ? 'Branch Dashboard' : 'City Dashboard'}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">{today}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="rounded-xl border border-[#0D1B3E]/8 bg-white px-3 py-2 text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Last updated</p>
+            <p className="text-xs font-bold text-[#0D1B3E]">{lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}</p>
+          </div>
+          <button type="button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading} className="rounded-xl border border-[#0D1B3E]/10 bg-white px-3 py-2 text-xs font-bold text-[#0D1B3E] hover:bg-[#f8f9fc] disabled:cursor-wait disabled:opacity-60">
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
           {!stats.isStaff && <Link href="/dashboard/city/staff"
             className="bg-white border border-[#C9A84C] text-[#9a6f1e] text-xs font-bold rounded-xl px-4 py-2 hover:bg-[#fef9ee] transition-colors">
             + Register Staff
@@ -188,13 +291,22 @@ useEffect(() => {
         </div>
       </div>
 
+      {error && (
+        <div role="alert" className="flex flex-col gap-2 rounded-xl border border-[#e8b3b3] bg-[#fff3f3] px-4 py-3 text-sm text-[#9d3030] sm:flex-row sm:items-center sm:justify-between">
+          <span>{error} Showing the last successfully loaded figures.</span>
+          <button type="button" onClick={() => setRefreshKey((key) => key + 1)} className="font-bold underline underline-offset-2">Retry now</button>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit overflow-x-auto">
         {[
           { key: 'overview',  label: '📊 Overview'    },
-          { key: 'sales',     label: '💰 Sales'       },
-          { key: 'products',  label: '📦 Products'    },
-          { key: 'packages',  label: '🎁 Packages'    },
+          ...(stats.canViewFinancials ? [
+            { key: 'sales',     label: '💰 Sales'       },
+            { key: 'products',  label: '📦 Products'    },
+            { key: 'packages',  label: '🎁 Packages'    },
+          ] : []),
           { key: 'pins',      label: '🔑 PINs'        },
           { key: 'inventory', label: '🏭 Inventory'   },
         ].map(t => (
@@ -230,7 +342,7 @@ useEffect(() => {
           <span className="text-[11px] font-semibold text-[#1a7a4a] whitespace-nowrap">{stats.period.label}</span>
         </div>}
       </div>
-      {(stats.financialIntegrity.legacy_reconstructed_rows > 0 || stats.financialIntegrity.unclassified_used_pins > 0 || stats.financialIntegrity.ledger_formula_mismatches > 0 || stats.financialIntegrity.order_cost_fallback_rows > 0) && (
+      {stats.canViewFinancials && (stats.financialIntegrity.legacy_reconstructed_rows > 0 || stats.financialIntegrity.unclassified_used_pins > 0 || stats.financialIntegrity.ledger_formula_mismatches > 0 || stats.financialIntegrity.order_cost_fallback_rows > 0) && (
         <div className="rounded-xl border border-[#e8b3b3] bg-[#fff3f3] px-4 py-3 text-xs text-[#9d3030]">
           <p className="font-bold">Financial integrity attention required</p>
           <p className="mt-1">Ledger rows: {stats.financialIntegrity.ledger_rows}. Legacy registration rows reconstructed: {stats.financialIntegrity.legacy_reconstructed_rows}. Unclassified used PINs excluded from registration profit: {stats.financialIntegrity.unclassified_used_pins}. Formula mismatches: {stats.financialIntegrity.ledger_formula_mismatches}. Legacy order items using current catalog cost fallback: {stats.financialIntegrity.order_cost_fallback_rows}.</p>
@@ -241,7 +353,7 @@ useEffect(() => {
         <>
           {/* Selected-period KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label={`${stats.period.label} Repeat + SRP Product Sales`} value={fmt(stats.orderRevenue)} color="#1a7a4a" icon="💰" sub="Revenue before product cost" />
+            <StatCard label={`${stats.period.label} Repeat + SRP Product Sales`} value={fmt(stats.orderRevenue)} color="#0f766e" icon="💰" sub="Revenue before product cost" />
             <StatCard label={`${stats.period.label} Registration Product Sales`} value={fmt(stats.packageRevenue)} color="#8b5cf6" icon="📈" sub="Registration product value · PIN allocation excluded" />
             <StatCard label={`${stats.period.label} Product Order Units Sold`} value={stats.orderUnitsSold} color="#2563eb" icon="📦" sub="Delivered product orders" />
             <StatCard label={`${stats.period.label} New Resellers`} value={stats.registrationCount} color="#9A6F1E" icon="👥" sub="Completed registrations" badge={stats.registrationCount > 0 ? 'New!' : undefined} />
@@ -250,12 +362,18 @@ useEffect(() => {
           {/* Running totals */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Resellers"    value={stats.totalResellers.toLocaleString()} color="#0D1B3E" icon="👤" sub={`+${stats.newResellersThisMonth} this month`} />
-            <StatCard label="Available PINs"     value={stats.unusedPins}                       color="#1a7a4a" icon="🔓" sub={`${stats.usedPins} used · ${stats.totalPinsRequested} total`} />
-            <StatCard label="Pending Orders"     value={stats.pendingOrders}                    color={stats.pendingOrders > 0 ? '#B45309' : '#0D1B3E'} icon="🕐" sub={`${stats.totalOrders} total orders`} badge={stats.pendingOrders > 0 ? 'Action needed' : undefined} />
-            <StatCard label="Low Stock Items"    value={stats.lowStockItems}                    color={stats.lowStockItems > 0 ? '#e05252' : '#1a7a4a'} icon="⚠️" sub={`${stats.totalStock} units in stock`} badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
+            <StatCard label="Available PINs"     value={stats.unusedPins}                       color="#0e7490" icon="🔓" sub={`${stats.usedPins} used · ${stats.totalPinsRequested} total`} />
+            {canOpenOrders ? <Link href="/dashboard/city/orders" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B45309]">
+              <StatCard label="Pending Stock Orders" value={stats.pendingOrders} color={stats.pendingOrders > 0 ? '#B45309' : '#0D1B3E'} icon="🕐" sub={`${stats.totalOrders} branch purchase orders`} badge={stats.pendingOrders > 0 ? 'Action needed' : undefined} />
+            </Link> : <StatCard label="Pending Stock Orders" value={stats.pendingOrders} color={stats.pendingOrders > 0 ? '#B45309' : '#0D1B3E'} icon="🕐" sub={`${stats.totalOrders} branch purchase orders`} />}
+            {canOpenInventory ? <Link href="/dashboard/city/inventory?stock=low" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#dc2626]">
+              <StatCard label="Low Stock Items" value={stats.lowStockItems} color={stats.lowStockItems > 0 ? '#dc2626' : '#c2410c'} icon="⚠️" sub={`${stats.outOfStockItems} out of stock · ${stats.totalStock} total units`} badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
+            </Link> : <StatCard label="Low Stock Items" value={stats.lowStockItems} color={stats.lowStockItems > 0 ? '#dc2626' : '#c2410c'} icon="⚠️" sub={`${stats.outOfStockItems} out of stock · ${stats.totalStock} total units`} />}
           </div>
 
-          <section className="rounded-2xl border border-[#1a7a4a]/30 bg-white overflow-hidden">
+          <ManagerActionCenter stats={stats} />
+
+          {stats.canViewFinancials && <section className="rounded-2xl border border-[#1a7a4a]/30 bg-white overflow-hidden">
             <div className="px-5 py-4 bg-[#e2f5e9] border-b border-[#1a7a4a]/15">
               <p className="text-xs font-bold uppercase tracking-wide text-[#187443]">{stats.period.label} {accountLabel} Financial Summary</p>
               <p className="text-xs leading-relaxed text-[#53627e] mt-1">Sales across reseller repeat orders, non-member/SRP sales, and new reseller registrations. Prepaid PIN allocation is excluded from distributor sales.</p>
@@ -287,6 +405,24 @@ useEffect(() => {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 gap-3 border-t border-[#1a7a4a]/10 bg-white px-4 py-4 sm:grid-cols-3">
+              <div className="rounded-xl bg-[#fff7ed] px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#9a5b16]">Approved POS refunds</p>
+                <p className="mt-1 text-lg font-extrabold text-[#c2410c]">−{fmt(stats.approvedRefundAmount)}</p>
+                <p className="mt-1 text-xs text-gray-500">Approved partial refunds recorded in this period; fully reversed receipts are already excluded from gross sales.</p>
+              </div>
+              <div className="rounded-xl bg-[#eff6ff] px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#1d4ed8]">Net sales after refunds</p>
+                <p className="mt-1 text-lg font-extrabold text-[#1d4ed8]">{fmt(stats.netSalesAfterAdjustments)}</p>
+                <p className="mt-1 text-xs text-gray-500">Gross product sales minus approved POS refunds in the selected period.</p>
+              </div>
+              <div className="rounded-xl bg-[#f8f9fc] px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#53627e]">Pending adjustments</p>
+                <p className="mt-1 text-lg font-extrabold text-[#0D1B3E]">{stats.actionSummary.pendingAdjustments}</p>
+                <p className="mt-1 text-xs text-gray-500">Not deducted until independently approved.</p>
+              </div>
+            </div>
+
             <div className="px-4 pb-4 bg-white">
               <p className="text-xs font-bold uppercase tracking-wide text-[#0D1B3E] mb-2">Gross Profit Breakdown</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 rounded-xl border border-[#0D1B3E]/8 overflow-hidden divide-y sm:divide-y-0 sm:divide-x divide-[#0D1B3E]/8 bg-[#fbfcfd]">
@@ -295,9 +431,9 @@ useEffect(() => {
                 <div className="p-4"><p className="text-xs uppercase tracking-wide text-gray-500">New reseller registration profit</p><p className="text-lg font-bold text-[#8b5cf6] mt-1">{fmt(stats.registrationProductProfit)}</p></div>
               </div>
             </div>
-          </section>
+          </section>}
 
-          {showSalesBreakdown && (
+          {stats.canViewFinancials && showSalesBreakdown && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/55 p-3 sm:p-4" onMouseDown={() => setShowSalesBreakdown(false)}>
               <div role="dialog" aria-modal="true" aria-labelledby="sales-breakdown-title" className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] rounded-xl sm:rounded-2xl bg-white shadow-2xl overflow-y-auto" onMouseDown={(event) => event.stopPropagation()}>
                 <div className="flex items-start justify-between gap-4 border-b border-[#0D1B3E]/8 px-5 py-4">
@@ -333,7 +469,7 @@ useEffect(() => {
             </div>
           )}
 
-          {showCostBreakdown && (
+          {stats.canViewFinancials && showCostBreakdown && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#010521]/55 p-3 sm:p-4" onMouseDown={() => setShowCostBreakdown(false)}>
               <div role="dialog" aria-modal="true" aria-labelledby="cost-breakdown-title" className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] rounded-xl sm:rounded-2xl bg-white shadow-2xl overflow-y-auto" onMouseDown={(event) => event.stopPropagation()}>
                 <div className="flex items-start justify-between gap-4 border-b border-[#0D1B3E]/8 px-5 py-4">
@@ -423,7 +559,7 @@ useEffect(() => {
             </div>
 
             {/* Top Performing Resellers */}
-            <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
+            {stats.canViewFinancials && <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#0D1B3E]/8">
                 <p className="text-sm font-bold text-[#0D1B3E]">Top Performing Resellers</p>
                 <Link href="/dashboard/city/top-performers" className="text-[11px] text-[#C9A84C] hover:underline">View All →</Link>
@@ -451,7 +587,7 @@ useEffect(() => {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
 
             {/* Recent Orders */}
             <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
@@ -484,7 +620,7 @@ useEffect(() => {
       )}
 
       {/* ══ SALES REPORT ══ */}
-      {tab === 'sales' && (
+      {stats.canViewFinancials && tab === 'sales' && (
         <>
           <div className="bg-[#fffaf0] border border-[#e8c66a]/60 rounded-2xl px-5 py-5">
             <p className="text-base font-extrabold text-[#0D1B3E]">{accountLabel} income summary</p>
@@ -561,7 +697,7 @@ useEffect(() => {
         </>
       )}
       {/* ══ PRODUCT MOVEMENT ══ */}
-      {tab === 'products' && (
+      {stats.canViewFinancials && tab === 'products' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <StatCard label="Delivered Product Revenue"  value={fmt(stats.orderRevenue)}              color="#2563eb" icon="🛒" sub={`${stats.orderUnitsSold} units`} />
@@ -620,7 +756,7 @@ useEffect(() => {
       )}
 
       {/* ══ REGISTRATION PACKAGES ══ */}
-      {tab === 'packages' && (
+      {stats.canViewFinancials && tab === 'packages' && (
         <>
           {stats.financialIntegrity.package_unit_fallback_rows > 0 && (
             <div className="rounded-xl border border-[#e8c66a]/70 bg-[#fffaf0] px-4 py-3 text-sm leading-5 text-[#72551b]">
@@ -746,11 +882,11 @@ useEffect(() => {
       {/* ══ INVENTORY ══ */}
       {tab === 'inventory' && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-2 gap-3 ${stats.canViewFinancials ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
             <StatCard label="Product Types" value={stats.totalInventoryItems} color="#0D1B3E" icon="📦" sub="Distinct products in inventory" />
             <StatCard label="Units On Hand" value={stats.totalStock.toLocaleString()} color="#2563eb" icon="🏭" sub="Current physical stock" />
             <StatCard label="Low-stock Products" value={stats.lowStockItems} color="#e05252" icon="⚠️" sub="At or below threshold" badge={stats.lowStockItems > 0 ? 'Restock!' : undefined} />
-            <StatCard label="Inventory Cost Value" value={fmt(stats.totalInventoryCost)} color="#1a7a4a" icon="💰" sub={`${accountLabel} acquisition cost × on-hand units`} />
+            {stats.canViewFinancials && <StatCard label="Inventory Cost Value" value={fmt(stats.totalInventoryCost)} color="#1a7a4a" icon="💰" sub={`${accountLabel} acquisition cost × on-hand units`} />}
           </div>
           <div className="bg-white rounded-2xl border border-[#0D1B3E]/8 overflow-hidden">
             <div className="px-5 py-4 border-b border-[#0D1B3E]/8">

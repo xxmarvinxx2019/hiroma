@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
+import { canViewCityDashboardFinancials } from '@/app/lib/cityDashboardAccess'
 import prisma from '@/app/lib/prisma'
 import { canLocalAccountCount, canLocalOwnerReview } from '@/app/lib/inventoryAuditPolicy'
 
@@ -51,14 +52,20 @@ export async function GET(_req: NextRequest, context: AuditRouteContext) {
     const { id } = await context.params
     const session = await sessionForOwner(id, user.id)
     if (!session) return NextResponse.json({ error: 'Audit session not found.' }, { status: 404 })
+    const canViewFinancials = canViewCityDashboardFinancials(user)
     const starter = await prisma.staffProfile.findUnique({ where: { user_id: session.started_by }, select: { staff_type: true } })
     const areaManagerAudit = starter?.staff_type === 'area_manager'
     const submission = await submissionForSession(id)
     return NextResponse.json({
       session: {
         ...session,
-        items: session.items.map((item) => ({ ...item, unit_cost_snapshot: Number(item.unit_cost_snapshot), variance_value: Number(item.variance_value || 0) })),
+        items: session.items.map((item) => ({
+          ...item,
+          unit_cost_snapshot: canViewFinancials ? Number(item.unit_cost_snapshot) : null,
+          variance_value: canViewFinancials ? Number(item.variance_value || 0) : null,
+        })),
       },
+      access: { can_view_financials: canViewFinancials },
       can_count: canLocalAccountCount(user.is_staff === true, starter?.staff_type),
       is_area_manager_audit: areaManagerAudit,
       can_approve: canLocalOwnerReview({ isAuthorizedApprover: isAuthorizedApprover(user), status: session.status, submitterId: submission?.actor_id, starterId: session.started_by, actorId: actor(user).id }),

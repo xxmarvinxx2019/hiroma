@@ -20,7 +20,14 @@ import { sealPosOfflineScope } from "@/app/lib/posOfflineQueue";
 // NAV ITEMS
 // ============================================================
 
-const navItems = [
+type NavItem = { label: string; href: string; icon: string };
+type NavGroup = {
+  section: string;
+  items: NavItem[];
+  collapsible?: boolean;
+};
+
+const navItems: NavGroup[] = [
   {
     section: "Main",
     items: [
@@ -39,6 +46,39 @@ const navItems = [
       { label: "PINs", href: "/dashboard/city/pins", icon: "🔑" },
       { label: "Inventory", href: "/dashboard/city/inventory", icon: "📦" },
       { label: "Orders", href: "/dashboard/city/orders", icon: "🛒" },
+      {
+        label: "PIN Requests",
+        href: "/dashboard/city/pin-requests",
+        icon: "🔑",
+      },
+    ],
+  },
+  {
+    section: "Administration",
+    items: [
+      {
+        label: "Bank Deposits",
+        href: "/dashboard/city/deposits",
+        icon: "🏦",
+      },
+      { label: "Reports", href: "/dashboard/city/reports", icon: "📈" },
+      {
+        label: "Payment Methods",
+        href: "/dashboard/city/payment-methods",
+        icon: "💳",
+      },
+    ],
+  },
+  {
+    section: "Account",
+    items: [
+      { label: "Digital ID", href: "/dashboard/city/digital-id", icon: "" },
+    ],
+  },
+  {
+    section: "Point of Sale",
+    collapsible: true,
+    items: [
       { label: "Point of Sale", href: "/dashboard/city/pos", icon: "🧾" },
       {
         label: "Registration Center",
@@ -62,23 +102,6 @@ const navItems = [
         href: "/dashboard/city/pos/settings",
         icon: "⚙️",
       },
-      { label: "Reports", href: "/dashboard/city/reports", icon: "📈" },
-      {
-        label: "Payment Methods",
-        href: "/dashboard/city/payment-methods",
-        icon: "💳",
-      },
-      {
-        label: "PIN Requests",
-        href: "/dashboard/city/pin-requests",
-        icon: "🔑",
-      },
-    ],
-  },
-  {
-    section: "Account",
-    items: [
-      { label: "Digital ID", href: "/dashboard/city/digital-id", icon: "" },
     ],
   },
 ];
@@ -136,7 +159,8 @@ const navPermission: Record<string, string> = {
   "/dashboard/city/pos/history": "pos",
   "/dashboard/city/pos/sync": "pos",
   "/dashboard/city/pos/settings": "pos",
-  "/dashboard/city/reports": "reports|orders",
+  "/dashboard/city/deposits": "reports|deposit_submit|deposit_confirm",
+  "/dashboard/city/reports": "reports",
   "/dashboard/city/payment-methods": "payment_methods",
   "/dashboard/city/pin-requests": "pin_requests",
 };
@@ -175,6 +199,8 @@ function Sidebar({
   pendingTransfers: number;
   pendingWork: PendingWorkCounts;
 }) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
   const isActive = (href: string) => {
     if (href === "/dashboard/city") return pathname === href;
     if (href === "/dashboard/city/pos") return pathname === href;
@@ -226,12 +252,8 @@ function Sidebar({
           msOverflowStyle: "none",
         }}
       >
-        {navItems.map((group) => (
-          <div key={group.section} className="mb-3">
-            <p className="text-white/30 text-xs font-medium tracking-widest uppercase px-2 py-1">
-              {group.section}
-            </p>
-            {[
+        {navItems.map((group) => {
+          const visibleItems = [
               ...group.items,
               ...(group.section === "Main" && !user?.is_staff
                 ? [staffNavItem]
@@ -259,11 +281,53 @@ function Sidebar({
                   ? (cashierNavPriority[a.href] ?? 99) -
                     (cashierNavPriority[b.href] ?? 99)
                   : 0,
-              )
-              .map((item) => {
-                const workKey = pendingCountKey[item.href];
-                const pendingCount = workKey ? pendingWork[workKey] : 0;
-                return (
+              );
+
+          if (visibleItems.length === 0) return null;
+
+          const hasActiveItem = visibleItems.some((item) =>
+            isActive(item.href),
+          );
+          const isOpen =
+            !group.collapsible ||
+            (openGroups[group.section] ?? hasActiveItem);
+
+          return (
+            <div
+              key={group.section}
+              className="mb-3"
+            >
+              {group.collapsible ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenGroups((current) => ({
+                      ...current,
+                      [group.section]: !isOpen,
+                    }))
+                  }
+                  aria-expanded={Boolean(isOpen)}
+                  aria-label={`${isOpen ? "Collapse" : "Expand"} ${group.section} menu`}
+                  className="group flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium uppercase tracking-widest text-white/35 transition-colors hover:bg-white/[0.04] hover:text-white/60"
+                >
+                  <span>{group.section}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-5 w-5 items-center justify-center text-sm text-white/45 transition-transform group-hover:text-white/70 ${isOpen ? "rotate-180" : ""}`}
+                  >
+                    ⌄
+                  </span>
+                </button>
+              ) : (
+                <p className="px-2 py-1 text-xs font-medium uppercase tracking-widest text-white/30">
+                  {group.section}
+                </p>
+              )}
+              {isOpen &&
+                visibleItems.map((item) => {
+                  const workKey = pendingCountKey[item.href];
+                  const pendingCount = workKey ? pendingWork[workKey] : 0;
+                  return (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -298,10 +362,11 @@ function Sidebar({
                       </span>
                     )}
                   </Link>
-                );
-              })}
-          </div>
-        ))}
+                  );
+                })}
+            </div>
+          );
+        })}
       </nav>
 
       {/* Footer */}
