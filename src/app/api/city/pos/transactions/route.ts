@@ -56,9 +56,13 @@ function parseItems(value: unknown): RequestedItem[] | null {
   return items
 }
 
-async function receiptFor(clientTransactionId: string, ownerId: string) {
+async function receiptFor(clientTransactionId: string, ownerId: string, cashierId?: string) {
   const transaction = await prisma.posTransaction.findFirst({
-    where: { client_transaction_id: clientTransactionId, owner_id: ownerId },
+    where: {
+      client_transaction_id: clientTransactionId,
+      owner_id: ownerId,
+      ...(cashierId ? { cashier_id: cashierId } : {}),
+    },
     include: {
       order: { select: { id: true, order_number: true, created_at: true } },
       items: { orderBy: { product_name_snapshot: 'asc' } },
@@ -369,16 +373,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const replay = await receiptFor(clientTransactionId, user.id)
+    const replay = await receiptFor(
+      clientTransactionId,
+      user.id,
+      user.is_staff ? actorId : undefined,
+    )
     if (replay) return NextResponse.json({ receipt: replay, replayed: true })
 
     const result = await prisma.$transaction(
       async (tx) => {
         const existing = await tx.posTransaction.findUnique({
           where: { client_transaction_id: clientTransactionId },
-          select: { owner_id: true },
+          select: { owner_id: true, cashier_id: true },
         })
-        if (existing) throw new Error(existing.owner_id === user.id ? 'POS_REPLAY' : 'POS_ID_CONFLICT')
+        if (existing) {
+          const replayAllowed = existing.owner_id === user.id
+            && (!user.is_staff || existing.cashier_id === actorId)
+          throw new Error(replayAllowed ? 'POS_REPLAY' : 'POS_ID_CONFLICT')
+        }
 
         const [terminal, shift] = await Promise.all([
           tx.posTerminal.findFirst({
@@ -653,7 +665,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const receipt = await receiptFor(clientTransactionId, user.id)
+    const receipt = await receiptFor(
+      clientTransactionId,
+      user.id,
+      user.is_staff ? actorId : undefined,
+    )
     if (!receipt) throw new Error('POS_RECEIPT_MISSING')
     const client = getClientInfo(req)
     createAuditLog({
@@ -689,7 +705,11 @@ export async function POST(req: NextRequest) {
     console.error('[POS FINALIZE]', error)
     const code = error instanceof Error ? error.message : ''
     if (code === 'POS_REPLAY' || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
-      const receipt = await receiptFor(submittedClientTransactionId, user.id)
+      const receipt = await receiptFor(
+        submittedClientTransactionId,
+        user.id,
+        user.is_staff ? (user.actor_id || user.id) : undefined,
+      )
       if (receipt) return NextResponse.json({ receipt, replayed: true })
     }
     if (error instanceof InsufficientStockError)

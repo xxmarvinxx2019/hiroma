@@ -15,7 +15,8 @@ test("flushout report is admin-only and read-only", () => {
 test("financial truth remains separate from exact event enrichment", () => {
   assert.match(route, /commissions as the financial source of truth/);
   assert.match(route, /LEFT JOIN binary_pair_events e ON e\.flashout_commission_id=c\.id/);
-  assert.match(route, /CASE WHEN e\.id IS NOT NULL THEN 'exact' ELSE 'legacy' END data_quality/);
+  assert.match(route, /CASE WHEN e\.id IS NOT NULL OR c\.type='deactivation_wallet_transfer' THEN 'exact' ELSE 'legacy' END data_quality/);
+  assert.match(route, /c\.type='deactivation_wallet_transfer' OR \(c\.type='binary_pairing' AND COALESCE\(c\.points,0\)=0\)/);
   assert.match(route, /exact_coverage_percent/);
 });
 

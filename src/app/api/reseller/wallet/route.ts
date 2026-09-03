@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/resellerSecurityPin'
 import { CommissionType } from '@prisma/client'
 import { InsufficientPayoutFundsError, lockPayoutRequestsForUser, reservePayoutFunds } from '@/app/lib/payoutFunds'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── GET wallet balance + commission history + payout history ──
 export async function GET(req: NextRequest) {
@@ -126,13 +127,13 @@ export async function GET(req: NextRequest) {
         : Promise.resolve(null),
       dateRange
         ? prisma.payout.aggregate({
-            where: { user_id: user.id, status: 'released', processed_at: { lt: dateRange.lt } },
+            where: { user_id: user.id, status: 'released', released_at: { lt: dateRange.lt } },
             _sum: { amount: true },
           })
         : Promise.resolve(null),
       dateRange
         ? prisma.payout.aggregate({
-            where: { user_id: user.id, status: 'released', processed_at: dateRange },
+            where: { user_id: user.id, status: 'released', released_at: dateRange },
             _sum: { amount: true },
           })
         : Promise.resolve(null),
@@ -278,8 +279,7 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       })
       if (existingPending) throw new Error('PENDING_PAYOUT_EXISTS')
-      await reservePayoutFunds(tx, user.id, requestedAmount)
-      return tx.payout.create({ data: {
+      const created = await tx.payout.create({ data: {
         user_id:           user.id,
         amount:            requestedAmount,
         status:            'pending',
@@ -288,6 +288,21 @@ export async function POST(req: NextRequest) {
         cutoff_date:       cutoffDate,
         payout_date:       payoutDate,
       } })
+      await reservePayoutFunds(tx, created.id, user.id, requestedAmount)
+      await createRequiredAuditLog(tx, {
+        user_id: user.id,
+        user_name: user.full_name || user.username,
+        user_role: user.role,
+        member_id: formatMemberId(user.id, user.role),
+        activity_type: 'payout_requested',
+        category: 'payout',
+        description: `Requested a source-backed payout of ₱${requestedAmount.toFixed(2)}.`,
+        metadata: { payout_id: created.id, reseller_id: user.id, amount: requestedAmount, payment_method: resolvedMethod },
+        ...getClientInfo(req),
+        risk_level: 'medium',
+        status: 'completed',
+      })
+      return created
     })
 
     return NextResponse.json({

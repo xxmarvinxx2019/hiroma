@@ -30,6 +30,14 @@ test('reseller client types contain only approved Product Binary summary fields'
 
 test('server-side Product Binary accounting still records payable and flash-out totals', () => {
   const engine = read('src/app/lib/productBinary.ts')
-  assert.match(engine, /lifetime_payable=lifetime_payable\+/)
-  assert.match(engine, /lifetime_flashout=lifetime_flashout\+/)
+  assert.match(
+    engine,
+    /closingLifetimePayable = openingLifetimePayable \+ payablePairs/,
+  )
+  assert.match(
+    engine,
+    /closingLifetimeFlashout = openingLifetimeFlashout \+ capFlashPairs \+ inactivePairs/,
+  )
+  assert.match(engine, /lifetime_payable=\$\{closingLifetimePayable\}/)
+  assert.match(engine, /lifetime_flashout=\$\{closingLifetimeFlashout\}/)
 })

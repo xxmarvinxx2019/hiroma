@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { calculatePackageEconomics } from '@/app/lib/package-economics'
 import { PinStatus, Prisma } from '@prisma/client'
 
 const PIN_TYPES = new Set(['registration', 'upgrade'])
@@ -106,6 +105,10 @@ export async function GET(req: NextRequest) {
           pin_type: true,
           upgrade_from_package_id: true,
           pin_allocation_snapshot: true,
+          registration_package_name_snapshot: true,
+          registration_points_snapshot: true,
+          registration_product_line_count_snapshot: true,
+          registration_units_snapshot: true,
           created_at: true,
           used_at: true,
           cancelled_at: true,
@@ -114,12 +117,6 @@ export async function GET(req: NextRequest) {
             select: {
               name: true,
               price: true,
-              products: {
-                select: {
-                  quantity: true,
-                  product: { select: { price: true, reseller_price: true } },
-                },
-              },
             },
           },
           used_by_user: {
@@ -148,16 +145,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       pins: pins.map((pin) => ({
         ...pin,
+        snapshot_status: pin.pin_type !== 'registration' || (
+          pin.pin_allocation_snapshot != null
+          && pin.registration_points_snapshot != null
+          && pin.registration_product_line_count_snapshot != null
+          && pin.registration_units_snapshot != null
+        ) ? 'sealed' : 'unreconciled',
         upgrade_from_package: pin.upgrade_from_package_id
           ? packages.find((pkg) => pkg.id === pin.upgrade_from_package_id) || null
           : null,
         package: {
-          name: pin.package.name,
+          name: pin.registration_package_name_snapshot || pin.package.name,
           price: pin.pin_allocation_snapshot != null
             ? Number(pin.pin_allocation_snapshot)
-            : pin.package.products.length > 0
-            ? calculatePackageEconomics(pin.package.products).pinAllocation
-            : Number(pin.package.price),
+            : null,
         },
       })),
       packages,

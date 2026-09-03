@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { releasePayoutFunds } from '@/app/lib/payoutFunds'
+import { generatePayoutTransactionNumber } from '@/app/lib/payoutTransactionNumber'
 
-function generateTransactionNumber() {
-  const now  = new Date()
-  const year = now.getFullYear()
-  const rand = Math.random().toString(36).substring(2, 8).toUpperCase()
-  return `PAY-${year}-${rand}`
+function isPayoutSourceAllocationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    message.includes('Payout is not fully backed by payable commission lots.') ||
+    message.includes('Historical payouts require full source-allocation reconciliation.')
+  )
 }
 
 // ── GET all payouts with filter & pagination ──
@@ -111,7 +113,7 @@ export async function PATCH(req: NextRequest) {
 
     const payout = await prisma.payout.findUnique({
       where:  { id: payout_id },
-      select: { id: true, status: true, amount: true, user_id: true },
+      select: { id: true, status: true, amount: true, user_id: true, requested_at: true },
     })
     if (!payout) {
       return NextResponse.json({ error: 'Payout not found.' }, { status: 404 })
@@ -121,17 +123,34 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === 'approve') {
-      const txNumber = generateTransactionNumber()
+      const txNumber = generatePayoutTransactionNumber(payout.id, payout.requested_at)
 
       // Approve only — wallet is deducted when cron releases on payout_date
-      const claimed = await prisma.payout.updateMany({
-        where: { id: payout_id, status: 'pending' },
-        data: {
-          status: 'approved', approved_by: user.id, processed_at: new Date(),
-          transaction_number: txNumber, notes: notes || null,
-        },
+      const approved = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.payout.updateMany({
+          where: { id: payout_id, status: 'pending' },
+          data: {
+            status: 'approved', approved_by: user.id, processed_at: new Date(),
+            transaction_number: txNumber, notes: notes || null,
+          },
+        })
+        if (claimed.count !== 1) return false
+        await createRequiredAuditLog(tx, {
+          user_id: user.id,
+          user_name: user.full_name || user.username,
+          user_role: user.role,
+          member_id: formatMemberId(user.id, user.role),
+          activity_type: 'payout_approved',
+          category: 'payout',
+          description: `Approved fully allocated payout ${payout_id}.`,
+          metadata: { payout_id, reseller_id: payout.user_id, amount: Number(payout.amount), transaction_number: txNumber },
+          ...getClientInfo(req),
+          risk_level: 'high',
+          status: 'completed',
+        })
+        return true
       })
-      if (claimed.count !== 1) {
+      if (!approved) {
         return NextResponse.json({ error: 'Payout was already processed by another request.' }, { status: 409 })
       }
 
@@ -145,7 +164,20 @@ export async function PATCH(req: NextRequest) {
           data: { status: 'rejected', approved_by: user.id, processed_at: new Date(), notes: notes || null },
         })
         if (claimed.count !== 1) return false
-        await releasePayoutFunds(tx, payout.user_id, Number(payout.amount))
+        await releasePayoutFunds(tx, payout.id, payout.user_id, Number(payout.amount))
+        await createRequiredAuditLog(tx, {
+          user_id: user.id,
+          user_name: user.full_name || user.username,
+          user_role: user.role,
+          member_id: formatMemberId(user.id, user.role),
+          activity_type: 'payout_rejected',
+          category: 'payout',
+          description: `Rejected payout ${payout_id} and released its reservation.`,
+          metadata: { payout_id, reseller_id: payout.user_id, amount: Number(payout.amount), notes: notes || null },
+          ...getClientInfo(req),
+          risk_level: 'high',
+          status: 'completed',
+        })
         return true
       })
       if (!rejected) {
@@ -156,6 +188,16 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid action.' }, { status: 400 })
   } catch (error) {
+    if (isPayoutSourceAllocationError(error)) {
+      console.error('[ADMIN PAYOUTS FUNDING CONFLICT]', error)
+      return NextResponse.json(
+        {
+          error:
+            'Payout cannot be approved because its spendable commission sources are not fully allocated. Reconcile the member ledger first.',
+        },
+        { status: 409 },
+      )
+    }
     console.error('[ADMIN PAYOUTS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

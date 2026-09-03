@@ -30,17 +30,12 @@ test('database counter increment is conditional on the configured maximum', () =
   assert.match(helper, /WHERE "identity_account_limits"\."count" < "identity_account_limits"\."max_allowed"/)
 })
 
-test('admin and city registrations claim identity capacity before user creation', () => {
-  for (const path of [
-    'src/app/api/admin/resellers/register/route.ts',
-    'src/app/api/city/resellers/route.ts',
-  ]) {
-    const source = readFileSync(path, 'utf8')
-    const claim = source.indexOf('claimIdentityAccountSlot(tx, identityDocumentHash)')
-    const createUser = source.indexOf('tx.user.create')
-    assert.ok(claim >= 0 && createUser >= 0 && claim < createUser)
-    assert.match(source, /error instanceof IdentityAccountLimitError/)
-  }
+test('City/Branch registration claims identity capacity before user creation', () => {
+  const source = readFileSync('src/app/api/city/resellers/route.ts', 'utf8')
+  const claim = source.indexOf('claimIdentityAccountSlot(tx, identityDocumentHash)')
+  const createUser = source.indexOf('tx.user.create')
+  assert.ok(claim >= 0 && createUser >= 0 && claim < createUser)
+  assert.match(source, /error instanceof IdentityAccountLimitError/)
 })
 
 test('migration backfills existing verified identities and rejects legacy over-limit state', () => {

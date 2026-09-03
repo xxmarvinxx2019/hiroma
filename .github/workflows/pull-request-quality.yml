@@ -1,0 +1,49 @@
+name: Application quality gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Application quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run complete test suite
+        run: npm run test:all
+
+      - name: Validate TypeScript
+        run: npx tsc --noEmit
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Build production application without external credentials
+        run: npm run build

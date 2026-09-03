@@ -46,8 +46,13 @@ export async function POST(req: NextRequest) {
         upgrade_customer_payment_snapshot: true,
         upgrade_reseller_value_snapshot: true,
         upgrade_acquisition_cost_snapshot: true,
+        upgrade_acquisition_tier_snapshot: true,
+        upgrade_direct_allocation_snapshot: true,
         upgrade_binary_allocation_snapshot: true,
         upgrade_points_difference_snapshot: true,
+        upgrade_product_snapshots: {
+          select: { product_id: true, quantity: true, unit_acquisition_cost_snapshot: true },
+        },
         package: {
           select: {
             id: true,
@@ -65,24 +70,28 @@ export async function POST(req: NextRequest) {
     if (pin.pin_type !== 'upgrade') return NextResponse.json({ error: 'A registration PIN cannot be used here. Enter a dedicated Upgrade PIN.' }, { status: 400 })
     if (pin.upgrade_from_package_id !== reseller.package_id) return NextResponse.json({ error: `This Upgrade PIN is not valid from the reseller's current ${reseller.package.name} package.` }, { status: 400 })
     if (pin.package_id !== target_package_id) return NextResponse.json({ error: `PIN mismatch: this PIN is for ${pin.package.name}, not the selected target package.` }, { status: 400 })
-    if (Number(pin.package.pairing_bonus_value) <= Number(reseller.package.pairing_bonus_value)) {
-      return NextResponse.json({ error: 'The selected package must be higher than the current package.' }, { status: 400 })
-    }
     if (
       pin.pin_allocation_snapshot == null ||
       pin.upgrade_customer_payment_snapshot == null ||
       pin.upgrade_reseller_value_snapshot == null ||
       pin.upgrade_acquisition_cost_snapshot == null ||
+      (pin.upgrade_acquisition_tier_snapshot !== 'city' && pin.upgrade_acquisition_tier_snapshot !== 'branch') ||
+      pin.upgrade_direct_allocation_snapshot == null ||
       pin.upgrade_binary_allocation_snapshot == null ||
-      pin.upgrade_points_difference_snapshot == null
+      pin.upgrade_points_difference_snapshot == null ||
+      !Number.isInteger(Number(pin.upgrade_points_difference_snapshot)) ||
+      Number(pin.upgrade_points_difference_snapshot) <= 0
     ) {
       return NextResponse.json({ error: 'This Upgrade PIN has no complete financial snapshot.' }, { status: 400 })
     }
 
-    const currentQuantities = new Map(reseller.package.products.map((item) => [item.product_id, item.quantity]))
-    const extraProducts = pin.package.products
-      .map((item) => ({ product_id: item.product_id, quantity: item.quantity - (currentQuantities.get(item.product_id) || 0) }))
-      .filter((item) => item.quantity > 0)
+    const extraProducts = pin.upgrade_product_snapshots
+    if (
+      extraProducts.length === 0 ||
+      extraProducts.some((item) => item.unit_acquisition_cost_snapshot == null)
+    ) {
+      return NextResponse.json({ error: 'This Upgrade PIN has no product-release snapshot. Cancel it and generate a new PIN.' }, { status: 400 })
+    }
     const stock = extraProducts.length
       ? await prisma.inventory.findMany({
           where: { owner_id: user.id, product_id: { in: extraProducts.map((item) => item.product_id) } },

@@ -20,19 +20,42 @@ export async function generateMemberId(
   registeredAt = new Date(),
 ): Promise<string> {
   const year = memberIdYear(registeredAt)
-  const prefix = `${MEMBER_ID_PREFIX}-${year}-`
-
-  await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext(${`hiroma-member-id-${year}`}))
+  // Keep allocation state outside `users`. A deleted account must never make its
+  // public Member ID available to a later registration and an old QR code. The
+  // issuance tombstone is created in the same statement as the high-water
+  // increment, so no allocated ID can be omitted or reused.
+  const rows = await tx.$queryRaw<Array<{
+    member_id: string
+    allocated_sequence: number
+  }>>`
+    WITH allocated AS (
+      INSERT INTO member_id_sequences (year, last_sequence)
+      VALUES (${year}, 1)
+      ON CONFLICT (year) DO UPDATE
+        SET last_sequence = member_id_sequences.last_sequence + 1
+      RETURNING last_sequence AS allocated_sequence
+    ), issued AS (
+      INSERT INTO member_id_issuances (
+        member_id, year, sequence, evidence_source, allocated_at
+      )
+      SELECT
+        ${MEMBER_ID_PREFIX} || '-' || ${year} || '-' ||
+          lpad(allocated_sequence::text, 6, '0'),
+        ${year}, allocated_sequence, 'runtime_allocation', CURRENT_TIMESTAMP
+      FROM allocated
+      RETURNING member_id, sequence AS allocated_sequence
+    )
+    SELECT member_id, allocated_sequence FROM issued
   `
 
-  const rows = await tx.$queryRaw<Array<{ highest_sequence: number | bigint | null }>>`
-    SELECT MAX(split_part(member_id, '-', 3)::integer) AS highest_sequence
-    FROM users
-    WHERE member_id LIKE ${`${prefix}%`}
-      AND member_id ~ ${`^${MEMBER_ID_PREFIX}-[0-9]{4}-[0-9]{6}$`}
-  `
-
-  const nextSequence = Number(rows[0]?.highest_sequence ?? 0) + 1
-  return `${prefix}${String(nextSequence).padStart(6, '0')}`
+  const nextSequence = Number(rows[0]?.allocated_sequence)
+  const memberId = rows[0]?.member_id
+  if (
+    !Number.isSafeInteger(nextSequence) ||
+    nextSequence < 1 ||
+    memberId !== `${MEMBER_ID_PREFIX}-${year}-${String(nextSequence).padStart(6, '0')}`
+  ) {
+    throw new Error('Unable to allocate a permanent Member ID sequence.')
+  }
+  return memberId
 }

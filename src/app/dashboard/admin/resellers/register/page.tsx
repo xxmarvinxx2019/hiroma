@@ -411,19 +411,21 @@ export default function AdminRegisterResellerPage() {
       return
     }
 
-    const query = new URLSearchParams({
-      name: normalizedName,
-      birthday,
-      birthplace: birthplace.trim(),
-      identity_document_type: form.identity_document_type,
-      identity_document_number: form.identity_document_number,
-      mobile: form.mobile,
-      email: form.email,
-      identity_confirmation: confirmation || '',
+    const res = await fetch('/api/city/resellers/check-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({
+        name: normalizedName,
+        birthday,
+        birthplace: birthplace.trim(),
+        identity_document_type: form.identity_document_type,
+        identity_document_number: form.identity_document_number,
+        mobile: form.mobile,
+        email: form.email,
+        identity_confirmation: confirmation || '',
+      }),
     })
-    const res = await fetch(
-      `/api/city/resellers/check-name?${query.toString()}`,
-    )
     const data = await res.json()
     if (!res.ok) {
       setNameCapInfo(data)
@@ -614,7 +616,6 @@ export default function AdminRegisterResellerPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         reseller_id: successData.id,
-        password: form.password,
       }),
     })
     const data = await res.json()
@@ -624,7 +625,7 @@ export default function AdminRegisterResellerPage() {
       res.ok
         ? {
             type: 'success',
-            message: data.message || 'Login credentials sent by SMS.',
+            message: data.message || 'A one-time password setup link was sent by SMS.',
           }
         : { type: 'error', message: data.error || 'SMS could not be sent.' },
     )
@@ -1471,7 +1472,7 @@ export default function AdminRegisterResellerPage() {
             {/* Terms & Conditions */}
             <p className="text-[11px] text-gray-400 -mt-2">
               Generated from the member&apos;s name initials plus six random digits.
-              It is included in the welcome SMS.
+              It is required to create the account, but it is never sent in the welcome SMS.
             </p>
             <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg p-3">
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -1598,11 +1599,11 @@ export default function AdminRegisterResellerPage() {
               📱
             </div>
             <h3 className="text-lg font-bold text-[#0D1B3E] text-center mt-3">
-              Send login credentials?
+              Send a secure setup link?
             </h3>
             <p className="text-sm text-gray-500 text-center mt-2">
-              Send the username and initial password to the reseller&apos;s
-              registered mobile number via SMS?
+              Send the username and a single-use password setup link to the
+              reseller&apos;s registered mobile number via SMS?
             </p>
             <div className="flex gap-2 mt-5">
               <button

@@ -14,8 +14,20 @@ interface Pin {
   used_by_user:     { full_name: string; username: string } | null
 }
 
-interface Package { id: string; name: string; price: number; is_active: boolean }
-interface CityDist { id: string; full_name: string; username: string }
+interface UpgradePath {
+  from_package_id: string
+  customer_price: number
+  pin_price: number
+  from_package: { id: string; name: string }
+  products: Array<{ product_id: string; quantity: number; product: { name: string } }>
+}
+interface Package { id: string; name: string; price: number; is_active: boolean; upgrade_paths_to: UpgradePath[] }
+interface CityDist {
+  id: string
+  full_name: string
+  username: string
+  distributor_profile?: { dist_level: string } | null
+}
 
 const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -51,6 +63,12 @@ export default function PinsPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [distSearch, setDistSearch]   = useState('')
   const [showDistDrop, setShowDistDrop] = useState(false)
+  const selectedUpgradePath = form.pin_type === 'upgrade'
+    ? packages.find((pkg) => pkg.id === form.package_id)?.upgrade_paths_to?.find((path) => path.from_package_id === form.upgrade_from_package_id)
+    : undefined
+  const eligiblePinRecipients = form.pin_type === 'upgrade'
+    ? cityDists.filter((distributor) => distributor.distributor_profile?.dist_level === 'city' || distributor.distributor_profile?.dist_level === 'branch')
+    : cityDists
 
   // Date filter
   const todayStr = new Date().toISOString().slice(0, 10)
@@ -87,10 +105,10 @@ export default function PinsPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/admin/packages?pageSize=100&active=true').then(r => r.json()),
-      fetch('/api/admin/distributors?pageSize=200&level=city').then(r => r.json()),
+      fetch('/api/admin/distributors?pageSize=200&parent_level=city,branch').then(r => r.json()),
     ]).then(([pd, dd]) => {
       setPackages(pd.packages || [])
-      const list = (dd.distributors || []).filter((d: any) => d.distributor_profile?.dist_level === 'city')
+      const list = (dd.distributors || []).filter((d: CityDist) => d.distributor_profile?.dist_level === 'city' || d.distributor_profile?.dist_level === 'branch')
       setCityDists([{ id: dd.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin' }, ...list])
     })
   }, [])
@@ -368,20 +386,20 @@ export default function PinsPage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">PIN purpose</label>
-                <select value={form.pin_type} onChange={e => setForm({ ...form, pin_type: e.target.value, package_id: '', upgrade_from_package_id: '' })}
+                <select value={form.pin_type} onChange={e => setForm({ ...form, pin_type: e.target.value, package_id: '', city_dist_id: '', upgrade_from_package_id: '' })}
                   className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
                   <option value="registration">New reseller registration PIN</option>
                   <option value="upgrade">Package upgrade PIN</option>
                 </select>
-                <p className="mt-1 text-[10px] text-gray-400">Upgrade PIN value is computed automatically from the current package to the target package.</p>
+                <p className="mt-1 text-[10px] text-gray-400">Upgrade PINs use the exact price and products configured in Admin Packages.</p>
               </div>
               {form.pin_type === 'upgrade' && (
                 <div>
                   <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Reseller’s current package</label>
-                  <select value={form.upgrade_from_package_id} onChange={e => setForm({ ...form, upgrade_from_package_id: e.target.value })}
+                  <select value={form.upgrade_from_package_id} onChange={e => setForm({ ...form, upgrade_from_package_id: e.target.value, package_id: '' })}
                     className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
                     <option value="">Select current package...</option>
-                    {packages.filter(p => p.id !== form.package_id).map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
+                    {packages.filter((source) => packages.some((target) => target.upgrade_paths_to?.some((path) => path.from_package_id === source.id))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
               )}
@@ -391,12 +409,27 @@ export default function PinsPage() {
                 <select value={form.package_id} onChange={e => setForm({ ...form, package_id: e.target.value })}
                   className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]">
                   <option value="">Select package...</option>
-                  {packages.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.price)}</option>)}
+                  {packages.filter((pkg) => form.pin_type !== 'upgrade' || !form.upgrade_from_package_id || pkg.upgrade_paths_to?.some((path) => path.from_package_id === form.upgrade_from_package_id)).map(p => {
+                    const configuredPath = p.upgrade_paths_to?.find((path) => path.from_package_id === form.upgrade_from_package_id)
+                    return <option key={p.id} value={p.id}>{p.name} — {fmt(form.pin_type === 'upgrade' && configuredPath ? configuredPath.pin_price : p.price)}</option>
+                  })}
                 </select>
               </div>
+              {form.pin_type === 'upgrade' && form.upgrade_from_package_id && form.package_id && (
+                selectedUpgradePath ? (
+                  <div className="rounded-xl border border-[#C9A84C]/40 bg-[#fffaf0] p-3 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-500">Customer upgrade price</span><strong className="text-[#0D1B3E]">{fmt(selectedUpgradePath.customer_price)}</strong></div>
+                    <div className="mt-1 flex justify-between"><span className="text-gray-500">Upgrade PIN price</span><strong className="text-[#1a7a4a]">{fmt(selectedUpgradePath.pin_price)}</strong></div>
+                    <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Products to release</p>
+                    {selectedUpgradePath.products.map((item) => <div key={item.product_id} className="mt-1 flex justify-between"><span>{item.product.name}</span><span>×{item.quantity}</span></div>)}
+                  </div>
+                ) : (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">This upgrade path is not configured in Packages.</p>
+                )
+              )}
               {/* City Dist */}
               <div className="relative">
-                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Assign to City Distributor</label>
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Assign to City Distributor or Branch</label>
                 <input
                   value={distSearch !== '' ? distSearch : form.city_dist_id ? (cityDists.find(d => d.id === form.city_dist_id)?.full_name || '') : ''}
                   onChange={e => {
@@ -411,11 +444,11 @@ export default function PinsPage() {
                   className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]" />
                 {showDistDrop && (
                   <div className="absolute top-full left-0 right-0 z-[9999] bg-white border border-[#0D1B3E]/10 rounded-xl shadow-xl mt-1 max-h-48 overflow-y-auto">
-                    {cityDists.filter(d => !distSearch || d.full_name.toLowerCase().includes(distSearch.toLowerCase()) || d.username.toLowerCase().includes(distSearch.toLowerCase())).map(d => (
+                    {eligiblePinRecipients.filter(d => !distSearch || d.full_name.toLowerCase().includes(distSearch.toLowerCase()) || d.username.toLowerCase().includes(distSearch.toLowerCase())).map(d => (
                       <button key={d.id} onClick={() => { setForm({ ...form, city_dist_id: d.id }); setDistSearch(''); setShowDistDrop(false) }}
                         className={`w-full text-left px-4 py-2.5 hover:bg-[#f8f9fc] text-sm transition-colors ${form.city_dist_id === d.id ? 'bg-[#f0f2f8]' : ''}`}>
                         <p className="font-medium text-[#0D1B3E]">{d.full_name}</p>
-                        <p className="text-[10px] text-gray-400">@{d.username}</p>
+                        <p className="text-[10px] text-gray-400">@{d.username}{d.distributor_profile?.dist_level ? ` · ${d.distributor_profile.dist_level}` : ''}</p>
                       </button>
                     ))}
                   </div>

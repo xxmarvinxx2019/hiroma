@@ -4,13 +4,23 @@ import { getCurrentUser } from "@/app/lib/auth";
 import prisma from "@/app/lib/prisma";
 import { releasePosRegistrationPackage } from "@/app/lib/posRegistration";
 import { InsufficientStockError } from "@/app/lib/inventoryReservation";
-import { validateIdentityDocument } from "@/app/lib/identityDocument";
+import { hashIdentityDocument } from "@/app/lib/identityDocument";
 import { notifyPosReviewers } from "@/app/lib/posNotifications";
 import {
   createRequiredAuditLog,
   formatMemberId,
   getClientInfo,
 } from "@/app/lib/auditLog";
+import {
+  buildRegistrationPinSnapshot,
+  RegistrationPinSnapshotError,
+  type RegistrationAcquisitionTier,
+} from "@/app/lib/registrationPinSnapshot";
+import {
+  assertPlacementWithinReferrerSubtree,
+  InvalidBinaryTreePlacementError,
+} from "@/app/lib/binaryTreePlacement";
+import { lockPosRegistrationApplicant } from "@/app/lib/posRegistrationApplicant";
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -242,9 +252,11 @@ export async function POST(req: NextRequest) {
   if (!user || user.role !== "city")
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const actorId = user.actor_id || user.id;
+  let replayClientIntakeId = "";
   try {
     const body = await req.json();
     const clientIntakeId = clean(body.client_intake_id, 36);
+    replayClientIntakeId = clientIntakeId;
     const receiptNumber = clean(body.receipt_number, 80).toUpperCase();
     const terminalId = clean(body.terminal_id, 36);
     const shiftId = clean(body.shift_id, 36);
@@ -347,8 +359,12 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    let identityDocumentHash = "";
     try {
-      validateIdentityDocument(identityDocumentType, identityDocumentReference);
+      identityDocumentHash = hashIdentityDocument(
+        identityDocumentType,
+        identityDocumentReference,
+      );
     } catch (reason) {
       return NextResponse.json(
         {
@@ -362,7 +378,11 @@ export async function POST(req: NextRequest) {
     }
 
     const existing = await prisma.posRegistrationIntake.findFirst({
-      where: { client_intake_id: clientIntakeId, owner_id: user.id },
+      where: {
+        client_intake_id: clientIntakeId,
+        owner_id: user.id,
+        ...(user.is_staff ? { cashier_id: actorId } : {}),
+      },
       select: selection,
     });
     if (existing)
@@ -373,7 +393,8 @@ export async function POST(req: NextRequest) {
 
     const registration = await prisma.$transaction(
       async (tx) => {
-        const [terminal, shift, packageRow] = await Promise.all([
+        await lockPosRegistrationApplicant(tx, identityDocumentHash);
+        const [terminal, shift, packageRow, ownerProfile, referrer, upline] = await Promise.all([
           tx.posTerminal.findFirst({
             where: { id: terminalId, owner_id: user.id, is_active: true },
             select: { id: true },
@@ -393,12 +414,42 @@ export async function POST(req: NextRequest) {
             select: {
               id: true,
               name: true,
+              price: true,
+              direct_referral_bonus: true,
+              pairing_bonus_value: true,
               products: {
                 select: {
+                  product_id: true,
                   quantity: true,
-                  product: { select: { id: true, name: true, price: true } },
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      price: true,
+                      reseller_price: true,
+                      city_price: true,
+                      branch_price: true,
+                      cost_price: true,
+                    },
+                  },
                 },
               },
+            },
+          }),
+          tx.distributorProfile.findUnique({
+            where: { user_id: user.id },
+            select: { dist_level: true, is_active: true },
+          }),
+          tx.user.findUnique({
+            where: { username: referrerUsername },
+            select: { id: true, username: true, role: true, status: true },
+          }),
+          tx.user.findUnique({
+            where: { username: uplineUsername },
+            select: {
+              id: true,
+              username: true,
+              binary_tree_node: { select: { id: true } },
             },
           }),
         ]);
@@ -406,6 +457,40 @@ export async function POST(req: NextRequest) {
         if (!shift) throw new Error("POS_SHIFT_INVALID");
         if (!packageRow || packageRow.products.length === 0)
           throw new Error("POS_PACKAGE_INVALID");
+        const acquisitionTier: RegistrationAcquisitionTier | null =
+          ownerProfile?.is_active
+            && (ownerProfile.dist_level === "city" || ownerProfile.dist_level === "branch")
+            ? ownerProfile.dist_level
+            : null;
+        if (!acquisitionTier) throw new Error("POS_OUTLET_INVALID");
+        if (
+          !referrer ||
+          referrer.status !== "active" ||
+          (referrer.role !== "reseller" && referrer.username !== "hiroma")
+        ) throw new Error("POS_REFERRER_INVALID");
+        if (!upline?.binary_tree_node) throw new Error("POS_UPLINE_INVALID");
+        await assertPlacementWithinReferrerSubtree(
+          tx,
+          referrer.id,
+          upline.binary_tree_node.id,
+        );
+        const occupiedSlot = await tx.binaryTreeNode.findFirst({
+          where: {
+            parent_id: upline.binary_tree_node.id,
+            position: preferredPosition,
+          },
+          select: { id: true },
+        });
+        if (occupiedSlot) throw new Error("POS_SLOT_UNAVAILABLE");
+        const registrationSnapshot = buildRegistrationPinSnapshot({
+          packageId: packageRow.id,
+          packageName: packageRow.name,
+          configuredPinPrice: packageRow.price,
+          directAllocation: packageRow.direct_referral_bonus,
+          points: packageRow.pairing_bonus_value,
+          acquisitionTier,
+          products: packageRow.products,
+        });
         const verificationByProduct = new Map<
           string,
           Record<string, unknown>
@@ -461,10 +546,7 @@ export async function POST(req: NextRequest) {
               160,
             );
         }
-        const amount = packageRow.products.reduce(
-          (sum, item) => sum + Number(item.product.price) * item.quantity,
-          0,
-        );
+        const amount = registrationSnapshot.customerPayment;
         const initialStatus =
           paymentSelection === "cash"
             ? "draft_intake"
@@ -488,6 +570,7 @@ export async function POST(req: NextRequest) {
             applicant_address: address,
             identity_document_type: identityDocumentType,
             identity_document_reference: identityDocumentReference,
+            identity_document_hash: identityDocumentHash,
             referrer_username: referrerUsername,
             preferred_position: preferredPosition,
             applicant_snapshot: {
@@ -500,15 +583,19 @@ export async function POST(req: NextRequest) {
               full_name: fullName,
               referrer_full_name: referrerFullName,
               referrer_username: referrerUsername,
+              referrer_user_id: referrer.id,
               upline_full_name: uplineFullName,
               upline_username: uplineUsername,
+              parent_node_id: upline.binary_tree_node.id,
               preferred_position: preferredPosition,
               package_release_verification: verifiedPackageContents,
+              identity_document_hash: identityDocumentHash,
             },
             payment_method_snapshot: paymentMethodSnapshot,
             payment_reference: paymentReference,
             payment_proof_url: clean(body.payment_proof_url, 500) || null,
             amount_snapshot: amount,
+            registration_snapshot: registrationSnapshot as unknown as Prisma.InputJsonValue,
             captured_offline: capturedOffline,
             notes: clean(body.notes, 1000) || null,
             local_created_at: localCreatedAt,
@@ -584,12 +671,42 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
+    if (error instanceof RegistrationPinSnapshotError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof InvalidBinaryTreePlacementError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (
+      replayClientIntakeId &&
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const existing = await prisma.posRegistrationIntake.findFirst({
+        where: {
+          client_intake_id: replayClientIntakeId,
+          owner_id: user.id,
+          ...(user.is_staff ? { cashier_id: actorId } : {}),
+        },
+        select: selection,
+      });
+      if (existing) {
+        return NextResponse.json({
+          registration: responseRow(existing),
+          replayed: true,
+        });
+      }
+    }
     const message = error instanceof Error ? error.message : "";
     const known: Record<string, string> = {
       POS_TERMINAL_INVALID: "This POS terminal is invalid or inactive.",
       POS_SHIFT_INVALID:
         "Open a valid cashier shift before accepting a registration.",
       POS_PACKAGE_INVALID: "The selected registration package is unavailable.",
+      POS_OUTLET_INVALID: "The City/Branch outlet is inactive or has an invalid pricing tier.",
+      POS_REFERRER_INVALID: "The selected sponsor is missing, inactive, or not eligible to sponsor a reseller.",
+      POS_UPLINE_INVALID: "The selected upline does not have a valid binary-tree position.",
+      POS_SLOT_UNAVAILABLE: "The selected upline leg is already occupied. Refresh the placement before accepting payment.",
       POS_PACKAGE_RELEASE_UNVERIFIED:
         "Verify every physical product and required quantity in the selected package before saving the registration.",
       POS_PAYMENT_INVALID: "The selected receiving account is unavailable.",
@@ -598,7 +715,10 @@ export async function POST(req: NextRequest) {
     };
     if (known[message])
       return NextResponse.json({ error: known[message] }, { status: 400 });
-    if (message.includes("Unique constraint")) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       return NextResponse.json(
         { error: "This receipt or payment reference was already recorded." },
         { status: 409 },

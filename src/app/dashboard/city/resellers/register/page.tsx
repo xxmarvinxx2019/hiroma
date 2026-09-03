@@ -338,8 +338,9 @@ function CityRegisterResellerPageInner() {
     setSmsStatus(null);
   }, []);
 
-  // A released POS intake pre-fills the applicant record. PIN verification,
-  // sponsor placement, and final review remain deliberate encoder actions.
+  // A released POS intake pre-fills the applicant record. Its paid sponsor,
+  // upline, and leg are immutable; PIN verification and final review remain
+  // deliberate encoder actions.
   useEffect(() => {
     const intakeId = searchParams.get("pos_intake");
     if (!intakeId) return;
@@ -497,7 +498,7 @@ function CityRegisterResellerPageInner() {
           });
         } else if (posRequestedPosition) {
           setReferralError(
-            `The POS requested the ${posRequestedPosition} side under @${posRequestedUpline}, but that slot is not currently available. Select another verified placement.`,
+            `The paid POS placement (${posRequestedPosition} under @${posRequestedUpline}) is no longer available. Start an authorized correction; do not substitute another sponsor, upline, or leg.`,
           );
         }
       }
@@ -526,19 +527,21 @@ function CityRegisterResellerPageInner() {
       return;
     }
 
-    const query = new URLSearchParams({
-      name: normalizedName,
-      birthday,
-      birthplace: birthplace.trim(),
-      identity_document_type: form.identity_document_type,
-      identity_document_number: form.identity_document_number,
-      mobile: form.mobile,
-      email: form.email,
-      identity_confirmation: confirmation || "",
+    const res = await fetch("/api/city/resellers/check-name", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        name: normalizedName,
+        birthday,
+        birthplace: birthplace.trim(),
+        identity_document_type: form.identity_document_type,
+        identity_document_number: form.identity_document_number,
+        mobile: form.mobile,
+        email: form.email,
+        identity_confirmation: confirmation || "",
+      }),
     });
-    const res = await fetch(
-      `/api/city/resellers/check-name?${query.toString()}`,
-    );
     const data = await res.json();
     if (!res.ok) {
       setNameCapInfo(data);
@@ -719,7 +722,6 @@ function CityRegisterResellerPageInner() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         reseller_id: successData.id,
-        password: form.password,
       }),
     });
     const data = await res.json();
@@ -729,7 +731,7 @@ function CityRegisterResellerPageInner() {
       res.ok
         ? {
             type: "success",
-            message: data.message || "Login credentials sent by SMS.",
+            message: data.message || "A one-time password setup link was sent by SMS.",
           }
         : { type: "error", message: data.error || "SMS could not be sent." },
     );
@@ -1111,6 +1113,7 @@ function CityRegisterResellerPageInner() {
               <div className="flex gap-2">
                 <input
                   value={referralInput}
+                  disabled={Boolean(posIntakeId)}
                   onChange={(e) => {
                     setReferralInput(e.target.value.toLowerCase());
                     setReferralError("");
@@ -1120,7 +1123,7 @@ function CityRegisterResellerPageInner() {
                   }}
                   onKeyDown={(e) => e.key === "Enter" && verifyReferral()}
                   placeholder="Enter referrer's username"
-                  className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]"
+                  className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:opacity-70"
                 />
                 <button
                   onClick={verifyReferral}
@@ -1182,15 +1185,16 @@ function CityRegisterResellerPageInner() {
                   <div className="relative slot-dropdown-container">
                     <input
                       value={slotSearch}
+                      disabled={Boolean(posIntakeId)}
                       onChange={(e) => {
                         setSlotSearch(e.target.value);
                         setSlotDropdownOpen(true);
                       }}
                       onFocus={() => setSlotDropdownOpen(true)}
                       placeholder="Type name or username..."
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
+                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-70"
                     />
-                    {slotDropdownOpen &&
+                    {!posIntakeId && slotDropdownOpen &&
                       !slotsLoading &&
                       availableSlots.length > 0 && (
                         <div className="absolute top-full left-0 right-0 z-50 bg-white border border-[#0D1B3E]/15 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
@@ -1558,7 +1562,7 @@ function CityRegisterResellerPageInner() {
             {/* Terms & Conditions */}
             <p className="text-[11px] text-gray-400 -mt-2">
               Generated from the member&apos;s name initials plus six random digits.
-              It is included in the welcome SMS.
+              It is required to create the account, but it is never sent in the welcome SMS.
             </p>
             <div className="bg-[#fef9ee] border border-[#C9A84C]/30 rounded-lg p-3">
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -1685,11 +1689,11 @@ function CityRegisterResellerPageInner() {
               📱
             </div>
             <h3 className="text-lg font-bold text-[#0D1B3E] text-center mt-3">
-              Send login credentials?
+              Send a secure setup link?
             </h3>
             <p className="text-sm text-gray-500 text-center mt-2">
-              Send the username and initial password to the reseller&apos;s
-              registered mobile number via SMS?
+              Send the username and a single-use password setup link to the
+              reseller&apos;s registered mobile number via SMS?
             </p>
             <div className="flex gap-2 mt-5">
               <button

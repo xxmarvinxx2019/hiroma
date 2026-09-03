@@ -8,8 +8,14 @@
     "start": "next start",
     "lint": "eslint",
     "reset:prelaunch": "tsx scripts/prelaunch-reset.ts",
+    "test:all": "tsx --test tests/*.test.ts",
     "test:binary-accounting": "tsx --test tests/binaryAccounting.test.ts tests/dateRangePresets.test.ts",
-    "verify:binary-accounting": "tsx scripts/verify-binary-accounting.ts"
+    "simulate:binary-5000": "tsx scripts/simulate-binary-5000.ts",
+    "verify:binary-accounting": "tsx scripts/verify-binary-accounting.ts",
+    "verify:binary-reserve-admission": "tsx scripts/verify-binary-reserve-admission.ts",
+    "verify:financial-runtime-role": "tsx scripts/verify-financial-runtime-role.ts",
+    "verify:production-database-target": "tsx scripts/verify-production-database-target.ts",
+    "write:financial-release-attestation": "tsx scripts/write-financial-release-attestation.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"

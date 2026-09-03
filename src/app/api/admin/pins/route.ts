@@ -3,22 +3,28 @@ import { PinStatus, Prisma } from '@prisma/client'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { calculatePackageEconomics } from '@/app/lib/package-economics'
+import {
+  assertUpgradePinIssuanceEconomics,
+  calculateUpgradeProductEconomics,
+  getUpgradeAcquisitionPrice,
+  PackageFundingConfigurationError,
+  type UpgradeAcquisitionTier,
+} from '@/app/lib/packageUpgradeConfiguration'
+import {
+  buildRegistrationPinSnapshot,
+  RegistrationPinSnapshotError,
+  type RegistrationAcquisitionTier,
+  type RegistrationPinSnapshot,
+} from '@/app/lib/registrationPinSnapshot'
+import {
+  assessPinIssuanceAgainstBinaryReserve,
+  BinaryReserveAdmissionError,
+  type BinaryReserveAdmissionDecision,
+} from '@/app/lib/binaryReserveAdmission'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 // ── Generate unique PIN code ──
-function calculateUpgradeSnapshot(products: Array<{ quantity: number; product: { price: unknown; reseller_price: unknown; city_price: unknown; cost_price: unknown } }>) {
-  return products.reduce((total, item) => {
-    const srp = Number(item.product.price || 0)
-    const reseller = Number(item.product.reseller_price || srp)
-    const city = Number(item.product.city_price || item.product.cost_price || 0)
-    total.customerPayment += srp * item.quantity
-    total.resellerValue += reseller * item.quantity
-    total.acquisitionCost += city * item.quantity
-    return total
-  }, { customerPayment: 0, resellerValue: 0, acquisitionCost: 0 })
-}
 function generatePinCode(packageName: string): string {
   const prefix = 'HRM'
   const year = new Date().getFullYear()
@@ -135,15 +141,15 @@ export async function POST(req: NextRequest) {
 
     const { package_id, city_dist_id, quantity, pin_type = 'registration', upgrade_from_package_id } = await req.json()
 
-    if (!package_id || !city_dist_id || !quantity) {
+    if (!package_id || !city_dist_id || quantity == null) {
       return NextResponse.json({ error: 'All fields are required.' }, { status: 400 })
     }
     if (pin_type !== 'registration' && pin_type !== 'upgrade') return NextResponse.json({ error: 'Invalid PIN type.' }, { status: 400 })
     if (pin_type === 'upgrade' && !upgrade_from_package_id) return NextResponse.json({ error: "Select the reseller's current package for an upgrade PIN." }, { status: 400 })
 
-    if (quantity < 1 || quantity > 50) {
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 50) {
       return NextResponse.json(
-        { error: 'Quantity must be between 1 and 50.' },
+        { error: 'Quantity must be a whole number between 1 and 50.' },
         { status: 400 }
       )
     }
@@ -159,8 +165,9 @@ export async function POST(req: NextRequest) {
         pairing_bonus_value: true,
         products: {
           select: {
+            product_id: true,
             quantity: true,
-            product: { select: { price: true, reseller_price: true, city_price: true, cost_price: true } },
+            product: { select: { price: true, reseller_price: true, city_price: true, branch_price: true, cost_price: true } },
           },
         },
       },
@@ -172,32 +179,118 @@ export async function POST(req: NextRequest) {
     if (!pkg.is_active) {
       return NextResponse.json({ error: 'Cannot generate PINs for an inactive package.' }, { status: 400 })
     }
-    // The Admin selects only the origin and target packages. The price is
-    // computed and snapshotted now, so later package-price edits are safe.
-    const targetEconomics = pkg.products.length > 0 ? calculatePackageEconomics(pkg.products) : { pinAllocation: Number(pkg.price) }
-    const targetSnapshot = calculateUpgradeSnapshot(pkg.products)
-    let sourcePackageName: string | null = null
-    let unitPinPrice = Number(targetEconomics.pinAllocation)
-    let upgradeSnapshot: { customerPayment: number; resellerValue: number; acquisitionCost: number; directAllocation: number; binaryAllocation: number; pointsDifference: number } | null = null
+    const pinRecipient = await prisma.user.findUnique({
+      where: { id: city_dist_id },
+      select: {
+        role: true,
+        status: true,
+        distributor_profile: { select: { dist_level: true, is_active: true } },
+      },
+    })
+    const recipientLevel: RegistrationAcquisitionTier | null =
+      pinRecipient?.role === 'admin' && pinRecipient.status === 'active'
+        ? 'admin'
+        : pinRecipient?.role === 'city' && pinRecipient.distributor_profile?.is_active
+          && (pinRecipient.distributor_profile.dist_level === 'city' || pinRecipient.distributor_profile.dist_level === 'branch')
+          ? pinRecipient.distributor_profile.dist_level
+          : null
+    if (!recipientLevel) {
+      return NextResponse.json({ error: 'PIN recipient must be Admin or an active City Distributor/Branch.' }, { status: 400 })
+    }
+
+    let registrationSnapshot: RegistrationPinSnapshot | null = null
+    let unitPinPrice = Number(pkg.price)
+    if (pin_type === 'registration') {
+      registrationSnapshot = buildRegistrationPinSnapshot({
+        packageId: package_id,
+        packageName: pkg.name,
+        configuredPinPrice: pkg.price,
+        directAllocation: pkg.direct_referral_bonus,
+        points: pkg.pairing_bonus_value,
+        acquisitionTier: recipientLevel,
+        products: pkg.products,
+      })
+      unitPinPrice = registrationSnapshot.pinAllocation
+    }
+    let upgradeSnapshot: {
+      customerPayment: number
+      resellerValue: number
+      acquisitionCost: number
+      acquisitionTier: UpgradeAcquisitionTier
+      directAllocation: number
+      binaryAllocation: number
+      pointsDifference: number
+      productLineCount: number
+      units: number
+    } | null = null
+    let configuredUpgradeProducts: Array<{
+      product_id: string
+      quantity: number
+      srp_snapshot: number
+      reseller_price_snapshot: number
+      unit_acquisition_cost_snapshot: number
+    }> = []
     if (pin_type === 'upgrade') {
+      if (
+        (recipientLevel !== 'city' && recipientLevel !== 'branch')
+      ) {
+        return NextResponse.json({ error: 'Upgrade PIN recipient must be an active City Distributor or Branch.' }, { status: 400 })
+      }
+      const acquisitionTier: UpgradeAcquisitionTier = recipientLevel
       const sourcePkg = await prisma.package.findUnique({
         where: { id: upgrade_from_package_id },
-        select: { name: true, direct_referral_bonus: true, pairing_bonus_value: true, products: { select: { quantity: true, product: { select: { price: true, reseller_price: true, city_price: true, cost_price: true } } } } },
+        select: { name: true, direct_referral_bonus: true, pairing_bonus_value: true },
       })
       if (!sourcePkg) return NextResponse.json({ error: 'Current package was not found.' }, { status: 404 })
-      const sourceEconomics = sourcePkg.products.length > 0 ? calculatePackageEconomics(sourcePkg.products) : { pinAllocation: 0 }
-      const sourceSnapshot = calculateUpgradeSnapshot(sourcePkg.products)
-      unitPinPrice = Number(targetEconomics.pinAllocation) - Number(sourceEconomics.pinAllocation)
-      const pointsDifference = Number(pkg.pairing_bonus_value) - Number(sourcePkg.pairing_bonus_value)
-      if (unitPinPrice <= 0 || pointsDifference <= 0) return NextResponse.json({ error: 'Upgrade PIN requires a higher target package.' }, { status: 400 })
-      sourcePackageName = sourcePkg.name
+      const configuredPath = await prisma.packageUpgradePath.findUnique({
+        where: {
+          from_package_id_to_package_id: {
+            from_package_id: upgrade_from_package_id,
+            to_package_id: package_id,
+          },
+        },
+        include: {
+          products: {
+            include: {
+              product: { select: { price: true, reseller_price: true, city_price: true, branch_price: true, cost_price: true } },
+            },
+          },
+        },
+      })
+      if (!configuredPath?.is_active) {
+        return NextResponse.json({ error: 'This package upgrade path is not configured or is inactive.' }, { status: 400 })
+      }
+      const configuredSnapshot = calculateUpgradeProductEconomics(configuredPath.products, acquisitionTier)
+      const sealedUpgrade = assertUpgradePinIssuanceEconomics({
+        customerPrice: configuredPath.customer_price,
+        pinPrice: configuredPath.pin_price,
+        sourceDirectAllocation: sourcePkg.direct_referral_bonus,
+        targetDirectAllocation: pkg.direct_referral_bonus,
+        sourceBinaryPoints: sourcePkg.pairing_bonus_value,
+        targetBinaryPoints: pkg.pairing_bonus_value,
+        sourceLabel: sourcePkg.name,
+        acquisitionTier,
+        products: configuredPath.products,
+        productEconomics: configuredSnapshot,
+      })
+      unitPinPrice = sealedUpgrade.pinAllocation
+      configuredUpgradeProducts = configuredPath.products.map((item) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+        srp_snapshot: Number(item.product.price),
+        reseller_price_snapshot: Number(item.product.reseller_price) || Number(item.product.price),
+        unit_acquisition_cost_snapshot: getUpgradeAcquisitionPrice(item.product, acquisitionTier),
+      }))
       upgradeSnapshot = {
-        customerPayment: targetSnapshot.customerPayment - sourceSnapshot.customerPayment,
-        resellerValue: targetSnapshot.resellerValue - sourceSnapshot.resellerValue,
-        acquisitionCost: targetSnapshot.acquisitionCost - sourceSnapshot.acquisitionCost,
-        directAllocation: Math.max(0, Number(pkg.direct_referral_bonus) - Number(sourcePkg.direct_referral_bonus)),
-        binaryAllocation: Math.max(0, Number(pkg.pairing_bonus_value) * 0.5 - Number(sourcePkg.pairing_bonus_value) * 0.5),
-        pointsDifference,
+        customerPayment: sealedUpgrade.customerPayment,
+        resellerValue: sealedUpgrade.resellerValue,
+        acquisitionCost: sealedUpgrade.acquisitionCost,
+        acquisitionTier,
+        directAllocation: sealedUpgrade.directAllocation,
+        binaryAllocation: sealedUpgrade.binaryAllocation,
+        pointsDifference: sealedUpgrade.pointsDifference,
+        productLineCount: sealedUpgrade.productLineCount,
+        units: sealedUpgrade.units,
       }
     }
 
@@ -218,8 +311,37 @@ export async function POST(req: NextRequest) {
 
     const totalAmount = unitPinPrice * quantity
 
+    let reserveAdmission: BinaryReserveAdmissionDecision | null = null
+
     // ── Create PINs + record as a sale order ──
     await prisma.$transaction(async (tx) => {
+      const requestedBinaryAllocation = quantity * (
+        registrationSnapshot?.binaryAllocation
+        ?? upgradeSnapshot?.binaryAllocation
+        ?? 0
+      )
+      reserveAdmission = await assessPinIssuanceAgainstBinaryReserve(
+        tx,
+        requestedBinaryAllocation,
+      )
+
+      const paidAt = new Date()
+      const fundingOrder = await tx.order.create({
+        data: {
+          buyer_id: city_dist_id,
+          seller_id: user.id,
+          order_type: 'online',
+          status: 'delivered',
+          total_amount: totalAmount,
+          is_cross_purchase: false,
+          payment_method: 'cash',
+          payment_status: 'paid',
+          financial_purpose: 'pin_sale',
+          paid_at: paidAt,
+          delivered_at: paidAt,
+          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${unitPinPrice.toLocaleString()} each`,
+        },
+      })
 
       // 1. Bulk create PINs
       await tx.pin.createMany({
@@ -229,31 +351,64 @@ export async function POST(req: NextRequest) {
           city_dist_id,
           status: 'unused',
           generated_by: user.id,
+          funding_order_id: fundingOrder.id,
           pin_type,
           upgrade_from_package_id: pin_type === 'upgrade' ? upgrade_from_package_id : null,
           pin_allocation_snapshot: unitPinPrice,
+          registration_package_name_snapshot: registrationSnapshot?.packageName ?? null,
+          registration_customer_payment_snapshot: registrationSnapshot?.customerPayment ?? null,
+          registration_reseller_value_snapshot: registrationSnapshot?.resellerValue ?? null,
+          registration_acquisition_cost_snapshot: registrationSnapshot?.acquisitionCost ?? null,
+          registration_acquisition_tier_snapshot: registrationSnapshot?.acquisitionTier ?? null,
+          registration_direct_allocation_snapshot: registrationSnapshot?.directAllocation ?? null,
+          registration_binary_allocation_snapshot: registrationSnapshot?.binaryAllocation ?? null,
+          registration_points_snapshot: registrationSnapshot?.points ?? null,
+          registration_product_line_count_snapshot: registrationSnapshot?.productLineCount ?? null,
+          registration_units_snapshot: registrationSnapshot?.units ?? null,
           upgrade_customer_payment_snapshot: upgradeSnapshot?.customerPayment ?? null,
           upgrade_reseller_value_snapshot: upgradeSnapshot?.resellerValue ?? null,
           upgrade_acquisition_cost_snapshot: upgradeSnapshot?.acquisitionCost ?? null,
+          upgrade_acquisition_tier_snapshot: upgradeSnapshot?.acquisitionTier ?? null,
           upgrade_direct_allocation_snapshot: upgradeSnapshot?.directAllocation ?? null,
           upgrade_binary_allocation_snapshot: upgradeSnapshot?.binaryAllocation ?? null,
           upgrade_points_difference_snapshot: upgradeSnapshot?.pointsDifference ?? null,
+          upgrade_product_line_count_snapshot: upgradeSnapshot?.productLineCount ?? null,
+          upgrade_units_snapshot: upgradeSnapshot?.units ?? null,
         })),
       })
 
-      // 2. Record the PIN sale as an order (admin → city distributor)
-      // Note: no order_items needed since this is a PIN sale not a product sale
-      await tx.order.create({
-        data: {
-          buyer_id: city_dist_id,
-          seller_id: user.id,
-          order_type: 'online',
-          status: 'delivered',
-          total_amount: totalAmount,
-          is_cross_purchase: false,
-          notes: `PIN sale: ${quantity} × ${pkg.name} package @ ₱${unitPinPrice.toLocaleString()} each`,
-        },
-      })
+      if (pin_type === 'upgrade') {
+        const createdPins = await tx.pin.findMany({
+          where: { pin_code: { in: pinCodes } },
+          select: { id: true },
+        })
+        await tx.pinUpgradeProductSnapshot.createMany({
+          data: createdPins.flatMap((createdPin) => configuredUpgradeProducts.map((product) => ({
+            pin_id: createdPin.id,
+            product_id: product.product_id,
+            quantity: product.quantity,
+            srp_snapshot: product.srp_snapshot,
+            reseller_price_snapshot: product.reseller_price_snapshot,
+            unit_acquisition_cost_snapshot: product.unit_acquisition_cost_snapshot,
+          }))),
+        })
+      }
+      if (pin_type === 'registration' && registrationSnapshot) {
+        const createdPins = await tx.pin.findMany({
+          where: { pin_code: { in: pinCodes } },
+          select: { id: true },
+        })
+        await tx.pinRegistrationProductSnapshot.createMany({
+          data: createdPins.flatMap((createdPin) => registrationSnapshot!.products.map((product) => ({
+            pin_id: createdPin.id,
+            product_id: product.product_id,
+            quantity: product.quantity,
+            srp_snapshot: product.srp_snapshot,
+            reseller_price_snapshot: product.reseller_price_snapshot,
+            unit_acquisition_cost_snapshot: product.unit_acquisition_cost_snapshot,
+          }))),
+        })
+      }
 
     })
 
@@ -266,7 +421,17 @@ export async function POST(req: NextRequest) {
       activity_type: 'pin_generated',
       category:      'pin',
       description:   `Generated ${pinCodes.length} PIN(s) for ${pkg.name} package`,
-      metadata:      { quantity: pinCodes.length, package: pkg.name, city_dist_id, pin_type, upgrade_from_package_id: pin_type === 'upgrade' ? upgrade_from_package_id : null, pin_allocation_snapshot: unitPinPrice },
+      metadata:      {
+        quantity: pinCodes.length,
+        package: pkg.name,
+        city_dist_id,
+        pin_type,
+        upgrade_from_package_id: pin_type === 'upgrade' ? upgrade_from_package_id : null,
+        pin_allocation_snapshot: unitPinPrice,
+        reserve_admission_mode: reserveAdmission?.mode,
+        reserve_admission_status: reserveAdmission?.status,
+        reserve_admission_reasons: reserveAdmission?.reasons,
+      },
       risk_level:    'low',
       status:        'normal',
     })
@@ -277,8 +442,26 @@ return NextResponse.json({
     })
   } catch (error) {
     console.error('[GENERATE PINS ERROR]', error)
+    if (error instanceof BinaryReserveAdmissionError) {
+      return NextResponse.json(
+        {
+          error: 'PIN issuance is temporarily paused by the protected reserve policy. Contact Finance/Admin.',
+          code: error.code,
+        },
+        { status: 503 },
+      )
+    }
     const detail = error instanceof Error ? error.message : 'Unknown server error'
-    return NextResponse.json({ error: 'PIN generation failed: ' + detail }, { status: 500 })
+    return NextResponse.json(
+      { error: 'PIN generation failed: ' + detail },
+      {
+        status:
+          error instanceof RegistrationPinSnapshotError ||
+          error instanceof PackageFundingConfigurationError
+            ? 400
+            : 500,
+      },
+    )
   }
 }
 // ── PATCH — cancel PINs (single or bulk) ──

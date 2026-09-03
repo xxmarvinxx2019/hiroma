@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { calculatePackageEconomics } from '@/app/lib/package-economics'
+import {
+  readIssuedRegistrationPinSnapshot,
+  RegistrationPinSnapshotError,
+} from '@/app/lib/registrationPinSnapshot'
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,18 +26,27 @@ export async function POST(req: NextRequest) {
         pin_code:     true,
         status:       true,
         pin_type:     true,
+        package_id:   true,
         city_dist_id: true,
-        package: {
+        pin_allocation_snapshot: true,
+        registration_package_name_snapshot: true,
+        registration_customer_payment_snapshot: true,
+        registration_reseller_value_snapshot: true,
+        registration_acquisition_cost_snapshot: true,
+        registration_acquisition_tier_snapshot: true,
+        registration_direct_allocation_snapshot: true,
+        registration_binary_allocation_snapshot: true,
+        registration_points_snapshot: true,
+        registration_product_line_count_snapshot: true,
+        registration_units_snapshot: true,
+        registration_product_snapshots: {
           select: {
-            id:    true,
-            name:  true,
-            price: true,
-            products: {
-              select: {
-                quantity: true,
-                product:  { select: { id: true, name: true, price: true, reseller_price: true } },
-              },
-            },
+            product_id: true,
+            quantity: true,
+            srp_snapshot: true,
+            reseller_price_snapshot: true,
+            unit_acquisition_cost_snapshot: true,
+            product: { select: { id: true, name: true } },
           },
         },
       },
@@ -56,8 +68,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This PIN does not belong to your account.' }, { status: 400 })
     }
 
-    // ── Check city distributor has enough inventory for all package products ──
-    const packageProductIds = pin.package.products.map((pp) => pp.product.id)
+    const snapshot = readIssuedRegistrationPinSnapshot(pin)
+
+    // Inventory and displayed economics must use the same frozen product rows
+    // that will be consumed by registration.
+    const packageProductIds = snapshot.products.map((product) => product.product_id)
 
     const inventoryItems = await prisma.inventory.findMany({
       where:  { owner_id: user.id, product_id: { in: packageProductIds } },
@@ -66,28 +81,44 @@ export async function POST(req: NextRequest) {
 
     const inventoryMap = new Map(inventoryItems.map((i) => [i.product_id, i.quantity]))
 
-    const stockErrors = pin.package.products
-      .filter((pp) => (inventoryMap.get(pp.product.id) ?? 0) < pp.quantity)
-      .map((pp) => `"${pp.product.name}": need ${pp.quantity}, only ${inventoryMap.get(pp.product.id) ?? 0} in stock`)
+    const productName = new Map(pin.registration_product_snapshots.map((item) => [item.product_id, item.product.name]))
+    const stockErrors = snapshot.products
+      .filter((product) => (inventoryMap.get(product.product_id) ?? 0) < product.quantity)
+      .map((product) => `"${productName.get(product.product_id) || 'Product'}": need ${product.quantity}, only ${inventoryMap.get(product.product_id) ?? 0} in stock`)
 
     if (stockErrors.length > 0) {
       return NextResponse.json({
-        error: `Insufficient inventory for package "${pin.package.name}":\n${stockErrors.join('\n')}`,
+        error: `Insufficient inventory for package "${snapshot.packageName}":\n${stockErrors.join('\n')}`,
       }, { status: 400 })
     }
 
-    const economics = calculatePackageEconomics(pin.package.products)
     return NextResponse.json({
       pin: {
-        ...pin,
+        id: pin.id,
+        pin_code: pin.pin_code,
+        status: pin.status,
+        pin_type: pin.pin_type,
         package: {
-          ...pin.package,
-          price: pin.package.products.length > 0 ? economics.pinAllocation : Number(pin.package.price),
+          id: snapshot.packageId,
+          name: snapshot.packageName,
+          price: snapshot.pinAllocation,
+          products: pin.registration_product_snapshots.map((item) => ({
+            quantity: item.quantity,
+            product: {
+              id: item.product.id,
+              name: item.product.name,
+              price: Number(item.srp_snapshot),
+              reseller_price: Number(item.reseller_price_snapshot),
+            },
+          })),
         },
       },
     })
   } catch (error) {
     console.error('[VERIFY PIN ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
+    return NextResponse.json(
+      { error: error instanceof RegistrationPinSnapshotError ? error.message : 'Something went wrong.' },
+      { status: error instanceof RegistrationPinSnapshotError ? 409 : 500 },
+    )
   }
 }
