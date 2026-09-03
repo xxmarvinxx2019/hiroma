@@ -11,6 +11,7 @@ test('pull requests to main run the complete application quality gate', () => {
   assert.match(workflow, /pull_request:\s*\n\s+branches:\s*\n\s+- main/)
   assert.match(workflow, /permissions:\s*\n\s+contents: read/)
   assert.match(workflow, /npm ci/)
+  assert.match(workflow, /npx prisma generate/)
   assert.match(workflow, /npm run test:all/)
   assert.match(workflow, /npx tsc --noEmit/)
   assert.match(workflow, /npx prisma validate/)
