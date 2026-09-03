@@ -32,6 +32,14 @@ test('owner credentials are limited to migration and target-attestation steps', 
   assert.doesNotMatch(workflow, /env:\s*\n\s*PRODUCTION_DATABASE_URL:[\s\S]*name:\s*Run full tests/)
 })
 
+test('production attestation generates Prisma before importing application tests', () => {
+  const generateIndex = workflow.indexOf('run: npx prisma generate')
+  const testIndex = workflow.indexOf('run: npm run test:all')
+  assert.ok(generateIndex >= 0)
+  assert.ok(testIndex > generateIndex)
+  assert.match(workflow, /Generate Prisma client without production credentials[\s\S]*DATABASE_URL: postgresql:\/\/invalid:invalid@127\.0\.0\.1:9\/invalid/)
+})
+
 test('database verifier requires separate owner/runtime roles and approved target name', () => {
   assert.match(targetVerifier, /PRODUCTION_DATABASE_EXPECTED_NAME/)
   assert.match(targetVerifier, /owner\.role_name === runtime\.role_name/)
