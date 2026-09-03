@@ -15,6 +15,20 @@ test('Product Binary cron atomically leases due obligations', () => {
   assert.match(cron, /RETURNING jobs\.order_id/)
 })
 
+test('temporary Vercel Hobby schedule is daily and the Pro cutover is tracked', () => {
+  const vercel = JSON.parse(read('../vercel.json')) as {
+    crons: Array<{ path: string; schedule: string }>
+  }
+  const rollout = read('../docs/financial-hardening-rollout.md')
+  const worker = vercel.crons.find(
+    (cron) => cron.path === '/api/cron/process-product-binary',
+  )
+
+  assert.equal(worker?.schedule, '0 16 * * *')
+  assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
+  assert.match(rollout, /restore `\*\/5 \* \* \* \*`/)
+})
+
 test('Product Binary failures use bounded exponential retry and remain durable', () => {
   const processor = read('../src/app/lib/productBinary.ts')
   const migration = read('../prisma/migrations/20260902140000_add_financial_ledger_boundary/migration.sql')

@@ -4,6 +4,22 @@ This release makes commission and payout correctness a database invariant. It
 does not replace treasury management: Hiroma must still keep actual cash equal
 to or above the protected obligations recorded by the system.
 
+## Temporary Vercel Hobby preview schedule
+
+While the project is being sampled on Vercel Hobby, the durable Product Binary
+retry worker runs once daily at `0 16 * * *` (nominally midnight in
+Asia/Manila). A paid and delivered order still attempts Product Binary
+settlement immediately; this cron is the safety net for obligations that remain
+pending or fail because of a temporary error.
+
+This daily schedule is temporary and is not the approved nationwide-production
+capacity. The worker leases at most ten due obligations per invocation, so a
+daily retry can delay recovery and accumulate a backlog. Before the public
+production rollout, upgrade the Vercel project to Pro, restore `*/5 * * * *`,
+deploy, verify the cron in Vercel, and force one safe staging retry to prove that
+the job completes exactly once. Do not remove the durable job, lease,
+idempotency, funding, or audit protections when changing only the schedule.
+
 ## Protected invariants
 
 - A registration or upgrade PIN is usable only when it has exactly one fully
