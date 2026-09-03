@@ -85,6 +85,14 @@ test('historical modern-rule pair entitlements fail descriptively instead of bei
   )
   assert.match(migration, /normal\."rule_version" IS DISTINCT FROM 'package-binary-v1'/)
   assert.match(migration, /normal\."rule_version" IS DISTINCT FROM 'product-binary-v1'/)
+  assert.equal(
+    (migration.match(/normal\."rule_version" IS DISTINCT FROM 'legacy-v1'/g) || []).length,
+    2,
+  )
+  assert.equal(
+    (migration.match(/flashout\."rule_version" IS DISTINCT FROM 'legacy-v1'/g) || []).length,
+    2,
+  )
   assert.match(migration, /commission\."rule_version" = 'package-binary-v1'[\s\S]*NOT EXISTS/)
   assert.match(migration, /commission\."rule_version" = 'product-binary-v1'[\s\S]*NOT EXISTS/)
 })

@@ -240,6 +240,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "product_binary_pair_events_flashout_commissio
 -- Do not silently bless historical pair links merely because their foreign
 -- keys exist. Modern rule-version commissions must already have exactly the
 -- same recipient, source, points, and amount as the immutable pair evidence.
+-- Rows sealed as legacy-v1 remain append-only historical evidence: they predate
+-- source-event/state snapshots and must not be relabelled as modern rules.
 DO $$
 DECLARE
   invalid_package_entitlements TEXT;
@@ -256,7 +258,9 @@ BEGIN
       ON flashout."id" = event."flashout_commission_id"
     WHERE (event."payable_amount" > 0) IS DISTINCT FROM (event."normal_commission_id" IS NOT NULL)
        OR (event."flashout_amount" > 0) IS DISTINCT FROM (event."flashout_commission_id" IS NOT NULL)
-       OR (event."normal_commission_id" IS NOT NULL AND (
+       OR (event."normal_commission_id" IS NOT NULL
+           AND normal."rule_version" IS DISTINCT FROM 'legacy-v1'
+           AND (
             normal."type" IS DISTINCT FROM 'binary_pairing'::"CommissionType"
          OR normal."rule_version" IS DISTINCT FROM 'package-binary-v1'
          OR normal."is_pair_overflow" IS DISTINCT FROM false
@@ -267,7 +271,9 @@ BEGIN
          OR normal."amount" IS DISTINCT FROM event."payable_amount"
          OR normal."points"::NUMERIC IS DISTINCT FROM event."payable_pairs" * event."points_per_pair"
        ))
-       OR (event."flashout_commission_id" IS NOT NULL AND (
+       OR (event."flashout_commission_id" IS NOT NULL
+           AND flashout."rule_version" IS DISTINCT FROM 'legacy-v1'
+           AND (
             flashout."type" IS DISTINCT FROM 'binary_pairing'::"CommissionType"
          OR flashout."rule_version" IS DISTINCT FROM 'package-binary-v1'
          OR flashout."is_pair_overflow" IS DISTINCT FROM true
@@ -327,7 +333,9 @@ BEGIN
       ON flashout."id" = pair_event."flashout_commission_id"
     WHERE (pair_event."payable_amount" > 0) IS DISTINCT FROM (pair_event."normal_commission_id" IS NOT NULL)
        OR (pair_event."flashout_amount" > 0) IS DISTINCT FROM (pair_event."flashout_commission_id" IS NOT NULL)
-       OR (pair_event."normal_commission_id" IS NOT NULL AND (
+       OR (pair_event."normal_commission_id" IS NOT NULL
+           AND normal."rule_version" IS DISTINCT FROM 'legacy-v1'
+           AND (
             normal."type" IS DISTINCT FROM 'sponsor_point'::"CommissionType"
          OR normal."rule_version" IS DISTINCT FROM 'product-binary-v1'
          OR normal."is_pair_overflow" IS DISTINCT FROM false
@@ -338,7 +346,9 @@ BEGIN
          OR normal."amount" IS DISTINCT FROM pair_event."payable_amount"
          OR normal."points"::NUMERIC IS DISTINCT FROM pair_event."payable_pairs" * pair_event."pair_rate_points"
        ))
-       OR (pair_event."flashout_commission_id" IS NOT NULL AND (
+       OR (pair_event."flashout_commission_id" IS NOT NULL
+           AND flashout."rule_version" IS DISTINCT FROM 'legacy-v1'
+           AND (
             flashout."type" IS DISTINCT FROM 'sponsor_point'::"CommissionType"
          OR flashout."rule_version" IS DISTINCT FROM 'product-binary-v1'
          OR flashout."is_pair_overflow" IS DISTINCT FROM true

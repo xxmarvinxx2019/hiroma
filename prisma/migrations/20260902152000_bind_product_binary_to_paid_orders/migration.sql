@@ -13,6 +13,10 @@ LOCK TABLE "commissions", "inventory_movements", "order_items", "orders",
 -- restored before COMMIT. Application traffic cannot enter between the two.
 DROP TRIGGER IF EXISTS "product_binary_funding_lots_protected_write" ON "product_binary_funding_lots";
 DROP TRIGGER IF EXISTS "orders_enqueue_product_binary_settlement" ON "orders";
+-- The legacy reconciliation UPDATE below must not queue the old deferred
+-- completion validator. Drop it under the writer locks before touching jobs,
+-- then install the paid-order validator near the end of this transaction.
+DROP TRIGGER IF EXISTS "product_binary_jobs_validate_completion" ON "product_binary_settlement_jobs";
 DROP FUNCTION IF EXISTS "enqueue_product_binary_settlement"();
 ALTER TABLE "product_binary_settlement_jobs"
   DROP CONSTRAINT IF EXISTS "product_binary_settlement_jobs_status_check";
@@ -776,7 +780,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS "product_binary_jobs_validate_completion" ON "product_binary_settlement_jobs";
 CREATE CONSTRAINT TRIGGER "product_binary_jobs_validate_completion"
 AFTER INSERT OR UPDATE ON "product_binary_settlement_jobs"
 DEFERRABLE INITIALLY DEFERRED

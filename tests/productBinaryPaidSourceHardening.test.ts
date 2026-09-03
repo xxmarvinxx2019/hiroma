@@ -7,6 +7,19 @@ const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.m
 const migration = read('../prisma/migrations/20260902152000_bind_product_binary_to_paid_orders/migration.sql')
 const processor = read('../src/app/lib/productBinary.ts')
 
+test('legacy jobs disarm the old deferred completion trigger before reconciliation', () => {
+  const dropTrigger = migration.indexOf(
+    'DROP TRIGGER IF EXISTS "product_binary_jobs_validate_completion"',
+  )
+  const reconcileJobs = migration.indexOf('UPDATE "product_binary_settlement_jobs"')
+  const createTrigger = migration.indexOf(
+    'CREATE CONSTRAINT TRIGGER "product_binary_jobs_validate_completion"',
+  )
+
+  assert.ok(dropTrigger >= 0 && dropTrigger < reconcileJobs)
+  assert.ok(reconcileJobs >= 0 && reconcileJobs < createTrigger)
+})
+
 test('inventory movements cannot mint Product Binary reserve', () => {
   assert.match(migration, /DROP TRIGGER IF EXISTS "inventory_movement_create_product_binary_funding"/)
   assert.doesNotMatch(migration, /AFTER INSERT ON "inventory_movements"[\s\S]*create_product_binary_funding_lot/)
