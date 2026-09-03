@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { createRequiredAuditLog, getClientInfo } from '@/app/lib/auditLog'
 import { claimPendingPinRequestAndCreatePins } from '@/app/lib/pinRequestApproval'
 import {
   buildRegistrationPinSnapshot,
@@ -141,6 +142,21 @@ export async function POST(req: NextRequest) {
     if (!pkg || !pkg.is_active) {
       return NextResponse.json({ error: 'Package not found or inactive.' }, { status: 400 })
     }
+    const paymentMethod = typeof payment_method === 'string' ? payment_method.trim() : ''
+    const paymentReference = typeof payment_reference === 'string' ? payment_reference.trim() : ''
+    const paymentSenderName = typeof payment_sender_name === 'string' ? payment_sender_name.trim() : ''
+    const paymentDatetime = payment_datetime ? new Date(payment_datetime) : null
+    if (
+      !['gcash', 'bank_transfer'].includes(paymentMethod)
+      || paymentReference.length < 3 || paymentReference.length > 120
+      || paymentSenderName.length < 2 || paymentSenderName.length > 120
+      || !paymentDatetime || Number.isNaN(paymentDatetime.getTime())
+      || paymentDatetime.getTime() > Date.now() + 5 * 60 * 1000
+    ) {
+      return NextResponse.json({
+        error: 'PIN requests require GCash/bank payment reference, sender name, and valid payment time.',
+      }, { status: 400 })
+    }
 
     const distributor = await prisma.distributorProfile.findUnique({
       where: { user_id: user.id },
@@ -153,6 +169,11 @@ export async function POST(req: NextRequest) {
         : null
     if (!acquisitionTier) {
       return NextResponse.json({ error: 'Only an active City Distributor or Branch may request registration PINs.' }, { status: 403 })
+    }
+    if (acquisitionTier === 'branch') {
+      return NextResponse.json({
+        error: 'Hiroma Branch PINs are received through Admin internal transfer, not a paid PIN request.',
+      }, { status: 403 })
     }
 
     const registrationSnapshot = buildRegistrationPinSnapshot({
@@ -172,11 +193,11 @@ export async function POST(req: NextRequest) {
         package_id,
         quantity,
         total_amount,
-        payment_method:      payment_method      || 'cash_on_pickup',
-        payment_reference:   payment_reference?.trim()   || null,
-        payment_sender_name: payment_sender_name?.trim() || null,
-        payment_datetime:    payment_datetime ? new Date(payment_datetime) : null,
-        payment_status:      payment_method === 'cash_on_pickup' ? 'unpaid' : 'pending',
+        payment_method:      paymentMethod,
+        payment_reference:   paymentReference,
+        payment_sender_name: paymentSenderName,
+        payment_datetime:    paymentDatetime,
+        payment_status:      'pending',
         status:              'pending',
         notes:               notes?.trim() || null,
         registration_snapshot: registrationSnapshot as unknown as Prisma.InputJsonValue,
@@ -238,6 +259,8 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: 'PIN request snapshot does not match its package.' }, { status: 409 })
       }
       const pins = []
+      const actorId = user.actor_id || user.id
+      const actorName = user.actor_name || user.full_name || user.username
       const existingCodes = new Set<string>()
 
       for (let i = 0; i < request.quantity; i++) {
@@ -257,6 +280,7 @@ export async function PATCH(req: NextRequest) {
           city_dist_id:  request.city_dist_id,
           status:        'unused',
           generated_by:  user.id,
+          generated_by_actor_id: actorId,
           pin_type:       'registration',
           pin_allocation_snapshot: snapshot.pinAllocation,
           registration_package_name_snapshot: snapshot.packageName,
@@ -283,7 +307,30 @@ export async function PATCH(req: NextRequest) {
           pins,
           registrationProducts: snapshot.products,
           updatedAt: new Date(),
+          approvedByActorId: actorId,
         })
+        if (approved) {
+          await createRequiredAuditLog(tx, {
+            user_id: actorId,
+            user_name: actorName,
+            user_role: user.role,
+            activity_type: 'pin_request_approved',
+            category: 'pin',
+            description: `Approved paid PIN request and issued ${pins.length} registration PIN(s).`,
+            metadata: {
+              owner_admin_id: user.id,
+              request_id: id,
+              recipient_id: request.city_dist_id,
+              quantity: pins.length,
+              package_id: request.package.id,
+              payment_status,
+              reserve_admission_mode: reserveAdmission.mode,
+              reserve_admission_status: reserveAdmission.status,
+            },
+            status: 'completed',
+            ...getClientInfo(req),
+          })
+        }
         return { approved, reserveAdmission }
       })
 
@@ -296,13 +343,34 @@ export async function PATCH(req: NextRequest) {
 
       console.log(`[PIN REQUEST] Generated ${pins.length} PINs for city dist ${request.city_dist_id}`)
     } else {
-      const rejected = await prisma.pinRequest.updateMany({
-        where: { id, status: 'pending' },
-        data: {
-          status: 'rejected',
-          ...(payment_status && { payment_status }),
-          updated_at: new Date(),
-        },
+      const actorId = user.actor_id || user.id
+      const actorName = user.actor_name || user.full_name || user.username
+      const rejected = await prisma.$transaction(async (tx) => {
+        const now = new Date()
+        const result = await tx.pinRequest.updateMany({
+          where: { id, status: 'pending' },
+          data: {
+            status: 'rejected',
+            rejected_by_actor_id: actorId,
+            rejected_at: now,
+            updated_at: now,
+          },
+        })
+        if (result.count === 1) {
+          await createRequiredAuditLog(tx, {
+            user_id: actorId,
+            user_name: actorName,
+            user_role: user.role,
+            activity_type: 'pin_request_rejected',
+            category: 'pin',
+            description: 'Rejected a pending paid PIN request.',
+            metadata: { owner_admin_id: user.id, request_id: id, recipient_id: request.city_dist_id },
+            status: 'completed',
+            risk_level: 'warning',
+            ...getClientInfo(req),
+          })
+        }
+        return result
       })
       if (rejected.count !== 1) {
         return NextResponse.json({ error: 'Request already finalized.' }, { status: 409 })

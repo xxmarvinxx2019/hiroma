@@ -12,6 +12,9 @@ interface Pin {
   package:          { name: string } | null
   city_distributor: { full_name: string; username: string } | null
   used_by_user:     { full_name: string; username: string } | null
+  funding_order: { order_number: string | null; payment_reference: string | null } | null
+  funding_pin_request: { id: string; payment_reference: string | null; status: string } | null
+  funding_pin_transfer: { reference_number: string; status: string; sale_value: number } | null
 }
 
 interface UpgradePath {
@@ -32,6 +35,7 @@ interface CityDist {
 const fmt = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const STATUS_STYLES: Record<string, string> = {
+  in_transit: 'bg-[#eef2ff] text-[#4338ca]',
   unused:    'bg-[#fff8e6] text-[#b87a00]',
   used:      'bg-[#e8f7ef] text-[#1a7a4a]',
   expired:   'bg-[#fff1f2] text-[#be123c]',
@@ -45,22 +49,28 @@ export default function PinsPage() {
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('unused')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'in_transit' | 'unused' | 'used' | 'expired' | 'cancelled'>('unused')
   const [page, setPage]               = useState(1)
   const [meta, setMeta]               = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 15, totalPages: 1 })
-  const [summary, setSummary]         = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
+  const [summary, setSummary]         = useState({ total: 0, in_transit: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
   const [showForm, setShowForm]       = useState(false)
-  const [form, setForm]               = useState({ package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '' })
+  const [form, setForm]               = useState({
+    package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '',
+    payment_method: 'cash', payment_reference: '', payment_sender_name: '', payment_datetime: '', notes: '',
+  })
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [generatedPins, setGeneratedPins] = useState<string[]>([])
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [issuanceResult, setIssuanceResult] = useState({ transaction_type: '', reference_number: '', message: '' })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [cancelling, setCancelling]   = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [cancelError, setCancelError] = useState('')
   const [cancelReason, setCancelReason] = useState('')
+  const [cancelDisposition, setCancelDisposition] = useState<'refunded' | 'credited' | 'retained'>('retained')
+  const [cancelReference, setCancelReference] = useState('')
   const [distSearch, setDistSearch]   = useState('')
   const [showDistDrop, setShowDistDrop] = useState(false)
   const selectedUpgradePath = form.pin_type === 'upgrade'
@@ -69,6 +79,8 @@ export default function PinsPage() {
   const eligiblePinRecipients = form.pin_type === 'upgrade'
     ? cityDists.filter((distributor) => distributor.distributor_profile?.dist_level === 'city' || distributor.distributor_profile?.dist_level === 'branch')
     : cityDists
+  const selectedRecipient = cityDists.find((distributor) => distributor.id === form.city_dist_id)
+  const isBranchTransfer = selectedRecipient?.distributor_profile?.dist_level === 'branch'
 
   // Date filter
   const todayStr = new Date().toISOString().slice(0, 10)
@@ -109,7 +121,7 @@ export default function PinsPage() {
     ]).then(([pd, dd]) => {
       setPackages(pd.packages || [])
       const list = (dd.distributors || []).filter((d: CityDist) => d.distributor_profile?.dist_level === 'city' || d.distributor_profile?.dist_level === 'branch')
-      setCityDists([{ id: dd.adminUser?.id || '', full_name: '⭐ Admin (Self)', username: 'admin' }, ...list])
+      setCityDists(list)
     })
   }, [])
 
@@ -134,7 +146,7 @@ export default function PinsPage() {
       .then(d => {
         setPins(d.pins || [])
         setMeta(d.meta || { total: 0, page: 1, pageSize: 15, totalPages: 1 })
-        setSummary(d.summary || { total: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
+        setSummary(d.summary || { total: 0, in_transit: 0, unused: 0, used: 0, expired: 0, cancelled: 0 })
       })
       .finally(() => setLoading(false))
   }, [page, statusFilter, search, dateMode, dateFrom, dateTo])
@@ -145,15 +157,46 @@ export default function PinsPage() {
     if (!form.package_id || !form.city_dist_id || !form.quantity || (form.pin_type === 'upgrade' && !form.upgrade_from_package_id)) {
       setFormError('All fields are required.'); return
     }
+    if (!isBranchTransfer && (
+      form.payment_reference.trim().length < 3
+      || form.payment_sender_name.trim().length < 2
+      || !form.payment_datetime
+    )) {
+      setFormError('Paid City PIN sales require official reference, payer name, and payment time.'); return
+    }
     setFormLoading(true); setFormError(''); setFormSuccess('')
-    const res  = await fetch('/api/admin/pins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package_id: form.package_id, city_dist_id: form.city_dist_id, quantity: parseInt(form.quantity), pin_type: form.pin_type, upgrade_from_package_id: form.pin_type === 'upgrade' ? form.upgrade_from_package_id : undefined }) })
+    const res  = await fetch('/api/admin/pins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_id: form.package_id,
+        city_dist_id: form.city_dist_id,
+        quantity: parseInt(form.quantity),
+        pin_type: form.pin_type,
+        upgrade_from_package_id: form.pin_type === 'upgrade' ? form.upgrade_from_package_id : undefined,
+        workflow: isBranchTransfer ? 'internal_transfer' : 'paid_sale',
+        payment_method: isBranchTransfer ? null : form.payment_method,
+        payment_reference: isBranchTransfer ? null : form.payment_reference.trim(),
+        payment_sender_name: isBranchTransfer ? null : form.payment_sender_name.trim(),
+        payment_datetime: isBranchTransfer ? null : form.payment_datetime,
+        notes: form.notes.trim() || null,
+      }),
+    })
     const data = await res.json()
     if (!res.ok) { setFormError(data.error || 'Failed'); setFormLoading(false); return }
     const pins = data.pins || data.pin_codes || []
     setGeneratedPins(pins)
+    setIssuanceResult({
+      transaction_type: data.transaction_type || '',
+      reference_number: data.reference_number || '',
+      message: data.message || '',
+    })
     setFormLoading(false)
     setShowForm(false)
-    setForm({ package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '' })
+    setForm({
+      package_id: '', city_dist_id: '', quantity: '1', pin_type: 'registration', upgrade_from_package_id: '',
+      payment_method: 'cash', payment_reference: '', payment_sender_name: '', payment_datetime: '', notes: '',
+    })
     setShowSuccessModal(true)
     fetchPins() // fetch after modal is shown
   }
@@ -165,10 +208,23 @@ export default function PinsPage() {
       setCancelError('Please enter a clear cancellation reason (at least 3 characters).')
       return
     }
+    if (['refunded', 'credited'].includes(cancelDisposition) && cancelReference.trim().length < 3) {
+      setCancelError('Enter the refund or credit reference.')
+      return
+    }
     setCancelling(true)
     setCancelError('')
     try {
-      const response = await fetch('/api/admin/pins', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin_ids: selectedIds, reason }) })
+      const response = await fetch('/api/admin/pins', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin_ids: selectedIds,
+          reason,
+          disposition: cancelDisposition,
+          disposition_reference: cancelReference.trim() || null,
+        }),
+      })
       const data = await response.json()
       if (!response.ok || data.cancelled !== selectedIds.length) {
         setCancelError(data.error || 'The selected PINs were not fully cancelled. Refresh and try again.')
@@ -176,6 +232,8 @@ export default function PinsPage() {
       }
       setSelectedIds([])
       setCancelReason('')
+      setCancelDisposition('retained')
+      setCancelReference('')
       setShowConfirm(false)
       await fetchPins()
     } catch {
@@ -201,7 +259,7 @@ export default function PinsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-[#0D1B3E]">PIN Manager</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Generate and track all impulse PINs.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Record paid City sales and zero-revenue Branch custody transfers.</p>
         </div>
         <button onClick={() => { setShowForm(true); setFormError(''); setFormSuccess(''); setGeneratedPins([]); setShowDistDrop(false); setDistSearch('') }}
           className="flex items-center gap-2 bg-[#C9A84C] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#b8963e] transition-colors">
@@ -210,9 +268,10 @@ export default function PinsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {[
           { label: 'TOTAL PINS', value: summary.total, color: '#2563eb', icon: '📋', sub: 'View details below' },
+          { label: 'IN TRANSIT', value: summary.in_transit, color: '#4338ca', icon: '🚚', sub: 'Awaiting Branch receipt' },
           { label: 'UNUSED',     value: summary.unused,    color: '#9a6f1e', icon: '🔒', sub: `${summary.total > 0 ? ((summary.unused / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
           { label: 'USED',       value: summary.used,      color: '#1a7a4a', icon: '✅', sub: `${summary.total > 0 ? ((summary.used / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
           { label: 'EXPIRED',    value: summary.expired,   color: '#be123c', icon: '⌛', sub: `${summary.total > 0 ? ((summary.expired / summary.total) * 100).toFixed(2) : '0.00'}% of total` },
@@ -277,6 +336,7 @@ export default function PinsPage() {
         <div className="flex items-center justify-between px-5 py-3 border-b border-[#0D1B3E]/8">
           <div className="flex gap-1">
             {([
+              { key: 'in_transit', label: `In Transit (${summary.in_transit})` },
               { key: 'unused',    label: `Unused (${summary.unused})` },
               { key: 'used',      label: `Used (${summary.used})` },
               { key: 'expired',   label: `Expired (${summary.expired})` },
@@ -291,7 +351,7 @@ export default function PinsPage() {
           </div>
           <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
-              <button onClick={() => { setCancelError(''); setCancelReason(''); setShowConfirm(true) }}
+              <button onClick={() => { setCancelError(''); setCancelReason(''); setCancelDisposition('retained'); setCancelReference(''); setShowConfirm(true) }}
                 className="text-xs bg-[#fdecea] text-[#e05252] px-3 py-1.5 rounded-lg font-medium hover:bg-[#e05252] hover:text-white transition-colors">
                 Cancel {selectedIds.length} PIN{selectedIds.length > 1 ? 's' : ''}
               </button>
@@ -348,6 +408,11 @@ export default function PinsPage() {
             <div>
               <p className="text-xs font-medium text-[#0D1B3E]">{pin.city_distributor?.full_name || '—'}</p>
               <p className="text-[10px] text-gray-400">@{pin.city_distributor?.username || ''}</p>
+              <p className="text-[10px] font-mono text-gray-400">
+                {pin.funding_pin_transfer?.reference_number
+                  || pin.funding_order?.order_number
+                  || (pin.funding_pin_request ? `REQ-${pin.funding_pin_request.id.slice(0, 8).toUpperCase()}` : 'Legacy source')}
+              </p>
             </div>
             <div>
               {pin.used_by_user ? (
@@ -454,11 +519,47 @@ export default function PinsPage() {
                   </div>
                 )}
               </div>
+              {selectedRecipient && (
+                isBranchTransfer ? (
+                  <div className="rounded-xl border border-[#4338ca]/20 bg-[#eef2ff] px-3 py-2">
+                    <p className="text-xs font-semibold text-[#4338ca]">Internal Branch transfer · Sale ₱0</p>
+                    <p className="mt-1 text-[10px] text-[#4338ca]/75">PINs will be in transit and cannot be used until this Branch receives the complete batch.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 rounded-xl border border-[#1a7a4a]/20 bg-[#e8f7ef]/60 p-3">
+                    <p className="text-xs font-semibold text-[#1a7a4a]">Paid City Distributor sale</p>
+                    <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
+                      className="w-full text-xs border border-[#0D1B3E]/15 rounded-lg px-3 py-2 outline-none focus:border-[#C9A84C] bg-white">
+                      <option value="cash">Cash / official receipt</option>
+                      <option value="gcash">GCash</option>
+                      <option value="bank_transfer">Bank transfer</option>
+                    </select>
+                    <input value={form.payment_reference} maxLength={120}
+                      onChange={e => setForm({ ...form, payment_reference: e.target.value })}
+                      placeholder="Official receipt / payment reference *"
+                      className="w-full text-xs border border-[#0D1B3E]/15 rounded-lg px-3 py-2 outline-none focus:border-[#C9A84C] bg-white" />
+                    <input value={form.payment_sender_name} maxLength={120}
+                      onChange={e => setForm({ ...form, payment_sender_name: e.target.value })}
+                      placeholder="Payer / sender name *"
+                      className="w-full text-xs border border-[#0D1B3E]/15 rounded-lg px-3 py-2 outline-none focus:border-[#C9A84C] bg-white" />
+                    <input type="datetime-local" value={form.payment_datetime}
+                      onChange={e => setForm({ ...form, payment_datetime: e.target.value })}
+                      className="w-full text-xs border border-[#0D1B3E]/15 rounded-lg px-3 py-2 outline-none focus:border-[#C9A84C] bg-white" />
+                  </div>
+                )
+              )}
               {/* Quantity */}
               <div>
                 <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Quantity</label>
-                <input type="number" min="1" max="100" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })}
+                <input type="number" min="1" max="50" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })}
                   className="w-full text-sm border border-[#0D1B3E]/15 rounded-xl px-3 py-2.5 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#0D1B3E] mb-1.5 block">Notes (optional)</label>
+                <textarea value={form.notes} maxLength={500} rows={2}
+                  onChange={e => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Custody or payment notes"
+                  className="w-full resize-none text-xs border border-[#0D1B3E]/15 rounded-xl px-3 py-2 outline-none focus:border-[#C9A84C] bg-[#f8f9fc]" />
               </div>
 
               {formError && <p className="text-xs text-[#e05252] bg-[#fdecea] px-3 py-2 rounded-lg">{formError}</p>}
@@ -471,7 +572,7 @@ export default function PinsPage() {
                 </button>
                 <button onClick={handleGenerate} disabled={formLoading}
                   className="flex-1 py-2.5 rounded-xl bg-[#C9A84C] text-white text-xs font-bold hover:bg-[#b8963e] transition-colors disabled:opacity-50">
-                  {formLoading ? 'Generating...' : 'Generate PINs'}
+                  {formLoading ? 'Recording...' : isBranchTransfer ? 'Dispatch PINs' : 'Record Sale & Issue'}
                 </button>
               </div>
             </div>
@@ -487,8 +588,14 @@ export default function PinsPage() {
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-[#1a7a4a]/20 flex items-center justify-center text-xl">✅</div>
                 <div>
-                  <p className="text-sm font-bold text-[#1a7a4a]">{generatedPins.length} PINs Generated Successfully!</p>
-                  <p className="text-[10px] text-[#1a7a4a]/70">PINs are ready to be assigned to resellers</p>
+                  <p className="text-sm font-bold text-[#1a7a4a]">
+                    {issuanceResult.transaction_type === 'internal_transfer' ? 'Branch PIN Transfer Dispatched' : 'Paid PIN Sale Recorded'}
+                  </p>
+                  <p className="text-[10px] text-[#1a7a4a]/70">
+                    {issuanceResult.transaction_type === 'internal_transfer'
+                      ? 'PINs remain unusable until the Branch receives the complete batch'
+                      : 'PINs are funded by the recorded paid receipt'}
+                  </p>
                 </div>
               </div>
               <button onClick={() => { setShowSuccessModal(false); setGeneratedPins([]) }}
@@ -497,6 +604,11 @@ export default function PinsPage() {
               </button>
             </div>
             <div className="p-6">
+              <div className="mb-4 rounded-xl border border-[#0D1B3E]/8 bg-[#f8f9fc] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Ledger reference</p>
+                <p className="font-mono text-xs font-semibold text-[#0D1B3E]">{issuanceResult.reference_number || '—'}</p>
+                {issuanceResult.message && <p className="mt-1 text-[10px] text-gray-500">{issuanceResult.message}</p>}
+              </div>
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Generated PIN Codes</p>
               <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
                 {generatedPins.map((pin, i) => (
@@ -548,6 +660,25 @@ export default function PinsPage() {
                 {pins.filter((pin) => selectedIds.includes(pin.id)).map((pin) => pin.pin_code).join(', ')}
               </p>
             </div>
+            <label className="block text-xs font-semibold text-[#0D1B3E] mb-1" htmlFor="pin-cancellation-disposition">Financial disposition</label>
+            <select id="pin-cancellation-disposition" value={cancelDisposition}
+              onChange={(event) => { setCancelDisposition(event.target.value as typeof cancelDisposition); setCancelReference(''); setCancelError('') }}
+              className="mb-3 w-full rounded-xl border border-[#0D1B3E]/15 px-3 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#e05252]">
+              <option value="retained">Retained by Hiroma (no refund/credit)</option>
+              <option value="refunded">Refunded</option>
+              <option value="credited">Credited to customer</option>
+            </select>
+            {cancelDisposition !== 'retained' && (
+              <>
+                <label className="block text-xs font-semibold text-[#0D1B3E] mb-1" htmlFor="pin-cancellation-reference">
+                  {cancelDisposition === 'refunded' ? 'Refund reference' : 'Credit reference'}
+                </label>
+                <input id="pin-cancellation-reference" value={cancelReference} maxLength={120}
+                  onChange={(event) => { setCancelReference(event.target.value); setCancelError('') }}
+                  placeholder="Official reference *"
+                  className="mb-3 w-full rounded-xl border border-[#0D1B3E]/15 px-3 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#e05252]" />
+              </>
+            )}
             <label className="block text-xs font-semibold text-[#0D1B3E] mb-1" htmlFor="pin-cancellation-reason">Cancellation reason</label>
             <textarea id="pin-cancellation-reason" value={cancelReason} maxLength={500} rows={3}
               onChange={(event) => { setCancelReason(event.target.value); setCancelError('') }}
@@ -555,7 +686,7 @@ export default function PinsPage() {
               className="mb-3 w-full resize-none rounded-xl border border-[#0D1B3E]/15 px-3 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#e05252] focus:ring-2 focus:ring-[#e05252]/10" />
             {cancelError && <p className="text-xs text-[#e05252] mb-3">{cancelError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => { setShowConfirm(false); setCancelError(''); setCancelReason('') }} disabled={cancelling}
+              <button onClick={() => { setShowConfirm(false); setCancelError(''); setCancelReason(''); setCancelDisposition('retained'); setCancelReference('') }} disabled={cancelling}
                 className="flex-1 py-2 rounded-xl border border-[#0D1B3E]/15 text-xs font-medium text-gray-500 hover:bg-[#f8f9fc] transition-colors">
                 Keep PINs
               </button>

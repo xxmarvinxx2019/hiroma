@@ -161,6 +161,8 @@ export async function PATCH(
     const totalAccepted = quantities.reduce((sum, item) => sum + item.accepted, 0)
     const totalDamaged = quantities.reduce((sum, item) => sum + item.damaged, 0)
     const totalMissing = quantities.reduce((sum, item) => sum + item.missing, 0)
+    const actorId = user.actor_id || user.id
+    const actorName = user.actor_name || user.full_name || user.username
 
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.inventoryTransfer.updateMany({
@@ -199,6 +201,7 @@ export async function PATCH(
           status: finalStatus,
           received_at: receivedAt,
           received_by: user.id,
+          received_by_actor_id: actorId,
           receiving_notes: typeof body.notes === 'string' ? body.notes.trim() || null : null,
         },
       })
@@ -216,13 +219,13 @@ export async function PATCH(
         },
       })
       await createRequiredAuditLog(tx, {
-        user_id: user.id,
-        user_name: user.full_name,
+        user_id: actorId,
+        user_name: actorName,
         user_role: user.role,
         activity_type: `branch_transfer_${finalStatus}`,
         category: 'distributor',
         description: `${user.full_name} resolved transfer ${transfer.reference_number} as ${finalStatus}.`,
-        metadata: { transfer_id: id, total_accepted: totalAccepted, total_damaged: totalDamaged, total_missing: totalMissing },
+        metadata: { owner_branch_id: user.id, transfer_id: id, total_accepted: totalAccepted, total_damaged: totalDamaged, total_missing: totalMissing },
         ...getClientInfo(req),
       })
     })

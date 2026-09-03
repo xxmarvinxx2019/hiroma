@@ -32,6 +32,18 @@ interface PaymentMethod {
   bank_name:      string | null
 }
 
+interface PinTransfer {
+  id: string
+  reference_number: string
+  quantity: number
+  reference_value: number
+  sale_value: number
+  status: string
+  created_at: string
+  package: { id: string; name: string } | null
+  sender: { full_name: string; username: string } | null
+}
+
 const PAGE_SIZE = 15
 
 const STATUS_COLOR: Record<string, string> = {
@@ -56,12 +68,17 @@ export default function CityPinRequestsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage]           = useState(1)
   const [showForm, setShowForm]   = useState(false)
+  const [isBranch, setIsBranch]   = useState(false)
+  const [transfers, setTransfers] = useState<PinTransfer[]>([])
+  const [transferLoading, setTransferLoading] = useState(false)
+  const [resolvingTransfer, setResolvingTransfer] = useState<string | null>(null)
+  const [transferError, setTransferError] = useState('')
 
   // Form
   const [form, setForm] = useState({
     package_id:          '',
     quantity:            1,
-    payment_method:      'cash_on_pickup',
+    payment_method:      'gcash',
     payment_reference:   '',
     payment_sender_name: '',
     payment_datetime:    '',
@@ -81,6 +98,25 @@ export default function CityPinRequestsPage() {
       })
       .catch(() => {})
   }, [])
+
+  const fetchTransfers = useCallback(() => {
+    setTransferLoading(true)
+    fetch('/api/pin-transfers?status=all&pageSize=50', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => setTransfers(data.transfers || []))
+      .finally(() => setTransferLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        const branch = data.user?.distributor_profile?.dist_level === 'branch'
+        setIsBranch(branch)
+        if (branch) fetchTransfers()
+      })
+      .catch(() => {})
+  }, [fetchTransfers])
 
   useEffect(() => { setPage(1) }, [statusFilter])
 
@@ -121,11 +157,9 @@ export default function CityPinRequestsPage() {
   const handleSubmit = async () => {
     if (!form.package_id) { setFormError('Please select a package.'); return }
     if (form.quantity < 1) { setFormError('Quantity must be at least 1.'); return }
-    if (form.payment_method !== 'cash_on_pickup') {
-      if (!form.payment_reference.trim()) { setFormError('Please enter payment reference.'); return }
-      if (!form.payment_sender_name.trim()) { setFormError('Please enter sender name.'); return }
-      if (!form.payment_datetime) { setFormError('Please enter payment date and time.'); return }
-    }
+    if (!form.payment_reference.trim()) { setFormError('Please enter payment reference.'); return }
+    if (!form.payment_sender_name.trim()) { setFormError('Please enter sender name.'); return }
+    if (!form.payment_datetime) { setFormError('Please enter payment date and time.'); return }
 
     setSubmitting(true); setFormError('')
     const res = await fetch('/api/pin-requests', {
@@ -149,11 +183,35 @@ export default function CityPinRequestsPage() {
       setTimeout(() => {
         setShowForm(false)
         setFormSuccess('')
-        setForm({ package_id: '', quantity: 1, payment_method: 'cash_on_pickup', payment_reference: '', payment_sender_name: '', payment_datetime: '', notes: '' })
+        setForm({ package_id: '', quantity: 1, payment_method: 'gcash', payment_reference: '', payment_sender_name: '', payment_datetime: '', notes: '' })
       }, 1500)
     } else {
       setFormError(data.error || 'Something went wrong.')
     }
+  }
+
+  const resolveTransfer = async (transfer: PinTransfer, action: 'received' | 'rejected') => {
+    const reason = action === 'rejected'
+      ? window.prompt(`Reason for rejecting ${transfer.reference_number}:`)?.trim() || ''
+      : ''
+    if (action === 'rejected' && reason.length < 3) return
+    if (action === 'received' && !window.confirm(
+      `Receive all ${transfer.quantity} PINs under ${transfer.reference_number}? This makes the complete batch usable by this Branch.`,
+    )) return
+    setResolvingTransfer(transfer.id)
+    setTransferError('')
+    const response = await fetch(`/api/pin-transfers/${transfer.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, reason }),
+    })
+    const data = await response.json()
+    setResolvingTransfer(null)
+    if (!response.ok) {
+      setTransferError(data.error || 'Unable to resolve PIN transfer.')
+      return
+    }
+    fetchTransfers()
   }
 
   return (
@@ -163,13 +221,54 @@ export default function CityPinRequestsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">PIN Requests</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Request PINs from admin and track your orders</p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {isBranch ? 'Receive zero-revenue PIN transfers from Hiroma Admin' : 'Request paid PINs from admin and track your orders'}
+          </p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        {!isBranch && <button onClick={() => setShowForm(true)}
           className="bg-[#C9A84C] text-[#0D1B3E] text-xs font-semibold rounded-lg px-4 py-2 hover:bg-[#E8C96A] transition-colors">
           + Request PINs
-        </button>
+        </button>}
       </div>
+
+      {isBranch && (
+        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 mb-6 overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#0D1B3E]/8">
+            <h2 className="text-sm font-semibold text-[#0D1B3E]">Incoming PIN Transfers</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Internal transfer only: ₱0 sale. PINs stay unusable until the complete batch is received.</p>
+          </div>
+          {transferError && <p className="m-4 text-xs text-[#a03030] bg-[#fdecea] px-3 py-2 rounded-lg">{transferError}</p>}
+          {transferLoading ? (
+            <p className="px-4 py-8 text-sm text-gray-400 text-center">Loading transfers...</p>
+          ) : transfers.length === 0 ? (
+            <p className="px-4 py-8 text-sm text-gray-400 text-center">No PIN transfers yet.</p>
+          ) : transfers.map((transfer) => (
+            <div key={transfer.id} className="grid grid-cols-[1.3fr_1fr_1fr_1.2fr] gap-3 px-4 py-3 border-b border-[#0D1B3E]/5 items-center">
+              <div>
+                <p className="text-xs font-semibold text-[#0D1B3E]">{transfer.reference_number}</p>
+                <p className="text-[10px] text-gray-400">{transfer.package?.name || 'Package'} · {new Date(transfer.created_at).toLocaleString('en-PH')}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[#0D1B3E]">{transfer.quantity} PINs</p>
+                <p className="text-[10px] text-gray-400">Reference ₱{Number(transfer.reference_value).toLocaleString()} · Sale ₱0</p>
+              </div>
+              <span className={`text-xs px-2 py-1 rounded-full w-fit ${transfer.status === 'received' ? 'bg-[#e8f7ef] text-[#1a7a4a]' : transfer.status === 'rejected' ? 'bg-[#fdecea] text-[#a03030]' : 'bg-[#fef9ee] text-[#9a6f1e]'}`}>
+                {transfer.status.replace('_', ' ')}
+              </span>
+              <div className="flex gap-1.5 justify-end">
+                {transfer.status === 'in_transit' && (
+                  <>
+                    <button onClick={() => resolveTransfer(transfer, 'received')} disabled={resolvingTransfer === transfer.id}
+                      className="text-[10px] bg-[#010521] text-white px-2 py-1.5 rounded-lg disabled:opacity-50">Receive all</button>
+                    <button onClick={() => resolveTransfer(transfer, 'rejected')} disabled={resolvingTransfer === transfer.id}
+                      className="text-[10px] bg-[#fdecea] text-[#a03030] px-2 py-1.5 rounded-lg disabled:opacity-50">Reject</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -216,9 +315,9 @@ export default function CityPinRequestsPage() {
         ) : requests.length === 0 ? (
           <div className="py-12 text-center">
             <p className="text-gray-400 text-sm">No PIN requests yet.</p>
-            <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline mt-1">
+            {!isBranch && <button onClick={() => setShowForm(true)} className="text-xs text-[#C9A84C] hover:underline mt-1">
               Submit your first request →
-            </button>
+            </button>}
           </div>
         ) : (
           requests.map((r) => (
@@ -256,7 +355,7 @@ export default function CityPinRequestsPage() {
       </div>
 
       {/* Request Modal */}
-      {showForm && (
+      {showForm && !isBranch && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="bg-[#010521] px-5 py-4 flex items-center justify-between">
@@ -299,12 +398,6 @@ export default function CityPinRequestsPage() {
               <div>
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
-                  <div onClick={() => setForm({ ...form, payment_method: 'cash_on_pickup', payment_reference: '', payment_sender_name: '', payment_datetime: '' })}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 cursor-pointer ${form.payment_method === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
-                    <span>💵</span>
-                    <p className="text-xs font-medium text-[#0D1B3E] flex-1">Cash on Pickup</p>
-                    {form.payment_method === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
-                  </div>
                   {paymentMethods.map((pm) => (
                     <div key={pm.id} onClick={() => setForm({ ...form, payment_method: pm.type })}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 cursor-pointer ${form.payment_method === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
@@ -318,18 +411,16 @@ export default function CityPinRequestsPage() {
                     </div>
                   ))}
                 </div>
-                {form.payment_method !== 'cash_on_pickup' && (
-                  <div className="mt-2 space-y-1.5">
-                    <input value={form.payment_reference} onChange={(e) => setForm({ ...form, payment_reference: e.target.value })}
-                      placeholder="Reference number *"
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
-                    <input value={form.payment_sender_name} onChange={(e) => setForm({ ...form, payment_sender_name: e.target.value })}
-                      placeholder="Sender name *"
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
-                    <input type="datetime-local" value={form.payment_datetime} onChange={(e) => setForm({ ...form, payment_datetime: e.target.value })}
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C] text-gray-500" />
-                  </div>
-                )}
+                <div className="mt-2 space-y-1.5">
+                  <input value={form.payment_reference} onChange={(e) => setForm({ ...form, payment_reference: e.target.value })}
+                    maxLength={120} placeholder="Payment reference number *"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
+                  <input value={form.payment_sender_name} onChange={(e) => setForm({ ...form, payment_sender_name: e.target.value })}
+                    maxLength={120} placeholder="Sender name *"
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
+                  <input type="datetime-local" value={form.payment_datetime} onChange={(e) => setForm({ ...form, payment_datetime: e.target.value })}
+                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C] text-gray-500" />
+                </div>
               </div>
 
               {/* Notes */}

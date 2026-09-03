@@ -35,7 +35,7 @@ export default function CityPinsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   // Filters
-  const [statusFilter,  setStatusFilter]  = useState<'all' | 'unused' | 'used' | 'expired' | 'cancelled'>('unused')
+  const [statusFilter,  setStatusFilter]  = useState<'all' | 'in_transit' | 'unused' | 'used' | 'expired' | 'cancelled'>('unused')
   const [packageFilter, setPackageFilter] = useState('')
   const [pinTypeFilter, setPinTypeFilter] = useState<'all' | 'registration' | 'upgrade'>('all')
   const [dateFrom,      setDateFrom]      = useState('')
@@ -45,7 +45,7 @@ export default function CityPinsPage() {
   const [page,          setPage]          = useState(1)
   const [showFilters,   setShowFilters]   = useState(false)
 
-  const [summary, setSummary] = useState({ total: 0, unused: 0, used: 0, expired: 0, cancelled: 0, registration: 0, upgrade: 0 })
+  const [summary, setSummary] = useState({ total: 0, in_transit: 0, unused: 0, used: 0, expired: 0, cancelled: 0, registration: 0, upgrade: 0 })
 
   const advancedFilterCount = [packageFilter, dateFrom, dateTo].filter(Boolean).length
   const hasChangedFilters = advancedFilterCount > 0 || pinTypeFilter !== 'all' || statusFilter !== 'unused' || Boolean(search)
@@ -255,8 +255,9 @@ export default function CityPinsPage() {
                   <p className="text-[10px] text-white/70">Choose where the PIN is in its lifecycle</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-1 sm:grid-cols-5" aria-label="Filter by PIN lifecycle status">
+              <div className="grid grid-cols-2 gap-1 sm:grid-cols-6" aria-label="Filter by PIN lifecycle status">
                 {([
+                  { value: 'in_transit', active: 'bg-[#4338ca] text-white ring-2 ring-white/70 shadow-sm', idle: 'border-white/25 bg-white/90 text-[#4338ca] hover:bg-white' },
                   { value: 'unused', active: 'bg-[#A77C18] text-white ring-2 ring-white/70 shadow-sm', idle: 'border-white/25 bg-white/90 text-[#7A5910] hover:bg-white' },
                   { value: 'used', active: 'bg-[#187B4B] text-white ring-2 ring-white/70 shadow-sm', idle: 'border-white/25 bg-white/90 text-[#12633C] hover:bg-white' },
                   { value: 'expired', active: 'bg-[#C23B43] text-white ring-2 ring-white/70 shadow-sm', idle: 'border-white/25 bg-white/90 text-[#A12F36] hover:bg-white' },
@@ -407,6 +408,7 @@ export default function CityPinsPage() {
               <span>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   pin.status === 'unused'  ? 'bg-[#e8f7ef] text-[#1a7a4a]' :
+                  pin.status === 'in_transit' ? 'bg-[#eef2ff] text-[#4338ca]' :
                   pin.status === 'used'    ? 'bg-[#eef0f8] text-[#0D1B3E]' :
                                              'bg-[#fdecea] text-[#a03030]'
                 }`}>{pin.status}</span>
@@ -440,7 +442,8 @@ export default function CityPinsPage() {
               </div>
             </div>
             <article className="space-y-3 p-4 md:hidden">
-              <div className="flex items-start justify-between gap-3"><div><p className="break-all font-mono text-xs font-bold text-[#0D1B3E]">{pin.pin_code}</p><p className="mt-1 text-[10px] text-gray-500">Assigned {new Date(pin.created_at).toLocaleDateString('en-PH')}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${pin.status === 'unused' ? 'bg-green-50 text-green-700' : pin.status === 'used' ? 'bg-slate-100 text-slate-700' : 'bg-red-50 text-red-700'}`}>{pin.status}</span></div>
+              <div className="flex items-start justify-between gap-3"><div><p className="break-all font-mono text-xs font-bold text-[#0D1B3E]">{pin.pin_code}</p><p className="mt-1 text-[10px] text-gray-500">Assigned {new Date(pin.created_at).toLocaleDateString('en-PH')}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${pin.status === 'unused' ? 'bg-green-50 text-green-700' : pin.status === 'in_transit' ? 'bg-indigo-50 text-indigo-700' : pin.status === 'used' ? 'bg-slate-100 text-slate-700' : 'bg-red-50 text-red-700'}`}>{pin.status}</span></div>
+              {pin.status === 'in_transit' && <p className="rounded-lg bg-indigo-50 p-2 text-xs text-indigo-700">Internal transfer pending Branch receipt. This PIN cannot be used yet.</p>}
               <div className="grid grid-cols-2 gap-3 text-xs"><div><p className="text-[10px] uppercase text-gray-400">Type</p><p className="mt-1 font-bold capitalize text-[#0D1B3E]">{pin.pin_type}</p></div><div><p className="text-[10px] uppercase text-gray-400">Package / path</p><p className="mt-1 font-bold text-[#0D1B3E]">{pin.pin_type === 'upgrade' && pin.upgrade_from_package ? `${pin.upgrade_from_package.name} → ` : ''}{pin.package?.name || '—'}</p></div><div><p className="text-[10px] uppercase text-gray-400">PIN allocation</p><p className="mt-1 font-bold text-[#9a6f1e]">₱{Number(pin.package?.price || 0).toLocaleString()}</p></div><div><p className="text-[10px] uppercase text-gray-400">Used by</p><p className="mt-1 font-bold text-[#0D1B3E]">{pin.used_by_user?.full_name || '—'}</p></div></div>
               {pin.status === 'cancelled' && <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">Cancelled {pin.cancelled_at ? new Date(pin.cancelled_at).toLocaleDateString('en-PH') : 'date unavailable'}{pin.cancellation_reason ? ` · ${pin.cancellation_reason}` : ''}</div>}
               {pin.status === 'expired' && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">Expired status recorded; no dedicated expiration timestamp exists for this legacy record.</p>}

@@ -60,6 +60,17 @@ interface CartItem {
   quantity: number
 }
 
+interface StockReceipt {
+  id: string
+  reference_number: string
+  source_type: string
+  source_reference: string
+  total_units: number
+  notes: string | null
+  received_at: string
+  items: Array<{ product_id: string; quantity: number; unit_cost: number; stock_before: number; stock_after: number }>
+}
+
 const PAGE_SIZE = 15
 
 const ROLE_COLOR: Record<string, string> = {
@@ -104,6 +115,8 @@ function AddProductionModal({
 }) {
   const [cart, setCart]             = useState<CartItem[]>([])
   const [notes, setNotes]           = useState('')
+  const [sourceType, setSourceType] = useState<'production' | 'supplier_purchase' | 'approved_adjustment'>('production')
+  const [sourceReference, setSourceReference] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [success, setSuccess]       = useState('')
@@ -128,6 +141,8 @@ function AddProductionModal({
 
   const handleSubmit = async () => {
     if (cart.length === 0) { setError('Add at least one product.'); return }
+    if (sourceReference.trim().length < 3) { setError('Enter the batch, supplier receipt, or approval reference.'); return }
+    if (sourceType === 'approved_adjustment' && notes.trim().length < 3) { setError('Enter the approved adjustment reason.'); return }
     setSubmitting(true); setError('')
     const res = await fetch('/api/admin/inventory', {
       method:  'PUT',
@@ -135,6 +150,8 @@ function AddProductionModal({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         notes,
+        source_type: sourceType,
+        source_reference: sourceReference.trim(),
         items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
       }),
     })
@@ -226,8 +243,19 @@ function AddProductionModal({
                 <span>Total Units</span>
                 <span>{cart.reduce((s, c) => s + c.quantity, 0).toLocaleString()}</span>
               </div>
+              <select value={sourceType} onChange={(e) => setSourceType(e.target.value as typeof sourceType)}
+                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C9A84C]">
+                <option value="production">Production batch</option>
+                <option value="supplier_purchase">Supplier purchase</option>
+                <option value="approved_adjustment">Approved adjustment</option>
+              </select>
+              <input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)}
+                maxLength={120}
+                placeholder={sourceType === 'production' ? 'Batch reference' : sourceType === 'supplier_purchase' ? 'Supplier receipt / invoice' : 'Approval reference'}
+                className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400" />
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Notes e.g. 'Batch #12 production run'" rows={2}
+                maxLength={500}
+                placeholder={sourceType === 'approved_adjustment' ? 'Required adjustment reason' : 'Optional notes'} rows={2}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#C9A84C] resize-none placeholder:text-gray-400" />
               {error   && <p className="text-xs text-[#a03030]">{error}</p>}
               {success && <p className="text-xs text-[#1a7a4a] bg-[#e8f7ef] px-2 py-1.5 rounded-lg">{success}</p>}
@@ -643,13 +671,14 @@ function AssignStockModal({
 // ============================================================
 
 export default function AdminInventoryPage() {
-  const [tab, setTab]                   = useState<'stock' | 'distributed'>('stock')
+  const [tab, setTab]                   = useState<'stock' | 'receipts' | 'distributed'>('stock')
   const [stockPage, setStockPage]       = useState(1)
   const [stockSearch, setStockSearch]   = useState('')
   const [stockSearchInput, setStockSearchInput] = useState('')
   const [stockMeta, setStockMeta]       = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [items, setItems]               = useState<InventoryItem[]>([])
   const [productStock, setProductStock] = useState<ProductStock[]>([])
+  const [stockReceipts, setStockReceipts] = useState<StockReceipt[]>([])
   const [distributors, setDistributors] = useState<Distributor[]>([])
   const [meta, setMeta]                 = useState<PaginationMeta>({ total: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1 })
   const [loading, setLoading]           = useState(true)
@@ -697,6 +726,7 @@ export default function AdminInventoryPage() {
         setItems(data.items || [])
         setDistributors(data.distributors || [])
         setProductStock(data.productStockSummary || [])
+        setStockReceipts(data.stockReceipts || [])
         setAdminRevenue(data.adminRevenue || 0)
         setAdminTotalOrders(data.adminTotalOrders || 0)
         if (data.meta)      setMeta(data.meta)
@@ -771,6 +801,7 @@ export default function AdminInventoryPage() {
       <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         {([
           { key: 'stock',       label: '📦 Product Stock Overview' },
+          { key: 'receipts',    label: '🧾 Stock Receipt Ledger' },
           { key: 'distributed', label: '📋 Distributor Inventory' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -853,6 +884,37 @@ export default function AdminInventoryPage() {
             ))
           )}
           <Pagination meta={stockMeta} onPageChange={setStockPage} />
+        </div>
+      )}
+
+      {tab === 'receipts' && (
+        <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
+            <p className="text-sm font-semibold text-[#0D1B3E]">Admin Stock Receipt Ledger</p>
+            <p className="text-xs text-gray-400 mt-0.5">Append-only proof for every product quantity entering Admin custody.</p>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr_1.4fr_0.8fr_1fr] px-4 py-2 bg-[#F0F2F8]">
+            {['Ledger Ref', 'Source', 'Source Reference', 'Units', 'Received'].map((heading) => (
+              <p key={heading} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{heading}</p>
+            ))}
+          </div>
+          {stockReceipts.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm py-10">No source-backed stock receipts recorded yet.</p>
+          ) : stockReceipts.map((receipt) => (
+            <div key={receipt.id} className="grid grid-cols-[1fr_1fr_1.4fr_0.8fr_1fr] px-4 py-3 border-b border-[#0D1B3E]/5 items-center">
+              <p className="font-mono text-xs font-semibold text-[#0D1B3E]">{receipt.reference_number}</p>
+              <span className="text-xs capitalize text-[#0D1B3E]">{receipt.source_type.replaceAll('_', ' ')}</span>
+              <div>
+                <p className="text-xs text-[#0D1B3E]">{receipt.source_reference}</p>
+                {receipt.notes && <p className="text-[10px] text-gray-400 truncate" title={receipt.notes}>{receipt.notes}</p>}
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-[#1a7a4a]">{receipt.total_units.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400">{receipt.items.length} product(s)</p>
+              </div>
+              <p className="text-xs text-gray-500">{new Date(receipt.received_at).toLocaleString('en-PH')}</p>
+            </div>
+          ))}
         </div>
       )}
 

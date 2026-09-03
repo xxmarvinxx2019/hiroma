@@ -71,12 +71,12 @@ export default function AdminPinRequestsPage() {
 
   useEffect(() => { fetchRequests() }, [fetchRequests])
 
-  const handleAction = async (id: string, status: string, payment_status?: string) => {
+  const handleAction = async (id: string, status: 'approved' | 'rejected') => {
     setActing(id)
     await fetch('/api/pin-requests', {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ id, status, payment_status }),
+      body:    JSON.stringify({ id, status, ...(status === 'approved' && { payment_status: 'paid' }) }),
     })
     setActing(null)
     fetchRequests()
@@ -189,16 +189,10 @@ export default function AdminPinRequestsPage() {
               <div className="flex items-center gap-1.5 flex-wrap">
                 {r.status === 'pending' && (
                   <>
-                    {/* Confirm payment if non-cash and unpaid */}
-                    {r.payment_method !== 'cash_on_pickup' && r.payment_status !== 'paid' && (
-                      <button onClick={() => handleAction(r.id, r.status, 'paid')} disabled={acting === r.id}
-                        className="text-[10px] bg-[#e8f7ef] text-[#1a7a4a] px-2 py-1 rounded-lg hover:bg-[#d4f0e0] disabled:opacity-50 font-medium">
-                        ✓ Paid
-                      </button>
-                    )}
                     <button onClick={() => handleAction(r.id, 'approved')} disabled={acting === r.id}
+                      title="Verify the displayed payment evidence before approval"
                       className="text-[10px] bg-[#010521] text-white px-2 py-1 rounded-lg hover:bg-[#162850] disabled:opacity-50 font-medium">
-                      {acting === r.id ? '...' : 'Approve'}
+                      {acting === r.id ? '...' : 'Verify & Approve'}
                     </button>
                     <button onClick={() => handleAction(r.id, 'rejected')} disabled={acting === r.id}
                       className="text-[10px] bg-[#fdecea] text-[#a03030] px-2 py-1 rounded-lg hover:bg-[#fcd9d9] disabled:opacity-50">

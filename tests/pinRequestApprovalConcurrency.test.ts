@@ -29,6 +29,7 @@ test('a concurrent approval loser cannot create another PIN batch', async () => 
     }],
     registrationProducts: [],
     updatedAt: new Date('2026-09-02T00:00:00.000Z'),
+    approvedByActorId: '00000000-0000-4000-8000-000000000001',
   })
 
   assert.equal(approved, false)
@@ -77,6 +78,7 @@ test('the pending claim precedes the complete PIN batch write', async () => {
       unit_acquisition_cost_snapshot: 163,
     }],
     updatedAt: new Date('2026-09-02T00:00:00.000Z'),
+    approvedByActorId: '00000000-0000-4000-8000-000000000001',
   })
 
   assert.equal(approved, true)

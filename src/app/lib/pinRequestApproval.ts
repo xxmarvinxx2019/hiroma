@@ -12,6 +12,7 @@ type ApprovalInput = {
     unit_acquisition_cost_snapshot: number
   }>
   updatedAt: Date
+  approvedByActorId: string
 }
 
 export async function claimPendingPinRequestAndCreatePins(
@@ -23,6 +24,8 @@ export async function claimPendingPinRequestAndCreatePins(
     data: {
       status: 'approved',
       ...(input.paymentStatus && { payment_status: input.paymentStatus }),
+      approved_by_actor_id: input.approvedByActorId,
+      approved_at: input.updatedAt,
       updated_at: input.updatedAt,
     },
   })
