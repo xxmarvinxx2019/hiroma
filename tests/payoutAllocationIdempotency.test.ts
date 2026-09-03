@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL('../prisma/migrations/20260813130000_make_binary_payout_allocation_idempotent/migration.sql', import.meta.url),
   'utf8',
 )
+const hardeningMigration = readFileSync(
+  new URL('../prisma/migrations/20260902120000_harden_binary_settlement_and_payouts/migration.sql', import.meta.url),
+  'utf8',
+)
 
 test('binary and product-binary allocators serialize the exact payout', () => {
   const locks = migration.match(/pg_advisory_xact_lock\(hashtextextended\(target_payout_id, 0\)\)/g) ?? []
@@ -43,4 +47,34 @@ test('existing payout amount, FIFO ordering, and allocation timestamp semantics 
   assert.match(migration, /LEAST\(remaining, lot\.remaining_amount\)/)
   assert.match(migration, /VALUES \(target_payout_id, lot\."id", consumed, allocation_time\)/)
   assert.match(migration, /VALUES\(target_payout_id, lot\.id, consumed, allocation_time\)/)
+})
+
+test('approved payouts fail closed unless every peso has a payable source allocation', () => {
+  assert.match(
+    hardeningMigration,
+    /direct_referral_payout_consumptions[\s\S]*binary_payout_consumptions[\s\S]*product_binary_payout_consumptions/,
+  )
+  assert.match(
+    hardeningMigration,
+    /IF allocated <> NEW\."amount" THEN[\s\S]*RAISE EXCEPTION/,
+  )
+  assert.match(
+    hardeningMigration,
+    /CREATE TRIGGER "zzzz_payouts_require_full_source_allocation"/,
+  )
+  assert.match(
+    hardeningMigration,
+    /NEW\."status" IN \('approved', 'released'\)/,
+  )
+  assert.match(
+    hardeningMigration,
+    /Historical payouts require full source-allocation reconciliation/,
+  )
+})
+
+test('admin payout approval exposes a ledger reconciliation conflict instead of a false success', () => {
+  const route = readFileSync('src/app/api/admin/payouts/route.ts', 'utf8')
+  assert.match(route, /isPayoutSourceAllocationError/)
+  assert.match(route, /Payout cannot be approved because its spendable commission sources are not fully allocated/)
+  assert.match(route, /status: 409/)
 })

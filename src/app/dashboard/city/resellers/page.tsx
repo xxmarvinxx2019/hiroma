@@ -661,7 +661,12 @@ export default function CityResellersPage() {
   // Check name cap
   const checkNameCap = async (name: string) => {
     if (!name.trim() || name.trim().length < 3) return
-    const res = await fetch(`/api/city/resellers/check-name?name=${encodeURIComponent(name.trim())}`)
+    const res = await fetch('/api/city/resellers/check-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ name: name.trim() }),
+    })
     const data = await res.json()
     setNameCapInfo(data)
   }

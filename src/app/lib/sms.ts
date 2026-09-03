@@ -64,20 +64,20 @@ export async function sendSMS(mobile: string, message: string): Promise<SMSResul
 export function smsWelcomeReseller({
   full_name,
   username,
-  password,
   package_name,
+  setup_url,
 }: {
   full_name:    string
   username:     string
-  password:     string
   package_name: string
+  setup_url:    string
 }): string {
   const first_name = full_name.split(' ')[0]
   return `Welcome to HIROMA, ${first_name}! Your account has been successfully activated.
 
 Package: ${package_name}
 Username: ${username}
-Temporary Password: ${password}
+Set your password using this one-time link (expires in 30 minutes): ${setup_url}
 
-Log in at HiromaDigital.com and change your temporary password after your first login. Never share your login credentials. Welcome to the HIROMA Digital Community.`
+Never share this link or your login credentials. Welcome to the HIROMA Digital Community.`
 }

@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 import { canUpdateOrderPaymentStatus, isAllowedOrderPaymentStatus } from '@/app/lib/orderPaymentAuthorization'
+import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
 // ── Regional always buys from Admin ──
 async function resolveSupplier() {
   const admin = await prisma.user.findFirst({
@@ -25,8 +26,8 @@ export async function GET(req: NextRequest) {
     const status   = searchParams.get('status')   || 'all'
     const type     = searchParams.get('type')     || 'all'
     const search   = searchParams.get('search')   || ''
-    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const page     = boundedPage(searchParams.get('page'))
+    const pageSize = boundedPageSize(searchParams.get('pageSize'))
 
     const isBuyer = tab === 'my_orders'
 

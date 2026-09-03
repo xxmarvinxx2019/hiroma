@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { PRODUCT_BINARY_BASE_POINTS, PRODUCT_BINARY_DEFAULT_THRESHOLDS, PRODUCT_BINARY_RANK_POINTS } from '@/app/lib/productBinaryQuarter'
+import { assertRegistrationPinFunding, PackageFundingConfigurationError } from '@/app/lib/packageUpgradeConfiguration'
 
 // ── GET all packages ──
 export async function GET(req: NextRequest) {
@@ -32,6 +33,15 @@ export async function GET(req: NextRequest) {
         products: {
           include: {
             product: { select: { name: true, price: true, reseller_price: true } },
+          },
+        },
+        upgrade_paths_to: {
+          orderBy: { created_at: 'asc' },
+          include: {
+            from_package: { select: { id: true, name: true } },
+            products: {
+              include: { product: { select: { id: true, name: true, price: true, reseller_price: true } } },
+            },
           },
         },
       },
@@ -125,6 +135,7 @@ export async function POST(req: NextRequest) {
     if (!name || !price || !direct_referral_bonus || !pairing_bonus_value || !point_php_value) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
     }
+    assertRegistrationPinFunding(price, direct_referral_bonus, pairing_bonus_value)
 
     let newPkg: any
     await prisma.$transaction(async (tx) => {
@@ -168,97 +179,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, package: newPkg })
   } catch (error) {
     console.error('[CREATE PACKAGE ERROR]', error)
+    if (error instanceof PackageFundingConfigurationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
 
-// ── PUT update package ──
-export async function PUT(req: NextRequest) {
-  try {
-    const user = await getCurrentUser()
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const url = req.nextUrl.pathname
-    const id  = url.split('/').pop()
-    if (!id) return NextResponse.json({ error: 'Missing package ID.' }, { status: 400 })
-
-    const {
-      name, price, direct_referral_bonus, pairing_bonus_value,
-      point_php_value, daily_product_pairing_cap,
-      product_binary_cap_enabled,
-      direct_referral_cap_enabled, daily_referral_cap, products,
-      binary_pair_cap_enabled, daily_binary_pair_cap,
-    } = await req.json()
-    const productBinaryCapEnabled =
-      typeof product_binary_cap_enabled === 'boolean' ? product_binary_cap_enabled : null
-
-    if (!name || !price || !direct_referral_bonus || !pairing_bonus_value || !point_php_value) {
-      return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.package.update({
-        where: { id },
-        data: {
-          name: name.trim(), price, direct_referral_bonus, pairing_bonus_value,
-          point_php_value: PRODUCT_BINARY_BASE_POINTS, point_reset_days: 90,
-        },
-      })
-
-      // Replace products
-      await tx.packageProduct.deleteMany({ where: { package_id: id } })
-      if (products && products.length > 0) {
-        await tx.packageProduct.createMany({
-          data: products
-            .filter((p: any) => p.product_id)
-            .map((p: any) => ({ package_id: id, product_id: p.product_id, quantity: p.quantity || 1 })),
-        })
-      }
-    })
-
-    // Update package-level caps via raw SQL
-    await prisma.$executeRaw`
-      UPDATE packages
-      SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50},
-          product_binary_cap_enabled = COALESCE(${productBinaryCapEnabled}, product_binary_cap_enabled),
-          direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
-          daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
-          binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
-          daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
-      WHERE id::text = ${id}
-    `
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('[UPDATE PACKAGE ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
-  }
-}
-
-// ── PATCH toggle active ──
-export async function PATCH(req: NextRequest) {
-  try {
-    const user = await getCurrentUser()
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const url = req.nextUrl.pathname
-    const id  = url.split('/').pop()
-    if (!id) return NextResponse.json({ error: 'Missing package ID.' }, { status: 400 })
-
-    const { is_active } = await req.json()
-
-    await prisma.package.update({
-      where: { id },
-      data:  { is_active },
-    })
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('[TOGGLE PACKAGE ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
-  }
-}
+// Package mutation deliberately lives only at /api/admin/packages/[id]. That
+// handler serializes and revalidates every inbound and outbound upgrade path.
+// Leaving a second collection-level PUT/PATCH would create a policy bypass.

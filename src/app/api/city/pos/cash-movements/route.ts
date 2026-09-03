@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/app/lib/auth'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { notifyPosReviewers } from '@/app/lib/posNotifications'
 import prisma from '@/app/lib/prisma'
+import { calculateShiftCashSales } from '@/app/lib/posCashSales'
 
 const PURPOSES = {
   paid_in: new Set(['change_fund', 'cash_float', 'correction', 'other']),
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
       where: { shift_id: shift.id, owner_id: user.id }, orderBy: { requested_at: 'desc' },
       select: { id: true, movement_type: true, status: true, amount: true, purpose: true, notes: true, reference: true, requested_at: true, reviewed_at: true, review_notes: true, requested_by_id: true, reviewed_by_id: true, requested_by: { select: { full_name: true, username: true } }, reviewed_by: { select: { full_name: true, username: true } } },
     }),
-    prisma.posTransaction.aggregate({ where: { shift_id: shift.id, payment_method_snapshot: 'cash', status: { in: ['approved', 'finalized'] } }, _sum: { total_snapshot: true } }),
+    calculateShiftCashSales(prisma, shift.id),
     prisma.posAdjustmentRequest.aggregate({ where: { request_type: 'refund', status: 'approved', transaction: { shift_id: shift.id, payment_method_snapshot: 'cash', status: { in: ['approved', 'finalized'] } } }, _sum: { amount_snapshot: true } }),
   ])
   const paidIn = movements.filter(row => row.movement_type === 'paid_in' && ['applied', 'approved'].includes(row.status)).reduce((sum, row) => sum + Number(row.amount), 0)
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     access: { can_approve: canApprove(user), view: audit && canApprove(user) ? 'audit' : 'mine' },
     shift: { ...shift, opening_cash: Number(shift.opening_cash) },
-    summary: { opening_cash: Number(shift.opening_cash), cash_sales: Number(cashSales._sum.total_snapshot || 0), cash_refunds: Number(cashRefunds._sum.amount_snapshot || 0), paid_in: paidIn, paid_out: paidOut, pending_paid_out: movements.filter(row => row.movement_type === 'paid_out' && row.status === 'pending').length },
+    summary: { opening_cash: Number(shift.opening_cash), cash_sales: cashSales.total, product_cash_sales: cashSales.productCash, registration_cash_sales: cashSales.registrationCash, cash_refunds: Number(cashRefunds._sum.amount_snapshot || 0), paid_in: paidIn, paid_out: paidOut, pending_paid_out: movements.filter(row => row.movement_type === 'paid_out' && row.status === 'pending').length },
     movements: movements.map(row => ({ ...row, amount: Number(row.amount), requested_by_name: row.requested_by.full_name || row.requested_by.username, reviewed_by_name: row.reviewed_by?.full_name || row.reviewed_by?.username || null })),
   })
 }

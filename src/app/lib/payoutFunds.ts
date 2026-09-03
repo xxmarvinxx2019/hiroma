@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { appendWalletLedgerEntryExactlyOnce, lockFinancialUser } from '@/app/lib/walletLedger'
 
 type PayoutTx = Prisma.TransactionClient
 
@@ -10,41 +11,51 @@ export class InsufficientPayoutFundsError extends Error {
 }
 
 export async function lockPayoutRequestsForUser(tx: PayoutTx, userId: string) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`
+  await lockFinancialUser(tx, userId)
 }
 
-export async function reservePayoutFunds(tx: PayoutTx, userId: string, amount: number) {
-  const changed = await tx.$executeRaw`
-    UPDATE "wallets"
-    SET "reserved_balance" = "reserved_balance" + ${amount},
-        "updated_at" = CURRENT_TIMESTAMP
-    WHERE "user_id" = ${userId}
-      AND ("balance" - "reserved_balance") >= ${amount}
-  `
-  if (changed !== 1) throw new InsufficientPayoutFundsError()
+export async function reservePayoutFunds(tx: PayoutTx, payoutId: string, userId: string, amount: number) {
+  try {
+    await appendWalletLedgerEntryExactlyOnce(tx, {
+      eventKey: `payout:${payoutId}:reservation`,
+      userId,
+      entryType: 'payout_reservation',
+      reservedDelta: amount,
+      payoutId,
+      sourceKind: 'payout',
+      sourceEventId: payoutId,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message.includes('source-backed withdrawable funds') || message.includes('wallet balance invariants')) {
+      throw new InsufficientPayoutFundsError()
+    }
+    throw error
+  }
 }
 
-export async function releasePayoutFunds(tx: PayoutTx, userId: string, amount: number) {
-  const changed = await tx.$executeRaw`
-    UPDATE "wallets"
-    SET "reserved_balance" = "reserved_balance" - ${amount},
-        "updated_at" = CURRENT_TIMESTAMP
-    WHERE "user_id" = ${userId}
-      AND "reserved_balance" >= ${amount}
-  `
-  if (changed !== 1) throw new Error('Payout reservation is missing.')
+export async function releasePayoutFunds(tx: PayoutTx, payoutId: string, userId: string, amount: number) {
+  await appendWalletLedgerEntryExactlyOnce(tx, {
+    eventKey: `payout:${payoutId}:reservation-release`,
+    userId,
+    entryType: 'payout_reservation_release',
+    reservedDelta: -amount,
+    payoutId,
+    sourceKind: 'payout',
+    sourceEventId: payoutId,
+  })
 }
 
-export async function finalizePayoutFunds(tx: PayoutTx, userId: string, amount: number) {
-  const changed = await tx.$executeRaw`
-    UPDATE "wallets"
-    SET "balance" = "balance" - ${amount},
-        "reserved_balance" = "reserved_balance" - ${amount},
-        "total_withdrawn" = "total_withdrawn" + ${amount},
-        "updated_at" = CURRENT_TIMESTAMP
-    WHERE "user_id" = ${userId}
-      AND "balance" >= ${amount}
-      AND "reserved_balance" >= ${amount}
-  `
-  if (changed !== 1) throw new Error('Reserved payout funds cannot be finalized.')
+export async function finalizePayoutFunds(tx: PayoutTx, payoutId: string, userId: string, amount: number) {
+  await appendWalletLedgerEntryExactlyOnce(tx, {
+    eventKey: `payout:${payoutId}:disbursement`,
+    userId,
+    entryType: 'payout_disbursement',
+    balanceDelta: -amount,
+    reservedDelta: -amount,
+    totalWithdrawnDelta: amount,
+    payoutId,
+    sourceKind: 'payout',
+    sourceEventId: payoutId,
+  })
 }

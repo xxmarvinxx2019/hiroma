@@ -36,10 +36,22 @@ const cardDefs = [
     "from-orange-700 to-orange-500",
   ],
   [
+    "total_direct_retained",
+    "Direct Retained",
+    "Upgrade, cap, ineligible, and company-root decisions",
+    "from-teal-800 to-teal-500",
+  ],
+  [
     "total_flashout",
     "Flashout Retained",
     "Returned to Hiroma",
     "from-red-800 to-red-500",
+  ],
+  [
+    "total_deactivation_forfeited",
+    "Deactivation Forfeited",
+    "Liquidated member payables",
+    "from-slate-800 to-slate-600",
   ],
   [
     "funding_shortfall",
@@ -56,7 +68,9 @@ type ReservePosition = {
   available: number;
   liability: number;
   paid: number;
+  retained: number;
   flashout: number;
+  forfeited: number;
   shortfall: number;
 };
 type ReserveMovement = {
@@ -71,6 +85,50 @@ type ReserveMovement = {
 };
 type ReserveLedgerData = {
   summary?: Record<string, number>;
+  reserve_admission?: {
+    mode: "monitor" | "enforce";
+    status: "healthy" | "warning" | "blocked";
+    allowed: boolean;
+    reasons: string[];
+    availableReserve: number;
+    earmarkedReserve: number;
+    payableLiability: number;
+    coveragePercent: number;
+    minimumAvailableReserve: number;
+    minimumCoveragePercent: number;
+    unusedPinExposure: number;
+    unusedPinCount: number;
+    carryoverPoints: number;
+    recentEventCount: number;
+    recentMaximumEventPayable: number;
+    recentMaximumEventRecipients: number;
+    unfundedAmount: number;
+    unfundedCount: number;
+  };
+  integrity?: {
+    unreconciled_wallets?: number;
+    unsupported_positive_balance?: number;
+    liability_deficit?: number;
+    source_backed_liability?: number;
+    wallet_balance?: number;
+    unreconciled_registration_pins?: number;
+    unreconciled_upgrade_pins?: number;
+    unreconciled_pin_requests?: number;
+    legacy_direct_referral_settlements?: number;
+    unreconciled_direct_referral_settlements?: number;
+    unreconciled_payouts?: number;
+    legacy_product_binary_funding_lots?: number;
+    legacy_product_binary_funding_amount?: number;
+    legacy_deactivation_events?: number;
+    unreconciled_deactivations?: number;
+  };
+  product_binary_jobs?: Array<{
+    status: string;
+    qualification_status: string;
+    count: number;
+    oldest?: string | null;
+    last_error?: string;
+  }>;
   reserves?: ReservePosition[];
   movements?: ReserveMovement[];
   error?: string;
@@ -158,7 +216,138 @@ export default function ReserveLedgerPage() {
           {data.error}
         </div>
       )}
-      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {!loading && data?.reserve_admission && (
+        <section className={
+          data.reserve_admission.status === "healthy"
+            ? "mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5"
+            : data.reserve_admission.status === "blocked"
+              ? "mt-5 rounded-2xl border border-rose-300 bg-rose-50 p-5"
+              : "mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5"
+        }>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-bold">Binary reserve admission monitor</h2>
+              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                Read-only operational health. It does not change package points,
+                commissions, daily caps, or existing balances.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase shadow-sm">
+              {data.reserve_admission.mode} · {data.reserve_admission.status}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Available for new pairs</p>
+              <p className="mt-1 text-xl font-black">{peso.format(data.reserve_admission.availableReserve)}</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Earmarked for earned binary</p>
+              <p className="mt-1 text-xl font-black">{peso.format(data.reserve_admission.earmarkedReserve)}</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Payable binary liability</p>
+              <p className="mt-1 text-xl font-black">{peso.format(data.reserve_admission.payableLiability)}</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Protected coverage</p>
+              <p className="mt-1 text-xl font-black">{data.reserve_admission.coveragePercent.toFixed(2)}%</p>
+              <p className="text-xs text-slate-500">Policy minimum {data.reserve_admission.minimumCoveragePercent}%</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Unused PIN allocation exposure</p>
+              <p className="mt-1 text-xl font-black">{peso.format(data.reserve_admission.unusedPinExposure)}</p>
+              <p className="text-xs text-slate-500">{data.reserve_admission.unusedPinCount} unused PINs</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Carryover waiting for opposite leg</p>
+              <p className="mt-1 text-xl font-black">{Math.round(data.reserve_admission.carryoverPoints).toLocaleString("en-PH")} pts</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Largest event, last 30 days</p>
+              <p className="mt-1 text-xl font-black">{peso.format(data.reserve_admission.recentMaximumEventPayable)}</p>
+              <p className="text-xs text-slate-500">Up to {data.reserve_admission.recentMaximumEventRecipients} recipients</p>
+            </div>
+            <div className="rounded-xl bg-white p-4">
+              <p className="text-xs text-slate-500">Historical unfunded records</p>
+              <p className="mt-1 text-xl font-black text-rose-700">{peso.format(data.reserve_admission.unfundedAmount)}</p>
+              <p className="text-xs text-slate-500">{data.reserve_admission.unfundedCount} records</p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-600">
+            {data.reserve_admission.mode === "monitor"
+              ? "Monitor-only: warnings are visible but PIN issuance continues. Enable enforcement only after Finance approves the thresholds."
+              : "Enforced: new PIN issuance or release pauses when this policy is breached; existing member data is not altered."}
+          </p>
+          {data.reserve_admission.reasons.length > 0 && (
+            <p className="mt-2 text-xs font-semibold text-amber-800">
+              Signals: {data.reserve_admission.reasons.join(", ")}
+            </p>
+          )}
+        </section>
+      )}
+      {!loading && data?.integrity && (
+        <section className={`mt-5 rounded-2xl border p-5 ${
+          Number(data.integrity.unreconciled_wallets || 0) > 0 ||
+          Number(data.integrity.unreconciled_registration_pins || 0) > 0 ||
+          Number(data.integrity.unreconciled_upgrade_pins || 0) > 0 ||
+          Number(data.integrity.unreconciled_pin_requests || 0) > 0 ||
+          Number(data.integrity.legacy_direct_referral_settlements || 0) > 0 ||
+          Number(data.integrity.unreconciled_direct_referral_settlements || 0) > 0 ||
+           Number(data.integrity.unreconciled_payouts || 0) > 0 ||
+          Number(data.integrity.legacy_product_binary_funding_lots || 0) > 0 ||
+          Number(data.integrity.legacy_deactivation_events || 0) > 0 ||
+          Number(data.integrity.unreconciled_deactivations || 0) > 0 ||
+          (data.product_binary_jobs || []).length > 0
+            ? "border-amber-300 bg-amber-50"
+            : "border-emerald-200 bg-emerald-50"
+        }`}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-bold">Financial integrity monitor</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Wallets reconcile against payable source lots; delivered Product Binary obligations stay queued until settled.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase shadow-sm">
+              {Number(data.integrity.unreconciled_wallets || 0) === 0 &&
+              Number(data.integrity.unreconciled_registration_pins || 0) === 0 &&
+              Number(data.integrity.unreconciled_upgrade_pins || 0) === 0 &&
+              Number(data.integrity.unreconciled_pin_requests || 0) === 0 &&
+              Number(data.integrity.legacy_direct_referral_settlements || 0) === 0 &&
+              Number(data.integrity.unreconciled_direct_referral_settlements || 0) === 0 &&
+               Number(data.integrity.unreconciled_payouts || 0) === 0 &&
+              Number(data.integrity.legacy_product_binary_funding_lots || 0) === 0 &&
+              Number(data.integrity.legacy_deactivation_events || 0) === 0 &&
+              Number(data.integrity.unreconciled_deactivations || 0) === 0 &&
+              (data.product_binary_jobs || []).length === 0 ? "Clear" : "Attention required"}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Unreconciled wallets</p><p className="mt-1 text-xl font-black">{data.integrity.unreconciled_wallets || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Unsupported balance</p><p className="mt-1 text-xl font-black">{peso.format(data.integrity.unsupported_positive_balance || 0)}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Liability deficit</p><p className="mt-1 text-xl font-black text-rose-700">{peso.format(data.integrity.liability_deficit || 0)}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Pending/failed settlements</p><p className="mt-1 text-xl font-black">{(data.product_binary_jobs || []).reduce((n, row) => n + Number(row.count || 0), 0)}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy PINs to reconcile</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.unreconciled_registration_pins || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy Upgrade PINs to cancel/reissue</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.unreconciled_upgrade_pins || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy PIN requests to reconcile</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.unreconciled_pin_requests || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy Direct Referral decisions</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.legacy_direct_referral_settlements || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Direct Referral settlement mismatches</p><p className="mt-1 text-xl font-black text-rose-700">{data.integrity.unreconciled_direct_referral_settlements || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Payout lifecycle mismatches</p><p className="mt-1 text-xl font-black text-rose-700">{data.integrity.unreconciled_payouts || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy Product Binary sources quarantined</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.legacy_product_binary_funding_lots || 0}</p><p className="text-xs text-slate-500">{peso.format(data.integrity.legacy_product_binary_funding_amount || 0)} historical gross allocation</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Legacy deactivations to reconcile</p><p className="mt-1 text-xl font-black text-amber-700">{data.integrity.legacy_deactivation_events || 0}</p></div>
+            <div className="rounded-xl bg-white p-4"><p className="text-xs text-slate-500">Deactivation lifecycle mismatches</p><p className="mt-1 text-xl font-black text-rose-700">{data.integrity.unreconciled_deactivations || 0}</p></div>
+          </div>
+          {(data.product_binary_jobs || []).map((job) => (
+            <p key={`${job.status}:${job.qualification_status}`} className="mt-3 text-xs text-slate-600">
+              <strong className="uppercase">{job.status} · {job.qualification_status}</strong>: {job.count}
+              {job.oldest ? ` · oldest ${new Date(job.oldest).toLocaleString("en-PH")}` : ""}
+              {job.last_error ? ` · ${job.last_error}` : ""}
+            </p>
+          ))}
+        </section>
+      )}
+      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         {cardDefs.map(([key, label, note, bg]) => (
           <article
             key={key}
@@ -192,7 +381,9 @@ export default function ReserveLedgerPage() {
                   "Available",
                   "Committed liability",
                   "Released",
+                  "Direct retained",
                   "Flashout",
+                  "Deactivation forfeited",
                   "Shortfall",
                 ].map((x) => (
                   <th key={x} className="px-5 py-3">
@@ -213,8 +404,14 @@ export default function ReserveLedgerPage() {
                     {peso.format(r.liability)}
                   </td>
                   <td className="px-5">{peso.format(r.paid)}</td>
+                  <td className="px-5 text-teal-700">
+                    {peso.format(r.retained)}
+                  </td>
                   <td className="px-5 text-red-600">
                     {peso.format(r.flashout)}
+                  </td>
+                  <td className="px-5 text-slate-700">
+                    {peso.format(r.forfeited)}
                   </td>
                   <td className="px-5 font-semibold text-rose-700">
                     {peso.format(r.shortfall)}

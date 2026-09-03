@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import prisma from "@/app/lib/prisma";
 import { notifyPosReviewers } from "@/app/lib/posNotifications";
+import { calculateShiftCashSales } from "@/app/lib/posCashSales";
 
 function money(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -157,14 +158,7 @@ export async function PATCH(req: Request) {
         },
       });
       if (pending > 0) return { blocked: true as const, pending };
-      const cashSales = await tx.posTransaction.aggregate({
-        where: {
-          shift_id: shift.id,
-          payment_method_snapshot: "cash",
-          status: { in: ["approved", "finalized"] },
-        },
-        _sum: { total_snapshot: true },
-      });
+      const cashSales = await calculateShiftCashSales(tx, shift.id);
       const approvedCashRefunds = await tx.posAdjustmentRequest.aggregate({
         where: {
           request_type: "refund",
@@ -210,7 +204,7 @@ export async function PATCH(req: Request) {
       );
       const expected =
         Number(shift.opening_cash) +
-        Number(cashSales._sum.total_snapshot || 0) -
+        cashSales.total -
         Number(approvedCashRefunds._sum.amount_snapshot || 0) +
         paidIn -
         paidOut;

@@ -2,23 +2,38 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { generateUsernamePlan } from '@/app/lib/usernameGenerator'
 
-export async function GET(req: NextRequest) {
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  })
+}
+
+function clean(value: unknown, max: number) {
+  return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || !['city', 'admin'].includes(user.role)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return json({ error: 'Unauthorized' }, 401)
+    }
+    if (user.is_staff && !user.permissions?.includes('register_reseller')) {
+      return json({ error: 'Your staff account cannot check new reseller identities.' }, 403)
     }
 
-    const name = req.nextUrl.searchParams.get('name')?.trim() || ''
-    const birthday = req.nextUrl.searchParams.get('birthday')?.trim() || ''
-    const birthplace = req.nextUrl.searchParams.get('birthplace')?.trim() || ''
-    const identityDocumentType = req.nextUrl.searchParams.get('identity_document_type')?.trim() || ''
-    const identityDocumentNumber = req.nextUrl.searchParams.get('identity_document_number')?.trim() || ''
-    const mobile = req.nextUrl.searchParams.get('mobile')?.trim() || ''
-    const email = req.nextUrl.searchParams.get('email')?.trim() || ''
-    const identityConfirmation = req.nextUrl.searchParams.get('identity_confirmation')
+    const body = await req.json().catch(() => ({}))
+    const name = clean(body.name, 180)
+    const birthday = clean(body.birthday, 20)
+    const birthplace = clean(body.birthplace, 240)
+    const identityDocumentType = clean(body.identity_document_type, 80)
+    const identityDocumentNumber = clean(body.identity_document_number, 180)
+    const mobile = clean(body.mobile, 40)
+    const email = clean(body.email, 180).toLowerCase()
+    const identityConfirmation = clean(body.identity_confirmation, 20)
     if (!name || !birthday || !birthplace) {
-      return NextResponse.json({
+      return json({
         ready: false,
         count: 0,
         max: 7,
@@ -37,7 +52,7 @@ export async function GET(req: NextRequest) {
       email,
       identityConfirmation: identityConfirmation === 'same' || identityConfirmation === 'different' ? identityConfirmation : undefined,
     })
-    return NextResponse.json({
+    return json({
       ready: true,
       count: plan.existingAccountCount,
       max: plan.maxAccounts,
@@ -52,6 +67,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to generate username.'
     const isLimit = message.startsWith('Maximum accounts')
-    return NextResponse.json({ error: message }, { status: isLimit ? 409 : 400 })
+    return json({ error: message }, isLimit ? 409 : 400)
   }
 }

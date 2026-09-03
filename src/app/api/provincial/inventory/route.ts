@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
 
 // ── GET city distributor's inventory with search & pagination ──
 export async function GET(req: NextRequest) {
@@ -14,8 +15,8 @@ export async function GET(req: NextRequest) {
     const search     = searchParams.get('search') || ''
     const type       = searchParams.get('type')   || 'all'
     const stockParam = searchParams.get('stock')  || 'all'
-    const page       = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize   = Math.max(1, parseInt(searchParams.get('pageSize') || '15'))
+    const page       = boundedPage(searchParams.get('page'))
+    const pageSize   = boundedPageSize(searchParams.get('pageSize'))
 
     const productFilter: Record<string, unknown> = {
       ...(type !== 'all' && { type }),

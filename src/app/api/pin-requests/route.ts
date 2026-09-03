@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { calculatePackageEconomics } from '@/app/lib/package-economics'
+import { claimPendingPinRequestAndCreatePins } from '@/app/lib/pinRequestApproval'
+import {
+  buildRegistrationPinSnapshot,
+  parseRegistrationPinSnapshot,
+  RegistrationPinSnapshotError,
+  type RegistrationAcquisitionTier,
+} from '@/app/lib/registrationPinSnapshot'
+import {
+  assessPinIssuanceAgainstBinaryReserve,
+  BinaryReserveAdmissionError,
+} from '@/app/lib/binaryReserveAdmission'
 
 // ── Generate unique PIN code ──
 function generatePinCode(packageName: string): string {
@@ -93,8 +104,11 @@ export async function POST(req: NextRequest) {
       payment_method, payment_reference, payment_sender_name, payment_datetime,
     } = await req.json()
 
-    if (!package_id || !quantity || quantity < 1) {
-      return NextResponse.json({ error: 'Package and quantity are required.' }, { status: 400 })
+    if (!package_id || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 50) {
+      return NextResponse.json(
+        { error: 'Package is required and quantity must be a whole number between 1 and 50.' },
+        { status: 400 },
+      )
     }
 
     const pkg = await prisma.package.findUnique({
@@ -104,10 +118,21 @@ export async function POST(req: NextRequest) {
         name: true,
         price: true,
         is_active: true,
+        direct_referral_bonus: true,
+        pairing_bonus_value: true,
         products: {
           select: {
+            product_id: true,
             quantity: true,
-            product: { select: { price: true, reseller_price: true } },
+            product: {
+              select: {
+                price: true,
+                reseller_price: true,
+                city_price: true,
+                branch_price: true,
+                cost_price: true,
+              },
+            },
           },
         },
       },
@@ -117,10 +142,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Package not found or inactive.' }, { status: 400 })
     }
 
-    const unitPinPrice = pkg.products.length > 0
-      ? calculatePackageEconomics(pkg.products).pinAllocation
-      : Number(pkg.price)
-    const total_amount = unitPinPrice * quantity
+    const distributor = await prisma.distributorProfile.findUnique({
+      where: { user_id: user.id },
+      select: { dist_level: true, is_active: true },
+    })
+    const acquisitionTier: RegistrationAcquisitionTier | null =
+      distributor?.is_active
+        && (distributor.dist_level === 'city' || distributor.dist_level === 'branch')
+        ? distributor.dist_level
+        : null
+    if (!acquisitionTier) {
+      return NextResponse.json({ error: 'Only an active City Distributor or Branch may request registration PINs.' }, { status: 403 })
+    }
+
+    const registrationSnapshot = buildRegistrationPinSnapshot({
+      packageId: pkg.id,
+      packageName: pkg.name,
+      configuredPinPrice: pkg.price,
+      directAllocation: pkg.direct_referral_bonus,
+      points: pkg.pairing_bonus_value,
+      acquisitionTier,
+      products: pkg.products,
+    })
+    const total_amount = registrationSnapshot.pinAllocation * quantity
 
     const request = await prisma.pinRequest.create({
       data: {
@@ -135,13 +179,18 @@ export async function POST(req: NextRequest) {
         payment_status:      payment_method === 'cash_on_pickup' ? 'unpaid' : 'pending',
         status:              'pending',
         notes:               notes?.trim() || null,
+        registration_snapshot: registrationSnapshot as unknown as Prisma.InputJsonValue,
       },
     })
 
     return NextResponse.json({ success: true, request })
   } catch (error) {
     console.error('[PIN REQUESTS POST ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
+    const detail = error instanceof Error ? error.message : 'Something went wrong.'
+    return NextResponse.json(
+      { error: error instanceof RegistrationPinSnapshotError ? detail : 'Something went wrong.' },
+      { status: error instanceof RegistrationPinSnapshotError ? 400 : 500 },
+    )
   }
 }
 
@@ -155,14 +204,14 @@ export async function PATCH(req: NextRequest) {
 
     const { id, status, payment_status } = await req.json()
 
-    if (!id) {
+    if (!id || !['approved', 'rejected'].includes(String(status))) {
       return NextResponse.json({ error: 'Request ID required.' }, { status: 400 })
     }
 
     const request = await prisma.pinRequest.findUnique({
       where:  { id },
       select: {
-        id: true, quantity: true, status: true,
+        id: true, quantity: true, status: true, registration_snapshot: true,
         city_dist_id: true,
         package: { select: { id: true, name: true, price: true } },
       },
@@ -176,18 +225,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Request already finalized.' }, { status: 400 })
     }
 
-    // Update request status
-    await prisma.pinRequest.update({
-      where: { id },
-      data: {
-        ...(status         && { status }),
-        ...(payment_status && { payment_status }),
-        updated_at: new Date(),
-      },
-    })
-
     // If approved → generate and assign PINs to city dist
     if (status === 'approved') {
+      if (payment_status !== 'paid') {
+        return NextResponse.json(
+          { error: 'Confirm full payment before issuing funded registration PINs.' },
+          { status: 400 },
+        )
+      }
+      const snapshot = parseRegistrationPinSnapshot(request.registration_snapshot)
+      if (snapshot.packageId !== request.package.id) {
+        return NextResponse.json({ error: 'PIN request snapshot does not match its package.' }, { status: 409 })
+      }
       const pins = []
       const existingCodes = new Set<string>()
 
@@ -208,12 +257,56 @@ export async function PATCH(req: NextRequest) {
           city_dist_id:  request.city_dist_id,
           status:        'unused',
           generated_by:  user.id,
+          pin_type:       'registration',
+          pin_allocation_snapshot: snapshot.pinAllocation,
+          registration_package_name_snapshot: snapshot.packageName,
+          registration_customer_payment_snapshot: snapshot.customerPayment,
+          registration_reseller_value_snapshot: snapshot.resellerValue,
+          registration_acquisition_cost_snapshot: snapshot.acquisitionCost,
+          registration_acquisition_tier_snapshot: snapshot.acquisitionTier,
+          registration_direct_allocation_snapshot: snapshot.directAllocation,
+          registration_binary_allocation_snapshot: snapshot.binaryAllocation,
+          registration_points_snapshot: snapshot.points,
+          registration_product_line_count_snapshot: snapshot.productLineCount,
+          registration_units_snapshot: snapshot.units,
         })
       }
 
-      await prisma.pin.createMany({ data: pins })
+      const approval = await prisma.$transaction(async (tx) => {
+        const reserveAdmission = await assessPinIssuanceAgainstBinaryReserve(
+          tx,
+          snapshot.binaryAllocation * request.quantity,
+        )
+        const approved = await claimPendingPinRequestAndCreatePins(tx, {
+          requestId: id,
+          paymentStatus: payment_status,
+          pins,
+          registrationProducts: snapshot.products,
+          updatedAt: new Date(),
+        })
+        return { approved, reserveAdmission }
+      })
+
+      if (!approval.approved) {
+        return NextResponse.json(
+          { error: 'Request already finalized.' },
+          { status: 409 },
+        )
+      }
 
       console.log(`[PIN REQUEST] Generated ${pins.length} PINs for city dist ${request.city_dist_id}`)
+    } else {
+      const rejected = await prisma.pinRequest.updateMany({
+        where: { id, status: 'pending' },
+        data: {
+          status: 'rejected',
+          ...(payment_status && { payment_status }),
+          updated_at: new Date(),
+        },
+      })
+      if (rejected.count !== 1) {
+        return NextResponse.json({ error: 'Request already finalized.' }, { status: 409 })
+      }
     }
 
     return NextResponse.json({
@@ -224,6 +317,19 @@ export async function PATCH(req: NextRequest) {
     })
   } catch (error) {
     console.error('[PIN REQUESTS PATCH ERROR]', error)
-    return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
+    if (error instanceof BinaryReserveAdmissionError) {
+      return NextResponse.json(
+        {
+          error: 'PIN release is temporarily paused by the protected reserve policy. Contact Finance/Admin.',
+          code: error.code,
+        },
+        { status: 503 },
+      )
+    }
+    const detail = error instanceof Error ? error.message : 'Something went wrong.'
+    return NextResponse.json(
+      { error: error instanceof RegistrationPinSnapshotError ? detail : 'Something went wrong.' },
+      { status: error instanceof RegistrationPinSnapshotError ? 409 : 500 },
+    )
   }
 }

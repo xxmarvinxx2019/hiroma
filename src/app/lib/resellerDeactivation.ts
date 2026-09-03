@@ -11,3 +11,10 @@ export class ConcurrentDeactivationError extends Error {
     this.name = 'ConcurrentDeactivationError'
   }
 }
+
+export class UnreconciledWalletBlocksDeactivationError extends Error {
+  constructor() {
+    super('The reseller wallet does not exactly match its funded payable liabilities. Reconcile it before deactivation.')
+    this.name = 'UnreconciledWalletBlocksDeactivationError'
+  }
+}

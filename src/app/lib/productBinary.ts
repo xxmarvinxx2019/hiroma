@@ -3,12 +3,58 @@ import { Prisma } from '@prisma/client'
 import prisma from '@/app/lib/prisma'
 import { ensureCurrentProductBinaryQuarter, PRODUCT_BINARY_PESO_PER_POINT } from '@/app/lib/productBinaryQuarter'
 import { calculateProductBinaryDailyCap } from '@/app/lib/productBinaryCap'
+import {
+  creditCommissionExactlyOnce,
+  recordCommissionExactlyOnce,
+} from '@/app/lib/commissionCredit'
+import { lockFinancialUser } from '@/app/lib/walletLedger'
+import { createAuditLog } from '@/app/lib/auditLog'
 
 const PU_PER_LEG_PER_PAIR = 2
 const PESO_PER_POINT = PRODUCT_BINARY_PESO_PER_POINT
 // Business rule: Product Binary is independent from package value and may pay
 // at most ₱20 per completed pair, even if a legacy rank row is configured higher.
 const MAX_PRODUCT_BINARY_PAIR_RATE = 20
+const PRODUCT_BINARY_RETRY_BASE_SECONDS = 30
+const PRODUCT_BINARY_RETRY_MAX_SECONDS = 60 * 60
+
+export const PRODUCT_BINARY_REWARDS_PENDING_WARNING =
+  'The order is complete, but Product Binary rewards are queued for automatic retry. The durable settlement record prevents duplicate rewards.'
+export const PRODUCT_BINARY_WAITING_PAYMENT_WARNING =
+  'Product Binary is waiting for seller-confirmed payment. No PU, reserve, or commission is created before the order is both paid and delivered.'
+
+type PendingSettlementActor = {
+  id?: string | null
+  name?: string | null
+  role?: string | null
+}
+
+export function reportPendingProductBinarySettlement(
+  orderId: string,
+  error: unknown,
+  actor: PendingSettlementActor = {},
+) {
+  const failure = error instanceof Error ? error.message.slice(0, 500) : 'Unknown Product Binary settlement error'
+  createAuditLog({
+    user_id: actor.id || null,
+    user_name: actor.name || undefined,
+    user_role: actor.role || undefined,
+    activity_type: 'product_binary_settlement_queued',
+    category: 'commission',
+    description: `Product Binary rewards for order ${orderId} remain queued for automatic retry.`,
+    metadata: {
+      order_id: orderId,
+      durable_settlement_job: true,
+      failure,
+    },
+    risk_level: 'warning',
+    status: 'under_review',
+  })
+  return {
+    rewards_pending: true as const,
+    rewards_warning: PRODUCT_BINARY_REWARDS_PENDING_WARNING,
+  }
+}
 
 type Tx = Prisma.TransactionClient
 
@@ -41,41 +87,86 @@ async function getRankSnapshot(tx: Tx, packageId: string | null, totalPu: number
  * result is snapshotted, so later rank/package edits cannot rewrite history.
  */
 export async function processDeliveredProductBinaryOrder(orderId: string) {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary:' + orderId}))`
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary:' + orderId}))`
+      const jobs = await tx.$queryRaw<{
+        id: string
+        status: string
+        qualification_status: string
+        buyer_user_id: string | null
+        eligible_units_snapshot: number | null
+        total_pu_snapshot: number | null
+        gross_margin_snapshot: string | null
+        snapshot_version: string | null
+      }[]>`
+        SELECT id::text,status,qualification_status,buyer_user_id::text,
+          eligible_units_snapshot,total_pu_snapshot,gross_margin_snapshot::text,snapshot_version
+        FROM product_binary_settlement_jobs
+        WHERE order_id=${orderId}
+        FOR UPDATE
+      `
+      const job = jobs[0]
+      if (!job) {
+        throw new Error('Product Binary order has no database-qualified settlement job.')
+      }
+      if (job.status === 'completed') {
+        if (job.qualification_status === 'ineligible_zero_pu') {
+          return { processed: false, reason: 'not_eligible' as const }
+        }
+        return { processed: false, reason: 'already_processed' as const }
+      }
+      if (job.status === 'waiting_payment') {
+        return { processed: false, reason: 'waiting_for_payment' as const }
+      }
+      if (job.status === 'reconciliation_required') {
+        return { processed: false, reason: 'reconciliation_required' as const }
+      }
+      if (!['pending', 'failed'].includes(job.status)
+          || job.qualification_status !== 'qualified_paid_delivery'
+          || job.snapshot_version !== 'product-binary-order-v1'
+          || !job.buyer_user_id
+          || Number(job.total_pu_snapshot) <= 0
+          || Number(job.eligible_units_snapshot) <= 0
+          || job.gross_margin_snapshot === null) {
+        throw new Error('Product Binary settlement job lacks exact paid-delivered snapshots.')
+      }
 
-    const existing = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id::text FROM product_binary_order_events WHERE order_id = ${orderId} LIMIT 1
-    `
-    if (existing.length) return { processed: false, reason: 'already_processed' as const }
+      const existing = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id::text FROM product_binary_order_events WHERE order_id = ${orderId} LIMIT 1
+      `
+      if (existing.length) {
+        await tx.$executeRaw`
+          UPDATE product_binary_settlement_jobs
+          SET status='completed',completed_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP
+          WHERE order_id=${orderId}
+        `
+        return { processed: false, reason: 'already_processed' as const }
+      }
 
-    const orders = await tx.$queryRaw<{
-      order_id: string; buyer_id: string; buyer_role: string; status: string;
-      eligible_units: number; total_pu: number; gross_margin: string;
-    }[]>`
-      SELECT o.id::text order_id, o.buyer_id::text, u.role::text buyer_role, o.status::text,
-        COALESCE(SUM(CASE WHEN p.binary_eligible AND p.pu_value > 0 THEN oi.quantity ELSE 0 END),0)::int eligible_units,
-        COALESCE(SUM(CASE WHEN p.binary_eligible AND p.pu_value > 0 THEN oi.quantity*p.pu_value ELSE 0 END),0)::int total_pu,
-        COALESCE(SUM(CASE WHEN p.binary_eligible AND p.pu_value > 0
-          THEN oi.quantity*(oi.unit_price-COALESCE(oi.unit_acquisition_cost,p.cost_price)) ELSE 0 END),0)::text gross_margin
-      FROM orders o JOIN users u ON u.id=o.buyer_id JOIN order_items oi ON oi.order_id=o.id JOIN products p ON p.id=oi.product_id
-      WHERE o.id::text=${orderId}
-      GROUP BY o.id,o.buyer_id,u.role,o.status
-    `
-    const order = orders[0]
-    if (!order || order.status !== 'delivered' || order.buyer_role !== 'reseller' || Number(order.total_pu) <= 0) {
-      return { processed: false, reason: 'not_eligible' as const }
-    }
+      const order = {
+        order_id: orderId,
+        buyer_id: job.buyer_user_id,
+        eligible_units: Number(job.eligible_units_snapshot),
+        total_pu: Number(job.total_pu_snapshot),
+        gross_margin: Number(job.gross_margin_snapshot),
+      }
 
     const orderEventId = randomUUID()
     await tx.$executeRaw`
-      INSERT INTO product_binary_order_events(id,order_id,buyer_user_id,eligible_units,total_pu,recorded_gross_margin)
-      VALUES(${orderEventId}::uuid,${order.order_id},${order.buyer_id},${Number(order.eligible_units)},${Number(order.total_pu)},${Number(order.gross_margin)})
+      INSERT INTO product_binary_order_events(
+        id,order_id,buyer_user_id,eligible_units,total_pu,recorded_gross_margin,settlement_job_id
+      )
+      VALUES(
+        ${orderEventId}::uuid,${order.order_id},${order.buyer_id},${Number(order.eligible_units)},
+        ${Number(order.total_pu)},${Number(order.gross_margin)},${job.id}::uuid
+      )
     `
 
     // Personal PU drives Rank Engine. Registration/package products are not
     // counted here; only a delivered, binary-eligible product order is counted.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + order.buyer_id}))`
+    await lockFinancialUser(tx, order.buyer_id)
     await ensureCurrentProductBinaryQuarter(tx, order.buyer_id)
     await tx.$executeRaw`
       UPDATE reseller_profiles SET total_pu=COALESCE(total_pu,0)+${Number(order.total_pu)} WHERE user_id=${order.buyer_id}
@@ -101,13 +192,19 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         JOIN binary_tree_nodes p ON p.id=c.parent_id
       ) SELECT user_id::text,source_leg,depth FROM chain ORDER BY depth
     `
-    const hiroma = await tx.$queryRaw<{ id: string }[]>`SELECT id::text FROM users WHERE username='hiroma' LIMIT 1`
+    const hiroma = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id::text
+      FROM users
+      WHERE username='hiroma' AND role='admin'::"Role" AND status='active'::"UserStatus"
+      LIMIT 1
+    `
     const day = manilaDayRange(new Date())
     let credited = 0
     let flashout = 0
 
     for (const ancestor of ancestors) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + ancestor.user_id}))`
+      await lockFinancialUser(tx, ancestor.user_id)
       await ensureCurrentProductBinaryQuarter(tx, ancestor.user_id)
       const profiles = await tx.$queryRaw<{
         status: string; package_id: string; package_name: string; base_points: string; total_pu: number;
@@ -129,21 +226,24 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       await tx.$executeRaw`
         INSERT INTO product_binary_positions(user_id) VALUES(${ancestor.user_id}) ON CONFLICT(user_id) DO NOTHING
       `
-      const positions = await tx.$queryRaw<{ left_carryover_pu: number; right_carryover_pu: number }[]>`
-        SELECT left_carryover_pu,right_carryover_pu FROM product_binary_positions
+      const positions = await tx.$queryRaw<{
+        left_carryover_pu: number; right_carryover_pu: number;
+        lifetime_pairs: number; lifetime_payable: number; lifetime_flashout: number;
+      }[]>`
+        SELECT left_carryover_pu,right_carryover_pu,lifetime_pairs,lifetime_payable,lifetime_flashout
+        FROM product_binary_positions
         WHERE user_id=${ancestor.user_id} FOR UPDATE
       `
       const openingLeft = Number(positions[0]?.left_carryover_pu || 0)
       const openingRight = Number(positions[0]?.right_carryover_pu || 0)
+      const openingLifetimePairs = Number(positions[0]?.lifetime_pairs || 0)
+      const openingLifetimePayable = Number(positions[0]?.lifetime_payable || 0)
+      const openingLifetimeFlashout = Number(positions[0]?.lifetime_flashout || 0)
       const availableLeft = openingLeft + (ancestor.source_leg === 'left' ? Number(order.total_pu) : 0)
       const availableRight = openingRight + (ancestor.source_leg === 'right' ? Number(order.total_pu) : 0)
       const completedPairs = Math.floor(Math.min(availableLeft, availableRight) / PU_PER_LEG_PER_PAIR)
       const closingLeft = availableLeft - completedPairs * PU_PER_LEG_PER_PAIR
       const closingRight = availableRight - completedPairs * PU_PER_LEG_PER_PAIR
-      if (completedPairs <= 0) {
-        await tx.$executeRaw`UPDATE product_binary_positions SET left_carryover_pu=${closingLeft},right_carryover_pu=${closingRight},updated_at=CURRENT_TIMESTAMP WHERE user_id=${ancestor.user_id}`
-        continue
-      }
 
       const today = await tx.$queryRaw<{ used: number }[]>`
         SELECT COALESCE(SUM(payable_pairs),0)::int used FROM product_binary_pair_events
@@ -159,46 +259,97 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       )
       const payableAmount = payablePairs*rateAmount
       const flashoutAmount = (capFlashPairs+inactivePairs)*rateAmount
+      const closingLifetimePairs = openingLifetimePairs + completedPairs
+      const closingLifetimePayable = openingLifetimePayable + payablePairs
+      const closingLifetimeFlashout = openingLifetimeFlashout + capFlashPairs + inactivePairs
+
+      if (flashoutAmount > 0 && !hiroma[0]) {
+        throw new Error('Hiroma product-binary flashout receiver was not found.')
+      }
+
       let normalCommissionId: string | null = null
       let flashCommissionId: string | null = null
 
       if (payableAmount > 0) {
-        normalCommissionId=randomUUID()
-        await tx.$executeRaw`INSERT INTO commissions(id,user_id,type,amount,points,source_user_id,is_pair_overflow,created_at)
-          VALUES(${normalCommissionId},${ancestor.user_id},'sponsor_point'::"CommissionType",${payableAmount},${payablePairs*effectiveRatePoints},${order.buyer_id},false,CURRENT_TIMESTAMP)`
-        await tx.$executeRaw`INSERT INTO wallets(id,user_id,balance,total_earned,total_withdrawn,updated_at)
-          VALUES(${randomUUID()},${ancestor.user_id},${payableAmount},${payableAmount},0,CURRENT_TIMESTAMP)
-          ON CONFLICT(user_id) DO UPDATE SET balance=wallets.balance+${payableAmount},total_earned=wallets.total_earned+${payableAmount},updated_at=CURRENT_TIMESTAMP`
+        const normalCommission = await creditCommissionExactlyOnce(tx, {
+          eventKey: `product-order:${order.order_id}:binary:${ancestor.user_id}:payable`,
+          sourceEventKind: 'product_order',
+          sourceEventId: order.order_id,
+          ruleVersion: 'product-binary-v1',
+          userId: ancestor.user_id,
+          type: 'sponsor_point',
+          amount: payableAmount,
+          points: payablePairs*effectiveRatePoints,
+          sourceUserId: order.buyer_id,
+        })
+        normalCommissionId = normalCommission.id
         credited += payableAmount
       }
       if (flashoutAmount > 0 && hiroma[0]) {
-        flashCommissionId=randomUUID()
-        await tx.$executeRaw`INSERT INTO commissions(id,user_id,type,amount,points,source_user_id,is_pair_overflow,overflow_to,created_at)
-          VALUES(${flashCommissionId},${hiroma[0].id},'sponsor_point'::"CommissionType",${flashoutAmount},${(capFlashPairs+inactivePairs)*effectiveRatePoints},${order.buyer_id},true,${hiroma[0].id},CURRENT_TIMESTAMP)`
-        await tx.$executeRaw`INSERT INTO wallets(id,user_id,balance,total_earned,total_withdrawn,updated_at)
-          VALUES(${randomUUID()},${hiroma[0].id},${flashoutAmount},${flashoutAmount},0,CURRENT_TIMESTAMP)
-          ON CONFLICT(user_id) DO UPDATE SET balance=wallets.balance+${flashoutAmount},total_earned=wallets.total_earned+${flashoutAmount},updated_at=CURRENT_TIMESTAMP`
+        const flashCommission = await recordCommissionExactlyOnce(tx, {
+          eventKey: `product-order:${order.order_id}:binary:${ancestor.user_id}:flashout`,
+          sourceEventKind: 'product_order',
+          sourceEventId: order.order_id,
+          ruleVersion: 'product-binary-v1',
+          userId: hiroma[0].id,
+          type: 'sponsor_point',
+          amount: flashoutAmount,
+          points: (capFlashPairs+inactivePairs)*effectiveRatePoints,
+          sourceUserId: order.buyer_id,
+          isOverflow: true,
+          overflowTo: hiroma[0].id,
+        })
+        flashCommissionId = flashCommission.id
         flashout += flashoutAmount
       }
 
       await tx.$executeRaw`
         INSERT INTO product_binary_pair_events(
           id,order_event_id,recipient_user_id,source_user_id,source_leg,source_pu,opening_left_pu,opening_right_pu,
+          opening_lifetime_pairs,opening_lifetime_payable,opening_lifetime_flashout,
           completed_pairs,payable_pairs,cap_flashout_pairs,inactive_flashout_pairs,closing_left_pu,closing_right_pu,
+          closing_lifetime_pairs,closing_lifetime_payable,closing_lifetime_flashout,
           package_id_snapshot,package_name_snapshot,rank_id_snapshot,rank_name_snapshot,pair_rate_points,peso_per_point,
           pair_rate_amount,payable_amount,flashout_amount,cap_enabled,cap_limit,normal_commission_id,flashout_commission_id)
         VALUES(${randomUUID()}::uuid,${orderEventId}::uuid,${ancestor.user_id},${order.buyer_id},${ancestor.source_leg},${Number(order.total_pu)},
-          ${openingLeft},${openingRight},${completedPairs},${payablePairs},${capFlashPairs},${inactivePairs},${closingLeft},${closingRight},
+          ${openingLeft},${openingRight},${openingLifetimePairs},${openingLifetimePayable},${openingLifetimeFlashout},
+          ${completedPairs},${payablePairs},${capFlashPairs},${inactivePairs},${closingLeft},${closingRight},
+          ${closingLifetimePairs},${closingLifetimePayable},${closingLifetimeFlashout},
           ${profile.package_id},${profile.package_name},${rank?.id || null},${rank?.name || 'Default'},${effectiveRatePoints},${PESO_PER_POINT},
           ${rateAmount},${payableAmount},${flashoutAmount},${profile.cap_enabled},${profile.cap_enabled ? Number(profile.cap_limit) : null},${normalCommissionId},${flashCommissionId})
       `
       await tx.$executeRaw`
         UPDATE product_binary_positions SET left_carryover_pu=${closingLeft},right_carryover_pu=${closingRight},
-          lifetime_pairs=lifetime_pairs+${completedPairs},lifetime_payable=lifetime_payable+${payablePairs},
-          lifetime_flashout=lifetime_flashout+${capFlashPairs+inactivePairs},updated_at=CURRENT_TIMESTAMP WHERE user_id=${ancestor.user_id}
+          lifetime_pairs=${closingLifetimePairs},lifetime_payable=${closingLifetimePayable},
+          lifetime_flashout=${closingLifetimeFlashout},updated_at=CURRENT_TIMESTAMP WHERE user_id=${ancestor.user_id}
       `
       await tx.$executeRaw`UPDATE reseller_profiles SET total_points=COALESCE(total_points,0)+${payablePairs*effectiveRatePoints} WHERE user_id=${ancestor.user_id}`
     }
-    return { processed: true, orderPu: Number(order.total_pu), credited, flashout }
-  }, { timeout: 30_000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      await tx.$executeRaw`
+        UPDATE product_binary_settlement_jobs
+        SET status='completed',completed_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE order_id=${orderId}
+      `
+      return { processed: true, orderPu: Number(order.total_pu), credited, flashout }
+    }, { timeout: 30_000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 2000) : 'Unknown Product Binary settlement error'
+    try {
+      await prisma.$executeRaw`
+        UPDATE product_binary_settlement_jobs
+        SET status='failed',attempts=attempts+1,last_error=${message},
+            next_attempt_at=CURRENT_TIMESTAMP + make_interval(
+              secs => LEAST(
+                ${PRODUCT_BINARY_RETRY_MAX_SECONDS},
+                (${PRODUCT_BINARY_RETRY_BASE_SECONDS} * power(2, LEAST(attempts, 7)))::integer
+              )
+            ),
+            updated_at=CURRENT_TIMESTAMP
+        WHERE order_id=${orderId} AND status<>'completed'
+      `
+    } catch (recordError) {
+      console.error('[PRODUCT BINARY] Failed to record settlement failure:', recordError)
+    }
+    throw error
+  }
 }

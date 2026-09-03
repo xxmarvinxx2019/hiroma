@@ -1,0 +1,159 @@
+name: Production financial attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      migration_mode:
+        description: Verify only, or apply reviewed additive migrations before verification
+        required: true
+        default: verify-only
+        type: choice
+        options:
+          - verify-only
+          - deploy
+      backup_reference:
+        description: Internal backup or restore-point reference; required for deploy and stored only as a SHA-256 digest
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-financial-attestation
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    name: Production financial attestation
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+
+    steps:
+      - name: Check out exact production candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable main-branch candidate
+        shell: bash
+        env:
+          RELEASE_MODE: ${{ inputs.migration_mode }}
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          if [ "$RELEASE_MODE" = "deploy" ] && [ -z "$BACKUP_REFERENCE" ]; then
+            echo "A tested backup or restore-point reference is required before migration deployment." >&2
+            exit 1
+          fi
+          mkdir -p financial-attestation
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run full tests
+        run: npm run test:all
+
+      - name: Run deterministic 5,000-member binary stress simulation
+        run: npm run simulate:binary-5000 > financial-attestation/binary-5000-simulation.json
+
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+        run: npx prisma validate
+
+      - name: Build production application without production credentials
+        env:
+          DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+        run: npm run build
+
+      - name: Apply reviewed additive migrations
+        if: inputs.migration_mode == 'deploy'
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx prisma migrate deploy | tee financial-attestation/migration-deploy.txt
+
+      - name: Verify exact production migration status
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx prisma migrate status | tee financial-attestation/migration-status.txt
+
+      - name: Verify owner and runtime target identity
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          FINANCIAL_RUNTIME_DATABASE_URL: ${{ secrets.FINANCIAL_RUNTIME_DATABASE_URL }}
+          PRODUCTION_DATABASE_EXPECTED_NAME: ${{ secrets.PRODUCTION_DATABASE_EXPECTED_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:production-database-target > financial-attestation/database-target.json
+
+      - name: Verify production runtime least privilege
+        env:
+          FINANCIAL_RUNTIME_DATABASE_URL: ${{ secrets.FINANCIAL_RUNTIME_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:financial-runtime-role > financial-attestation/runtime-role.json
+
+      - name: Verify binary accounting and reserve admission
+        env:
+          DATABASE_URL: ${{ secrets.FINANCIAL_RUNTIME_DATABASE_URL }}
+          BINARY_RESERVE_ADMISSION_MODE: ${{ vars.BINARY_RESERVE_ADMISSION_MODE }}
+          BINARY_RESERVE_MIN_AVAILABLE_PHP: ${{ vars.BINARY_RESERVE_MIN_AVAILABLE_PHP }}
+          BINARY_RESERVE_MIN_COVERAGE_PERCENT: ${{ vars.BINARY_RESERVE_MIN_COVERAGE_PERCENT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:binary-accounting > financial-attestation/binary-accounting.json
+          npm run verify:binary-reserve-admission > financial-attestation/reserve-admission.json
+
+      - name: Write commit-bound release attestation
+        env:
+          FINANCIAL_RELEASE_MODE: ${{ inputs.migration_mode }}
+          FINANCIAL_BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+          FINANCIAL_ATTESTATION_DIR: financial-attestation
+          FINANCIAL_TARGET_ATTESTATION_PATH: financial-attestation/database-target.json
+        run: npm run write:financial-release-attestation
+
+      - name: Publish redacted financial attestation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: financial-attestation-${{ github.sha }}-${{ github.run_attempt }}
+          path: financial-attestation
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Summarize successful attestation
+        run: |
+          {
+            echo "## Production financial attestation"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Mode: \`${{ inputs.migration_mode }}\`"
+            echo "- Migration status: passed"
+            echo "- Runtime least privilege: passed"
+            echo "- Binary accounting: passed"
+            echo "- Reserve admission policy: passed"
+          } >> "$GITHUB_STEP_SUMMARY"

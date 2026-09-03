@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
 import { finalizePayoutFunds } from '@/app/lib/payoutFunds'
+import { createRequiredAuditLog } from '@/app/lib/auditLog'
 
 export const maxDuration = 60
 
@@ -16,9 +17,6 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-
     // Find all approved payouts whose payout_date has arrived
     const duePayouts = await prisma.$queryRaw<{
       id: string
@@ -30,7 +28,7 @@ export async function GET(req: NextRequest) {
       FROM payouts
       WHERE status = 'approved'
         AND payout_date IS NOT NULL
-        AND payout_date::date <= ${today}::date
+        AND payout_date::date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
     `
 
     if (!duePayouts || duePayouts.length === 0) {
@@ -48,7 +46,24 @@ export async function GET(req: NextRequest) {
             data:  { status: 'released', released_at: new Date() },
           })
           if (claimed.count !== 1) return false
-          await finalizePayoutFunds(tx, payout.user_id, Number(payout.amount))
+          await finalizePayoutFunds(tx, payout.id, payout.user_id, Number(payout.amount))
+          await createRequiredAuditLog(tx, {
+            user_id: payout.user_id,
+            user_name: 'Hiroma payout scheduler',
+            user_role: 'system',
+            activity_type: 'payout_released',
+            category: 'payout',
+            description: `Released source-backed payout ${payout.id}.`,
+            metadata: {
+              payout_id: payout.id,
+              reseller_id: payout.user_id,
+              amount: Number(payout.amount),
+              transaction_number: payout.transaction_number,
+              actor_type: 'system',
+            },
+            risk_level: 'high',
+            status: 'completed',
+          })
           return true
         })
         if (didRelease) released++

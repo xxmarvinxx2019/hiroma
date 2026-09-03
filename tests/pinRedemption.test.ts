@@ -34,7 +34,6 @@ test('only one of two concurrent attempts can claim an unused PIN', async () => 
 
 test('registration and upgrade claim the PIN before financial side effects', () => {
   for (const path of [
-    'src/app/api/admin/resellers/register/route.ts',
     'src/app/api/city/resellers/route.ts',
     'src/app/api/city/resellers/upgrade/route.ts',
   ]) {
@@ -46,11 +45,6 @@ test('registration and upgrade claim the PIN before financial side effects', () 
 })
 
 test('new-account routes reject upgrade PINs', () => {
-  for (const path of [
-    'src/app/api/admin/resellers/register/route.ts',
-    'src/app/api/city/resellers/route.ts',
-  ]) {
-    const source = readFileSync(path, 'utf8')
-    assert.match(source, /pin\.pin_type !== "registration"/)
-  }
+  const source = readFileSync('src/app/api/city/resellers/route.ts', 'utf8')
+  assert.match(source, /pin\.pin_type !== "registration"/)
 })

@@ -29,7 +29,8 @@ test("paid out requires independent approval while paid in is applied", () => {
 test("shift reconciliation includes only applied or approved movement totals", () => {
   const shifts = read("src/app/api/city/pos/shifts/route.ts")
   assert.match(shifts, /pendingPaidOut[\s\S]*SHIFT_CASH_MOVEMENT_PENDING/)
-  assert.match(shifts, /opening_cash\)\s*\+\s*Number\(cashSales[\s\S]*\+\s*paidIn\s*-\s*paidOut/)
+  assert.match(shifts, /calculateShiftCashSales\(tx, shift\.id\)/)
+  assert.match(shifts, /opening_cash\)\s*\+\s*cashSales\.total[\s\S]*\+\s*paidIn\s*-\s*paidOut/)
 })
 
 test("cashier UI keeps expected drawer hidden and provides cash management", () => {

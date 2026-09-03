@@ -5,6 +5,7 @@ import prisma from '@/app/lib/prisma'
 import { releasePosRegistrationPackage } from '@/app/lib/posRegistration'
 import { InsufficientStockError } from '@/app/lib/inventoryReservation'
 import { notifyPosReviewers } from '@/app/lib/posNotifications'
+import { RegistrationPinSnapshotError } from '@/app/lib/registrationPinSnapshot'
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser()
@@ -44,6 +45,9 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
+    if (error instanceof RegistrationPinSnapshotError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
     if (error instanceof InsufficientStockError) {
       return NextResponse.json({
         error: 'The package cannot be released because one or more products no longer have enough stock.',
@@ -54,6 +58,8 @@ export async function POST(req: NextRequest) {
       POS_REGISTRATION_NOT_FOUND: ['Registration intake not found.', 404],
       POS_REGISTRATION_NOT_READY_FOR_RELEASE: ['Payment must be verified before the package can be released.', 409],
       POS_REGISTRATION_PACKAGE_EMPTY: ['The selected package has no products configured.', 409],
+      POS_REGISTRATION_SNAPSHOT_MISMATCH: ['The POS registration snapshot does not match its package.', 409],
+      POS_REGISTRATION_IDENTITY_INVALID: ['The applicant identity on this registration is invalid. Correct it before releasing the package.', 409],
     }
     if (known[message]) return NextResponse.json({ error: known[message][0] }, { status: known[message][1] })
     console.error('[POS REGISTRATION RELEASE]', error)

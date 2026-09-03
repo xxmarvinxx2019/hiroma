@@ -10,6 +10,7 @@ test('Admin reseller registration is blocked by the API and removed from the Adm
 
   assert.match(route, /Direct Admin reseller registration is disabled/)
   assert.match(route, /status:\s*403/)
+  assert.doesNotMatch(route, /isAdminDirectRegistrationEnabled|settleDirectReferral|settleBinaryCommission|claimUnusedPin/)
   assert.doesNotMatch(page, /href="\/dashboard\/admin\/resellers\/register"/)
   assert.match(page, /Use an authorized City Distributor or Hiroma Branch account/)
 })
@@ -22,5 +23,5 @@ test('legacy Admin registration page is redirected while City and Branch workflo
   assert.match(middleware, /role === 'admin'.*dashboard\/admin\/resellers\/register/)
   assert.match(middleware, /dashboard\/admin\/resellers'/)
   assert.match(cityPage, /dashboard\/city\/resellers\/register/)
-  assert.match(cityRoute, /registrationOwnerProfile\?\.dist_level === "branch"/)
+  assert.match(cityRoute, /registrationOwnerProfile\.dist_level !== registrationSnapshot\.acquisitionTier/)
 })

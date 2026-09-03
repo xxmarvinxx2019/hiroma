@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { PRODUCT_BINARY_BASE_POINTS } from '@/app/lib/productBinaryQuarter'
+import {
+  assertRegistrationPinFunding,
+  assertUpgradePinFunding,
+  normalizeUpgradePaths,
+  PackageFundingConfigurationError,
+} from '@/app/lib/packageUpgradeConfiguration'
 
 // ── PUT update package ──
 export async function PUT(
@@ -27,11 +33,90 @@ export async function PUT(
       binary_pair_cap_enabled,
       daily_binary_pair_cap,
       products,
+      upgrade_paths,
     } = await req.json()
     const productBinaryCapEnabled =
       typeof product_binary_cap_enabled === 'boolean' ? product_binary_cap_enabled : null
 
+    assertRegistrationPinFunding(price, direct_referral_bonus, pairing_bonus_value)
+    const normalizedUpgradePaths = normalizeUpgradePaths(upgrade_paths, id)
     const pkg = await prisma.$transaction(async (tx) => {
+      // Serialize package-economics edits so source/target validation and the
+      // subsequent write cannot race against another admin package update.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('package-upgrade-funding-configuration'))`
+
+      const sourcePackageIds = normalizedUpgradePaths.map((path) => path.from_package_id)
+      if (sourcePackageIds.length > 0) {
+        const sourcePackages = await tx.package.findMany({
+          where: { id: { in: sourcePackageIds }, is_active: true },
+          select: { id: true, name: true, direct_referral_bonus: true, pairing_bonus_value: true, price: true },
+        })
+        if (sourcePackages.length !== sourcePackageIds.length) {
+          throw new PackageFundingConfigurationError('One or more upgrade source packages are missing or inactive.')
+        }
+        const targetPoints = Number(pairing_bonus_value)
+        const targetPrice = Number(price)
+        if (
+          !Number.isFinite(targetPoints) ||
+          !Number.isFinite(targetPrice) ||
+          sourcePackages.some((source) =>
+            Number(source.pairing_bonus_value) >= targetPoints ||
+            Number(source.price) >= targetPrice
+          )
+        ) {
+          throw new PackageFundingConfigurationError(
+            'Upgrade sources must be lower than the target package in both package value and points.',
+          )
+        }
+
+        const sourcePackageMap = new Map(sourcePackages.map((source) => [source.id, source]))
+        for (const path of normalizedUpgradePaths) {
+          const source = sourcePackageMap.get(path.from_package_id)!
+          assertUpgradePinFunding(
+            path.pin_price,
+            source.direct_referral_bonus,
+            direct_referral_bonus,
+            source.pairing_bonus_value,
+            pairing_bonus_value,
+            source.name,
+          )
+        }
+      }
+
+      // Editing this package also changes the source side of every existing
+      // outbound upgrade. Revalidate those retained paths before committing.
+      const outboundUpgradePaths = await tx.packageUpgradePath.findMany({
+        where: { from_package_id: id, is_active: true },
+        select: {
+          pin_price: true,
+          to_package: {
+            select: {
+              name: true,
+              price: true,
+              direct_referral_bonus: true,
+              pairing_bonus_value: true,
+            },
+          },
+        },
+      })
+      for (const path of outboundUpgradePaths) {
+        const target = path.to_package
+        if (Number(price) >= Number(target.price)
+          || Number(pairing_bonus_value) >= Number(target.pairing_bonus_value)) {
+          throw new PackageFundingConfigurationError(
+            `This change would make the existing upgrade option to ${target.name} invalid because its source must remain lower in package value and points.`,
+          )
+        }
+        assertUpgradePinFunding(
+          path.pin_price,
+          direct_referral_bonus,
+          target.direct_referral_bonus,
+          pairing_bonus_value,
+          target.pairing_bonus_value,
+          name.trim(),
+        )
+      }
+
       const updated = await tx.package.update({
         where: { id },
         data: {
@@ -59,6 +144,19 @@ export async function PUT(
         })
       }
 
+      await tx.packageUpgradePath.deleteMany({ where: { to_package_id: id } })
+      for (const path of normalizedUpgradePaths) {
+        await tx.packageUpgradePath.create({
+          data: {
+            from_package_id: path.from_package_id,
+            to_package_id: id,
+            customer_price: path.customer_price,
+            pin_price: path.pin_price,
+            products: { create: path.products },
+          },
+        })
+      }
+
       return updated
     })
 
@@ -77,6 +175,9 @@ export async function PUT(
     return NextResponse.json({ success: true, package: pkg })
   } catch (error) {
     console.error('[UPDATE PACKAGE ERROR]', error)
+    if (error instanceof PackageFundingConfigurationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }

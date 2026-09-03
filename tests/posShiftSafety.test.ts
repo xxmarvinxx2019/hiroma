@@ -9,6 +9,7 @@ const posPage = fs.readFileSync('src/app/dashboard/city/pos/page.tsx', 'utf8')
 const cityLayout = fs.readFileSync('src/app/dashboard/city/layout.tsx', 'utf8')
 const bootstrap = fs.readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
 const historyPage = fs.readFileSync('src/app/dashboard/city/pos/history/page.tsx', 'utf8')
+const cashSales = fs.readFileSync('src/app/lib/posCashSales.ts', 'utf8')
 
 test('database atomically limits a terminal to one open shift', () => {
   assert.match(schema, /active_terminal_key\s+String\?\s+@unique/)
@@ -28,8 +29,10 @@ test('closing cannot finalize while transactions still need synchronization or r
 })
 
 test('cash reconciliation uses immutable approved POS totals', () => {
-  assert.match(route, /payment_method_snapshot: ["']cash["']/)
-  assert.match(route, /total_snapshot/)
+  assert.match(route, /calculateShiftCashSales\(tx, shift\.id\)/)
+  assert.match(cashSales, /payment_method_snapshot: ["']cash["']/)
+  assert.match(cashSales, /total_snapshot/)
+  assert.match(cashSales, /amount_snapshot/)
   assert.match(route, /variance_snapshot/)
 })
 

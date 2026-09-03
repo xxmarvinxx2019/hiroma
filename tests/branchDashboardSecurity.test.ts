@@ -107,7 +107,7 @@ test('placement options performs route-level city authentication before querying
   assert.match(route, /\{ error: 'Unauthorized' \}, \{ status: 401 \}/)
 })
 
-test('reseller package upgrade claims the expected starting package before side effects', () => {
+test('reseller package upgrade claims the expected package and uses issued points before side effects', () => {
   const route = read('src/app/api/city/resellers/upgrade/route.ts')
   const profileClaim = route.indexOf('tx.resellerProfile.updateMany')
   const pinClaim = route.indexOf('claimUnusedPin(tx, pin.id')
@@ -117,7 +117,8 @@ test('reseller package upgrade claims the expected starting package before side 
   assert.match(route, /claimedProfile\.count !== 1/)
   assert.match(route, /error instanceof ResellerUpgradeConflictError[\s\S]*status: 409/)
   assert.doesNotMatch(route, /tx\.resellerProfile\.update\(\{\s*where: \{ user_id: reseller_id \}/)
-  assert.match(route, /const diffPts = newPts - oldPts/)
+  assert.match(route, /const diffPts = Number\(pin\.upgrade_points_difference_snapshot\)/)
+  assert.doesNotMatch(route, /const diffPts = newPts - oldPts/)
 })
 
 test('inventory-only audit responses keep quantities but redact monetary fields', () => {

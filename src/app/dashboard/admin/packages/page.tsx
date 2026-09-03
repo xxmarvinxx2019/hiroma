@@ -21,6 +21,15 @@ interface PackageProduct {
   product: { name: string; price: number; reseller_price: number }
 }
 
+interface UpgradePath {
+  id?: string
+  from_package_id: string
+  customer_price: number
+  pin_price: number
+  from_package?: { id: string; name: string }
+  products: Array<{ product_id: string; quantity: number; product?: { name: string } }>
+}
+
 interface Package {
   id: string
   name: string
@@ -38,6 +47,7 @@ interface Package {
   is_active: boolean
   created_at: string
   products: PackageProduct[]
+  upgrade_paths_to: UpgradePath[]
   _count?: { pins: number }
 }
 
@@ -72,6 +82,7 @@ export default function PackagesPage() {
   const [selectedProducts, setSelectedProducts] = useState<
     { product_id: string; quantity: number }[]
   >([])
+  const [upgradePaths, setUpgradePaths] = useState<UpgradePath[]>([])
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError]     = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -114,6 +125,7 @@ export default function PackagesPage() {
       daily_binary_pair_cap:      '10',
     })
     setSelectedProducts([])
+    setUpgradePaths([])
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -141,6 +153,15 @@ export default function PackagesPage() {
         quantity:   p.quantity,
       }))
     )
+    setUpgradePaths((pkg.upgrade_paths_to || []).map((path) => ({
+      from_package_id: path.from_package_id,
+      customer_price: Number(path.customer_price),
+      pin_price: Number(path.pin_price),
+      products: path.products.map((product) => ({
+        product_id: product.product_id,
+        quantity: product.quantity,
+      })),
+    })))
     setFormError('')
     setFormSuccess('')
     setShowForm(true)
@@ -152,6 +173,30 @@ export default function PackagesPage() {
     const updated = [...selectedProducts]
     updated[index] = { ...updated[index], [field]: value }
     setSelectedProducts(updated)
+  }
+
+  const addUpgradePath = () => setUpgradePaths((currentPaths) => {
+    const usedSources = new Set(currentPaths.map((path) => path.from_package_id))
+    const nextSource = eligibleUpgradeSources.find((pkg) => !usedSources.has(pkg.id))
+    if (!nextSource) return currentPaths
+    return [
+      ...currentPaths,
+      {
+        from_package_id: nextSource.id,
+        customer_price: 0,
+        pin_price: 0,
+        products: [{ product_id: '', quantity: 1 }],
+      },
+    ]
+  })
+  const updateUpgradePath = (index: number, patch: Partial<UpgradePath>) => {
+    setUpgradePaths(upgradePaths.map((path, pathIndex) => pathIndex === index ? { ...path, ...patch } : path))
+  }
+  const updateUpgradeProduct = (pathIndex: number, productIndex: number, field: 'product_id' | 'quantity', value: string | number) => {
+    const path = upgradePaths[pathIndex]
+    updateUpgradePath(pathIndex, {
+      products: path.products.map((product, index) => index === productIndex ? { ...product, [field]: value } : product),
+    })
   }
 
   const handleSubmit = async () => {
@@ -166,6 +211,10 @@ export default function PackagesPage() {
     }
     if (form.binary_pair_cap_enabled && Number(form.daily_binary_pair_cap) < 1) {
       setFormError('Registration binary daily cap must be at least 1 when enabled.')
+      return
+    }
+    if (upgradePaths.some((path) => !path.from_package_id || Number(path.customer_price) <= 0 || Number(path.pin_price) <= 0 || path.products.length === 0 || path.products.some((product) => !product.product_id || Number(product.quantity) < 1))) {
+      setFormError('Complete every upgrade source, customer price, PIN price, and included product.')
       return
     }
 
@@ -193,6 +242,7 @@ export default function PackagesPage() {
         binary_pair_cap_enabled:    form.binary_pair_cap_enabled,
         daily_binary_pair_cap:      parseInt(form.daily_binary_pair_cap) || 10,
         products:                  selectedProducts.filter((p) => p.product_id),
+        upgrade_paths:             upgradePaths,
       }),
     })
 
@@ -215,6 +265,14 @@ export default function PackagesPage() {
     })
     fetchData()
   }
+
+  const eligibleUpgradeSources = editPkg
+    ? packages.filter((pkg) =>
+        pkg.id !== editPkg.id &&
+        Number(pkg.pairing_bonus_value) < Number(form.pairing_bonus_value || 0) &&
+        Number(pkg.price) < Number(form.price || 0)
+      ).sort((a, b) => Number(a.pairing_bonus_value) - Number(b.pairing_bonus_value))
+    : []
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -318,6 +376,19 @@ export default function PackagesPage() {
                     </div>
                   </>
                 )}
+                {pkg.upgrade_paths_to?.length > 0 && (
+                  <>
+                    <p className="mb-2 text-xs uppercase tracking-wide text-gray-400">Upgrade options</p>
+                    <div className="mb-4 flex flex-col gap-1.5">
+                      {pkg.upgrade_paths_to.map((path) => (
+                        <div key={path.from_package_id} className="rounded-lg bg-[#fffaf0] px-2.5 py-2 text-xs">
+                          <div className="flex justify-between font-medium text-[#0D1B3E]"><span>{path.from_package?.name} → {pkg.name}</span><span>PIN ₱{Number(path.pin_price).toLocaleString()}</span></div>
+                          <div className="mt-0.5 flex justify-between text-[10px] text-gray-500"><span>{path.products.reduce((sum, item) => sum + item.quantity, 0)} products</span><span>Customer ₱{Number(path.customer_price).toLocaleString()}</span></div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-2 border-t border-[#0D1B3E]/5">
@@ -338,7 +409,7 @@ export default function PackagesPage() {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden">
             <div className="bg-[#010521] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold text-sm">
                 {editPkg ? 'Edit package' : 'Create new package'}
@@ -566,7 +637,7 @@ export default function PackagesPage() {
                             </option>
                           ))}
                         </select>
-                        <input type="number" min="1" value={sp.quantity}
+                        <input type="number" min="1" value={sp.quantity || ''}
                           onChange={(e) => updateProduct(index, 'quantity', parseInt(e.target.value))}
                           className="w-16 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-2 text-sm outline-none focus:border-[#C9A84C] text-center" />
                         <button onClick={() => removeProduct(index)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
@@ -576,15 +647,60 @@ export default function PackagesPage() {
                 )}
               </div>
 
-              {editPkg && packages.filter(pkg => pkg.id !== editPkg.id && Number(pkg.price) < (parseFloat(form.price) || 0)).length > 0 && (
-                <div className="rounded-lg border border-[#C9A84C]/40 bg-[#fff8e6] px-3 py-2.5">
-                  <p className="text-xs font-semibold text-[#0D1B3E]">Automatic Upgrade PIN fees</p>
-                  <p className="mt-0.5 text-[10px] text-gray-500">Reference only. Admin generates the dedicated Upgrade PIN in PIN Manager; its fee and economics are locked automatically when issued.</p>
-                  <div className="mt-2 space-y-1 text-xs">
-                    {packages.filter(pkg => pkg.id !== editPkg.id && Number(pkg.price) < (parseFloat(form.price) || 0)).map(pkg => (
-                      <p key={pkg.id} className="flex justify-between"><span>{pkg.name} → {form.name || editPkg.name}</span><span className="font-semibold text-[#1a7a4a]">₱{Math.max(0, (parseFloat(form.price) || 0) - Number(pkg.price)).toLocaleString()}</span></p>
-                    ))}
+              {editPkg && (eligibleUpgradeSources.length > 0 || upgradePaths.length > 0) && (
+                <div className="rounded-xl border border-[#C9A84C]/40 bg-[#fffaf0] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-[#0D1B3E]">Upgrade options to {form.name || editPkg.name}</p>
+                      <p className="mt-0.5 text-[10px] text-gray-500">Set the exact payment, Upgrade PIN price, and physical products released for each source package.</p>
+                    </div>
+                    {upgradePaths.length < eligibleUpgradeSources.length && (
+                      <button type="button" onClick={addUpgradePath} className="shrink-0 text-xs font-semibold text-[#9a7418] hover:underline">+ Add upgrade source</button>
+                    )}
                   </div>
+                  {upgradePaths.length === 0 ? (
+                    <p className="mt-3 rounded-lg bg-white/70 px-3 py-3 text-xs italic text-gray-400">No package can upgrade to this package yet.</p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {upgradePaths.map((path, pathIndex) => (
+                        <div key={pathIndex} className="rounded-lg border border-[#0D1B3E]/10 bg-white p-3">
+                          <div className="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_auto]">
+                            <label className="text-[10px] text-gray-500">Upgrade from
+                              <select value={path.from_package_id} onChange={(event) => updateUpgradePath(pathIndex, { from_package_id: event.target.value })} className="mt-1 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-xs text-[#0D1B3E]">
+                                <option value="">Select source...</option>
+                                {eligibleUpgradeSources.filter((pkg) => !upgradePaths.some((other, index) => index !== pathIndex && other.from_package_id === pkg.id)).map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}
+                              </select>
+                            </label>
+                            <label className="text-[10px] text-gray-500">Customer upgrade price
+                              <input type="number" min="0.01" step="0.01" value={path.customer_price || ''} onChange={(event) => updateUpgradePath(pathIndex, { customer_price: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-xs" placeholder="2490" />
+                            </label>
+                            <label className="text-[10px] text-gray-500">Upgrade PIN price
+                              <input type="number" min="0.01" step="0.01" value={path.pin_price || ''} onChange={(event) => updateUpgradePath(pathIndex, { pin_price: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-xs" placeholder="660" />
+                            </label>
+                            <button type="button" onClick={() => setUpgradePaths(upgradePaths.filter((_, index) => index !== pathIndex))} className="self-end px-2 py-2 text-xs text-red-500 hover:underline">Remove</button>
+                          </div>
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Products released on this upgrade</p>
+                              <button type="button" onClick={() => updateUpgradePath(pathIndex, { products: [...path.products, { product_id: '', quantity: 1 }] })} className="text-[10px] font-semibold text-[#9a7418] hover:underline">+ Add product</button>
+                            </div>
+                            <div className="mt-1.5 space-y-1.5">
+                              {path.products.map((upgradeProduct, productIndex) => (
+                                <div key={productIndex} className="flex gap-2">
+                                  <select value={upgradeProduct.product_id} onChange={(event) => updateUpgradeProduct(pathIndex, productIndex, 'product_id', event.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-xs">
+                                    <option value="">Select product...</option>
+                                    {products.filter((product) => !path.products.some((other, index) => index !== productIndex && other.product_id === product.id)).map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                                  </select>
+                                  <input type="number" min="1" value={upgradeProduct.quantity || ''} onChange={(event) => updateUpgradeProduct(pathIndex, productIndex, 'quantity', Number(event.target.value))} className="w-20 rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-center text-xs" aria-label="Upgrade product quantity" />
+                                  <button type="button" onClick={() => updateUpgradePath(pathIndex, { products: path.products.filter((_, index) => index !== productIndex) })} className="px-1 text-xs text-red-400">✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {formError && (

@@ -30,8 +30,8 @@ test('database constraint prevents negative and over-reserved inventory', () => 
   assert.match(migration, /"reserved_quantity" <= "quantity"/)
 })
 
-test('admin registration consumes package stock atomically inside its transaction', () => {
-  const route = readFileSync('src/app/api/admin/resellers/register/route.ts', 'utf8')
+test('City/Branch registration consumes package stock atomically inside its transaction', () => {
+  const route = readFileSync('src/app/api/city/resellers/route.ts', 'utf8')
   const transaction = route.indexOf('const registration = await prisma.$transaction')
   const consumption = route.indexOf('await consumeAvailableStock(', transaction)
   assert.ok(transaction !== -1 && consumption > transaction)

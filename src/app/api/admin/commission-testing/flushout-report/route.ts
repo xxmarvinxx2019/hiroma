@@ -65,9 +65,9 @@ export async function GET(req: NextRequest) {
             COALESCE(e.recipient_user_id,c.source_user_id) affected_user_id,
             CASE WHEN c.type='direct_referral' THEN 'direct_referral'
                  WHEN c.type='sponsor_point' THEN 'product_binary'
-                 WHEN c.type='binary_pairing' AND COALESCE(c.points,0)=0 THEN 'deactivation'
+                 WHEN c.type='deactivation_wallet_transfer' OR (c.type='binary_pairing' AND COALESCE(c.points,0)=0) THEN 'deactivation'
                  ELSE 'binary' END category,
-            CASE WHEN e.id IS NOT NULL THEN 'exact' ELSE 'legacy' END data_quality
+            CASE WHEN e.id IS NOT NULL OR c.type='deactivation_wallet_transfer' THEN 'exact' ELSE 'legacy' END data_quality
           FROM commissions c LEFT JOIN binary_pair_events e ON e.flashout_commission_id=c.id
           WHERE c.is_pair_overflow=true AND c.created_at>=${from} AND c.created_at<=${to}
         ) SELECT COUNT(*)::int total_events,COALESCE(SUM(amount),0)::float total_amount,
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
           SELECT c.amount::float amount,COALESCE(c.points,0)::float points,
             CASE WHEN c.type='direct_referral' THEN 'direct_referral'
                  WHEN c.type='sponsor_point' THEN 'product_binary'
-                 WHEN c.type='binary_pairing' AND COALESCE(c.points,0)=0 THEN 'deactivation'
+                 WHEN c.type='deactivation_wallet_transfer' OR (c.type='binary_pairing' AND COALESCE(c.points,0)=0) THEN 'deactivation'
                  ELSE 'binary' END key
           FROM commissions c WHERE c.is_pair_overflow=true AND c.created_at>=${from} AND c.created_at<=${to}
         ) SELECT key,CASE key WHEN 'direct_referral' THEN 'Direct referral overflow'
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
             CASE WHEN e.cap_flashout_pairs>0 AND e.inactive_flashout_pairs>0 THEN 'mixed_binary'
                  WHEN e.cap_flashout_pairs>0 THEN 'binary_cap'
                  WHEN e.inactive_flashout_pairs>0 THEN 'inactive_binary'
-                 WHEN c.type='binary_pairing' AND COALESCE(c.points,0)=0 THEN 'deactivation_wallet'
+                 WHEN c.type='deactivation_wallet_transfer' OR (c.type='binary_pairing' AND COALESCE(c.points,0)=0) THEN 'deactivation_wallet'
                  WHEN c.type='direct_referral' THEN 'direct_legacy'
                  WHEN c.type='sponsor_point' THEN 'product_legacy'
                  ELSE 'binary_legacy' END key
@@ -125,16 +125,16 @@ export async function GET(req: NextRequest) {
             COALESCE(e.cap_flashout_pairs+e.inactive_flashout_pairs,0)::int exact_pairs,
             CASE WHEN c.type='direct_referral' THEN 'direct_referral'
                  WHEN c.type='sponsor_point' THEN 'product_binary'
-                 WHEN c.type='binary_pairing' AND COALESCE(c.points,0)=0 THEN 'deactivation'
+                 WHEN c.type='deactivation_wallet_transfer' OR (c.type='binary_pairing' AND COALESCE(c.points,0)=0) THEN 'deactivation'
                  ELSE 'binary' END category,
             CASE WHEN e.cap_flashout_pairs>0 AND e.inactive_flashout_pairs>0 THEN 'Cap and inactive binary flushout'
                  WHEN e.cap_flashout_pairs>0 THEN 'Daily binary cap exceeded'
                  WHEN e.inactive_flashout_pairs>0 THEN 'Inactive member binary earnings'
-                 WHEN c.type='binary_pairing' AND COALESCE(c.points,0)=0 THEN 'Wallet balance flushed on deactivation'
+                 WHEN c.type='deactivation_wallet_transfer' OR (c.type='binary_pairing' AND COALESCE(c.points,0)=0) THEN 'Wallet balance flushed on deactivation'
                  WHEN c.type='direct_referral' THEN 'Direct referral overflow (legacy reason not separable)'
                  WHEN c.type='sponsor_point' THEN 'Product binary overflow (legacy reason not separable)'
                  ELSE 'Binary overflow (legacy reason not separable)' END reason,
-            CASE WHEN e.id IS NOT NULL THEN 'exact' ELSE 'legacy' END data_quality,
+            CASE WHEN e.id IS NOT NULL OR c.type='deactivation_wallet_transfer' THEN 'exact' ELSE 'legacy' END data_quality,
             COALESCE(e.recipient_user_id,c.source_user_id) member_id,c.user_id recipient_id,c.source_user_id source_id,
             COALESCE(e.package_name_snapshot,p.name) package_name,
             CASE WHEN e.package_name_snapshot IS NOT NULL THEN 'event snapshot' WHEN p.name IS NOT NULL THEN 'current profile' ELSE 'unavailable' END package_source
