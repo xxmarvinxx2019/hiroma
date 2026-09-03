@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     }
 
     const normalizedSearch = search.trim().toLowerCase()
-    const searchableStatuses = ['unused', 'used', 'expired', 'cancelled'] as const
+    const searchableStatuses = ['in_transit', 'unused', 'used', 'expired', 'cancelled'] as const
     const searchedStatus = searchableStatuses.find((value) => value === normalizedSearch)
     const searchedPinType = PIN_TYPES.has(normalizedSearch) ? normalizedSearch : null
     const searchDateMatch = normalizedSearch.match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\/(\d{1,2})\/(\d{4}))$/)
@@ -132,8 +132,9 @@ export async function GET(req: NextRequest) {
     ])
 
     // ── Summary counts (all statuses, no filter) ──
-    const [totalAll, unused, used, expired, cancelled, registration, upgrade] = await Promise.all([
+    const [totalAll, inTransit, unused, used, expired, cancelled, registration, upgrade] = await Promise.all([
       prisma.pin.count({ where: { city_dist_id: user.id } }),
+      prisma.pin.count({ where: { city_dist_id: user.id, status: 'in_transit' } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'unused'  } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'used'    } }),
       prisma.pin.count({ where: { city_dist_id: user.id, status: 'expired' } }),
@@ -170,6 +171,7 @@ export async function GET(req: NextRequest) {
       },
       summary: {
         total: totalAll,
+        in_transit: inTransit,
         unused,
         used,
         expired,

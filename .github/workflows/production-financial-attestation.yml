@@ -65,6 +65,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Generate Prisma client without production credentials
+        env:
+          DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+        run: npx prisma generate
+
       - name: Run full tests
         run: npm run test:all
 

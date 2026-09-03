@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { consumeAvailableStock, InsufficientStockError } from '@/app/lib/inventoryReservation'
-import { createAuditLog, getClientInfo } from '@/app/lib/auditLog'
+import { createRequiredAuditLog, getClientInfo } from '@/app/lib/auditLog'
 import { PRODUCT_BINARY_WAITING_PAYMENT_WARNING } from '@/app/lib/productBinary'
 import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
 
@@ -247,6 +248,12 @@ export async function GET(req: NextRequest) {
       select: { product_id: true, quantity: true },
     })
     const adminStockMap = new Map(adminOwnStock.map((i) => [i.product_id, i.quantity]))
+    const stockReceipts = await prisma.adminStockReceipt.findMany({
+      where: { admin_id: user.id },
+      orderBy: [{ received_at: 'desc' }, { id: 'desc' }],
+      take: 25,
+      include: { items: { select: { product_id: true, quantity: true, unit_cost: true, stock_before: true, stock_after: true } } },
+    })
 
     const productStockSummaryWithAdmin = productStockSummary.map((p) => ({
       ...p,
@@ -259,6 +266,10 @@ export async function GET(req: NextRequest) {
       recipients:    recipientList,
       recipientMeta: { total: recipientTotal, totalPages: Math.max(1, Math.ceil(recipientTotal / recipient_size)) },
       productStockSummary: productStockSummaryWithAdmin,
+      stockReceipts: stockReceipts.map((receipt) => ({
+        ...receipt,
+        items: receipt.items.map((item) => ({ ...item, unit_cost: Number(item.unit_cost) })),
+      })),
       adminRevenue:     Number(adminRevenue._sum.total_amount || 0),
       adminTotalOrders,
       meta:      { total,      page,      pageSize, totalPages: Math.max(1, Math.ceil(total      / pageSize)) },
@@ -310,6 +321,9 @@ export async function POST(req: NextRequest) {
     if (!owner) return NextResponse.json({ error: 'Distributor not found.' }, { status: 404 })
 
     const isBranchTransfer = owner.distributor_profile?.dist_level === 'branch'
+    const actorId = user.actor_id || user.id
+    const actorName = user.actor_name || user.full_name
+    const clientInfo = getClientInfo(req)
     if (workflow !== 'branch_transfer' && workflow !== 'distributor_sale') {
       return NextResponse.json({ error: 'A valid stock workflow is required.' }, { status: 400 })
     }
@@ -387,6 +401,7 @@ export async function POST(req: NextRequest) {
             id:               transferId!,
             reference_number: transferReference!,
             admin_id:         user.id,
+            dispatched_by_actor_id: actorId,
             recipient_id:     owner_id,
             status:           'in_transit',
             reference_value:  totalAmount,
@@ -496,27 +511,30 @@ export async function POST(req: NextRequest) {
               action_url:  `/dashboard/${recipientDashboard}/orders/${newOrder!.id}`,
             },
       })
+      if (isBranchTransfer) {
+        await createRequiredAuditLog(tx, {
+          user_id:       actorId,
+          user_name:     actorName,
+          user_role:     user.role,
+          activity_type: 'branch_stock_dispatched',
+          category:      'distributor',
+          description:   `Dispatched stock from Admin to Hiroma Branch ${owner.full_name}; inventory remains in transit pending Branch receiving.`,
+          metadata: {
+            owner_admin_id: user.id,
+            recipient_id: owner.id,
+            recipient_name: owner.full_name,
+            transfer_id: transferId,
+            reference_number: transferReference,
+            reference_value: totalAmount,
+            sale_value: 0,
+            items: orderItems,
+            notes: notes?.trim() || null,
+          },
+          ...clientInfo,
+        })
+      }
       return newOrder
     })
-
-    if (isBranchTransfer) {
-      createAuditLog({
-        user_id:       user.id,
-        user_name:     user.full_name,
-        user_role:     user.role,
-        activity_type: 'branch_stock_dispatched',
-        category:      'distributor',
-        description:   `Dispatched stock from Admin to Hiroma Branch ${owner.full_name}; inventory remains in transit pending Branch receiving.`,
-        metadata: {
-          recipient_id:    owner.id,
-          recipient_name:  owner.full_name,
-          reference_value: totalAmount,
-          items:            orderItems,
-          notes:            notes?.trim() || null,
-        },
-        ...getClientInfo(req),
-      })
-    }
 
     // A stock assignment records delivery, not payment. The database creates a
     // visible waiting-payment job for reseller orders; settlement starts only
@@ -589,10 +607,24 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { items, notes } = await req.json()
+    const { items, notes, source_type, source_reference } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ error: 'items are required.' }, { status: 400 })
+
+    const sourceType = typeof source_type === 'string' ? source_type.trim() : ''
+    const sourceReference = typeof source_reference === 'string' ? source_reference.trim() : ''
+    const sourceReferenceKey = sourceReference.replace(/\s+/g, ' ').toUpperCase()
+    const receiptNotes = typeof notes === 'string' ? notes.trim() : ''
+    if (!['production', 'supplier_purchase', 'approved_adjustment'].includes(sourceType)) {
+      return NextResponse.json({ error: 'Select a valid stock source.' }, { status: 400 })
+    }
+    if (sourceReference.length < 3 || sourceReference.length > 120) {
+      return NextResponse.json({ error: 'Source reference must be between 3 and 120 characters.' }, { status: 400 })
+    }
+    if (receiptNotes.length > 500 || (sourceType === 'approved_adjustment' && receiptNotes.length < 3)) {
+      return NextResponse.json({ error: 'Approved adjustments require a reason; notes may not exceed 500 characters.' }, { status: 400 })
+    }
 
     const normalizedItems = items.map((item: { product_id?: unknown; quantity?: unknown }) => ({
       product_id: typeof item.product_id === 'string' ? item.product_id : '',
@@ -613,15 +645,35 @@ export async function PUT(req: NextRequest) {
 
     const products   = await prisma.product.findMany({
       where:  { id: { in: productIds }, is_active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, cost_price: true },
     })
 
     if (products.length !== productIds.length)
       return NextResponse.json({ error: 'One or more products not found.' }, { status: 400 })
 
-    await prisma.$transaction(
-      normalizedItems.map((item) =>
-        prisma.inventory.upsert({
+    const actorId = user.actor_id || user.id
+    const actorName = user.actor_name || user.full_name
+    const totalUnits = normalizedItems.reduce((sum, item) => sum + item.quantity, 0)
+    const receiptId = crypto.randomUUID()
+    const receiptReference = `STK-${receiptId.slice(0, 8).toUpperCase()}`
+    const productMap = new Map(products.map((product) => [product.id, product]))
+
+    await prisma.$transaction(async (tx) => {
+      await tx.adminStockReceipt.create({
+        data: {
+          id: receiptId,
+          reference_number: receiptReference,
+          source_type: sourceType,
+          source_reference: sourceReference,
+          source_reference_key: sourceReferenceKey,
+          admin_id: user.id,
+          received_by_actor_id: actorId,
+          total_units: totalUnits,
+          notes: receiptNotes || null,
+        },
+      })
+      for (const item of normalizedItems) {
+        const inventory = await tx.inventory.upsert({
           where:  { owner_id_product_id: { owner_id: user.id, product_id: item.product_id } },
           update: { quantity: { increment: item.quantity } },
           create: {
@@ -630,15 +682,49 @@ export async function PUT(req: NextRequest) {
             quantity:            item.quantity,
             low_stock_threshold: 10,
           },
+          select: { quantity: true },
         })
-      )
-    )
+        await tx.adminStockReceiptItem.create({
+          data: {
+            receipt_id: receiptId,
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_cost: Number(productMap.get(item.product_id)!.cost_price),
+            stock_before: inventory.quantity - item.quantity,
+            stock_after: inventory.quantity,
+          },
+        })
+      }
+      await createRequiredAuditLog(tx, {
+        user_id: actorId,
+        user_name: actorName,
+        user_role: user.role,
+        activity_type: 'admin_stock_received',
+        category: 'product',
+        description: `Recorded ${totalUnits} unit(s) entering Admin custody from ${sourceType}.`,
+        metadata: {
+          owner_admin_id: user.id,
+          receipt_id: receiptId,
+          reference_number: receiptReference,
+          source_type: sourceType,
+          source_reference: sourceReference,
+          total_units: totalUnits,
+          items: normalizedItems,
+          notes: receiptNotes || null,
+        },
+        ...getClientInfo(req),
+      })
+    })
 
     return NextResponse.json({
       success: true,
-      message: `Stock updated for ${normalizedItems.length} product(s). Notes: ${notes || 'N/A'}`,
+      reference_number: receiptReference,
+      message: `Stock receipt ${receiptReference} recorded for ${normalizedItems.length} product(s).`,
     })
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return NextResponse.json({ error: 'This stock source reference was already recorded.' }, { status: 409 })
+    }
     console.error('[ADMIN INVENTORY PUT ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
