@@ -42,6 +42,9 @@ jobs:
       - name: Run complete test suite
         run: npm run test:all
 
+      - name: Generate Next.js route types
+        run: npx next typegen
+
       - name: Validate TypeScript
         run: npx tsc --noEmit
 
