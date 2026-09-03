@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 30
     env:
       DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+      JWT_SECRET: ci-only-non-production-secret-0000000000000000
 
     steps:
       - name: Check out pull request

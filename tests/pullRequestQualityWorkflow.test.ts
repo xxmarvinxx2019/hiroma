@@ -22,6 +22,10 @@ test('pull requests to main run the complete application quality gate', () => {
 test('quality workflow has no production credentials and pins third-party actions', () => {
   assert.doesNotMatch(workflow, /secrets\./)
   assert.doesNotMatch(workflow, /FINANCIAL_RUNTIME_DATABASE_URL|PRODUCTION_DATABASE_URL/)
+  assert.match(
+    workflow,
+    /JWT_SECRET: ci-only-non-production-secret-0000000000000000/,
+  )
 
   const actions = [...workflow.matchAll(/uses:\s+[^@\s]+@([^\s#]+)/g)]
   assert.ok(actions.length >= 2)
