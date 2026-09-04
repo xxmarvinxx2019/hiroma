@@ -107,7 +107,7 @@ export function getHiroSuggestions(messages: SuggestionMessage[], conversationId
     .filter((suggestion) => !accountSelection.includes(suggestion))
     .slice(0, Math.max(0, 4 - accountSelection.length))
   const discovery = seededShuffle(
-    general.filter((suggestion) => !relatedSelection.includes(suggestion) && !accountSelection.includes(suggestion)),
+    general.filter((suggestion) => !related.includes(suggestion) && !accountSelection.includes(suggestion)),
     `${seed}:discovery`,
   ).slice(0, 4 - accountSelection.length - relatedSelection.length)
   return seededShuffle([...accountSelection, ...relatedSelection, ...discovery], `${seed}:final`).slice(0, 4)
