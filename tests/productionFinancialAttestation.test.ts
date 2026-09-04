@@ -40,6 +40,13 @@ test('production attestation generates Prisma before importing application tests
   assert.match(workflow, /Generate Prisma client without production credentials[\s\S]*DATABASE_URL: postgresql:\/\/invalid:invalid@127\.0\.0\.1:9\/invalid/)
 })
 
+test('production build uses an explicit non-production JWT secret', () => {
+  const buildStep = workflow.match(/- name: Build production application without production credentials[\s\S]*?run: npm run build/)?.[0]
+  assert.ok(buildStep)
+  assert.match(buildStep, /JWT_SECRET: ci-only-non-production-secret-[0-9]{16}/)
+  assert.doesNotMatch(buildStep, /secrets\./)
+})
+
 test('database verifier requires separate owner/runtime roles and approved target name', () => {
   assert.match(targetVerifier, /PRODUCTION_DATABASE_EXPECTED_NAME/)
   assert.match(targetVerifier, /owner\.role_name === runtime\.role_name/)
