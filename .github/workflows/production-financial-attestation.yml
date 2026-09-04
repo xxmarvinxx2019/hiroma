@@ -84,6 +84,7 @@ jobs:
       - name: Build production application without production credentials
         env:
           DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:9/invalid?connect_timeout=1
+          JWT_SECRET: ci-only-non-production-secret-0000000000000000
         run: npm run build
 
       - name: Apply reviewed additive migrations
