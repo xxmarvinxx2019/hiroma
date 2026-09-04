@@ -19,6 +19,19 @@ test('recommends follow-up questions related to the latest Hiro intent', () => {
   assert.equal(suggestions.filter((suggestion) => walletFollowUps.includes(suggestion)).length, 2)
 })
 
+test('keeps discovery suggestions separate from the selected intent follow-ups', () => {
+  const walletFollowUps = ['What is my total earned?', 'What is my total withdrawn?', 'Do I have a pending payout?', 'How do I request a payout?']
+
+  for (let index = 0; index < 100; index += 1) {
+    const suggestions = getHiroSuggestions([
+      { role: 'user', text: 'how much my balance' },
+      { role: 'hiro', text: 'Your balance is available.', intent: 'wallet' },
+    ], `wallet-chat-${index}`)
+
+    assert.equal(suggestions.filter((suggestion) => walletFollowUps.includes(suggestion)).length, 2)
+  }
+})
+
 test('changes discovery recommendations as the conversation changes', () => {
   const initial = getHiroSuggestions([], 'same-chat')
   const afterProduct = getHiroSuggestions([
