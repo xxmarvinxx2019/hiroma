@@ -8,6 +8,7 @@ const config = fs.readFileSync('next.config.ts', 'utf8')
 const offlineQueue = fs.readFileSync('src/app/lib/posOfflineQueue.ts', 'utf8')
 const posPage = fs.readFileSync('src/app/dashboard/city/pos/page.tsx', 'utf8')
 const cityLayout = fs.readFileSync('src/app/dashboard/city/layout.tsx', 'utf8')
+const rootLayout = fs.readFileSync('src/app/layout.tsx', 'utf8')
 
 test('Hiroma POS manifest keeps authentication inside the standalone application', () => {
   assert.match(manifest, /name: 'Hiroma Point of Sale'/)
@@ -51,6 +52,12 @@ test('local development removes stale POS service workers and caches', () => {
   assert.match(cityLayout, /navigator\.serviceWorker\s*\?\.getRegistrations\(\)/)
   assert.match(cityLayout, /registration\.unregister\(\)/)
   assert.match(cityLayout, /key\.startsWith\(["']hiroma-pos-["']\)/)
+  assert.match(rootLayout, /process\.env\.NODE_ENV !== ["']production["']/)
+  assert.match(rootLayout, /strategy="beforeInteractive"/)
+  assert.match(rootLayout, /new URL\(worker\.scriptURL\)\.pathname === ['"]\/sw-pos\.js['"]/)
+  assert.match(rootLayout, /key\.startsWith\(['"]hiroma-pos-['"]\)/)
+  assert.match(rootLayout, /window\.location\.reload\(\)/)
+  assert.match(posPage, /process\.env\.NODE_ENV !== ["']production["']\) return;[\s\S]*serviceWorker[\s\S]*\.register\("\/sw-pos\.js\?v=5"/)
 })
 
 

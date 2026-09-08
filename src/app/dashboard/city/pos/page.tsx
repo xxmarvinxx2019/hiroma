@@ -564,8 +564,13 @@ export default function PointOfSalePage() {
           }),
         });
         const result = await response.json();
-        if (!response.ok)
+        if (!response.ok) {
+          if (result.code === "POS_ENROLLMENT_REQUIRED") {
+            window.location.assign(result.setup_url || "/dashboard/city/pos/setup");
+            return;
+          }
           throw new Error(result.error || "Unable to initialize POS.");
+        }
         // Establish the protected offline scope before queue effects can run.
         await savePosBootstrap(result);
         setError("");
@@ -771,6 +776,7 @@ export default function PointOfSalePage() {
   }
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "production") return;
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker
       .register("/sw-pos.js?v=5", {

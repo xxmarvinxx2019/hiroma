@@ -1412,6 +1412,23 @@ model PosTerminal {
   @@map("pos_terminals")
 }
 
+model PosTerminalEnrollment {
+  id                   String    @id @default(uuid()) @db.Uuid
+  owner_id             String
+  created_by_id        String
+  terminal_name        String    @db.VarChar(120)
+  code_hash            String    @unique @db.VarChar(64)
+  expires_at           DateTime  @db.Timestamptz(6)
+  used_at              DateTime? @db.Timestamptz(6)
+  revoked_at           DateTime? @db.Timestamptz(6)
+  enrolled_terminal_id String?   @unique @db.Uuid
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([owner_id, expires_at])
+  @@index([created_by_id, created_at])
+  @@map("pos_terminal_enrollments")
+}
+
 model PosShift {
   id                     String                  @id @default(uuid()) @db.Uuid
   owner_id               String

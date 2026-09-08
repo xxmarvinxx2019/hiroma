@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { randomUUID } from 'node:crypto'
 
 function cleanText(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -48,22 +47,21 @@ export async function POST(req: Request) {
       )
     }
 
+    if (!existing) {
+      return NextResponse.json(
+        {
+          error: 'This device is not enrolled as an authorized POS terminal.',
+          code: 'POS_ENROLLMENT_REQUIRED',
+          setup_url: '/dashboard/city/pos/setup',
+        },
+        { status: 403 },
+      )
+    }
+
     const actorId = user.actor_id || user.id
-    const terminalId = existing?.id || randomUUID()
-    const terminal = existing
-      ? await prisma.posTerminal.update({
+    const terminal = await prisma.posTerminal.update({
           where: { id: existing.id },
           data: { platform },
-        })
-      : await prisma.posTerminal.create({
-          data: {
-            id: terminalId,
-            owner_id: user.id,
-            installation_id: installationId,
-            name: terminalName,
-            platform,
-            receipt_code: terminalId.replaceAll('-', '').slice(-7).toUpperCase(),
-          },
         })
 
     const [owner, inventory, paymentMethods, openShift, blockingShift, registrationPackages] = await Promise.all([
