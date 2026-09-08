@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Terminal = { id: string; name: string; receipt_code: string; platform: string | null; is_active: boolean; last_synced_at: string | null; shifts: Array<{ status: string }> };
+type Enrollment = { id: string; terminal_name: string; expires_at: string };
 type Pending = { terminal: Terminal; action: "deactivate" | "reactivate" } | null;
 
 export default function PosTerminalManagement() {
@@ -12,6 +13,10 @@ export default function PosTerminalManagement() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState<Pending>(null);
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [newName, setNewName] = useState("");
+  const [securityPin, setSecurityPin] = useState("");
+  const [createdCode, setCreatedCode] = useState<{ code: string; terminal_name: string; expires_at: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -22,6 +27,7 @@ export default function PosTerminalManagement() {
       if (!response.ok) throw new Error("Unable to load authorized POS devices.");
       const data = await response.json();
       setTerminals(Array.isArray(data.terminals) ? data.terminals : []);
+      setEnrollments(Array.isArray(data.enrollments) ? data.enrollments : []);
       setOwnerAccess(true);
     } catch (error) {
       setOwnerAccess(true);
@@ -33,6 +39,28 @@ export default function PosTerminalManagement() {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  async function createEnrollment() {
+    setSaving(true); setMessage(""); setCreatedCode(null);
+    try {
+      const response = await fetch("/api/city/pos/terminals", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName, security_pin: securityPin }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Unable to authorize a new terminal.");
+      setCreatedCode(data); setNewName(""); setSecurityPin(""); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to authorize a new terminal."); }
+    finally { setSaving(false); }
+  }
+
+  async function cancelEnrollment(id: string) {
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch("/api/city/pos/terminals", { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enrollment_id: id }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Unable to cancel enrollment.");
+      setEnrollments((current) => current.filter((item) => item.id !== id)); setMessage("Enrollment cancelled.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to cancel enrollment."); }
+    finally { setSaving(false); }
+  }
 
   async function applyAction() {
     if (!pending) return;
@@ -64,6 +92,12 @@ export default function PosTerminalManagement() {
         </summary>
         <div className="border-t border-slate-200 p-6">
           <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-2xl text-sm leading-6 text-slate-500">Only the city distributor or branch owner can manage these devices. Blocking prevents the next online POS bootstrap; receipts and audit records are preserved.</p><button type="button" onClick={() => void load()} disabled={loading} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-[#08183d] disabled:opacity-50">{loading ? "Refreshing…" : "Refresh list"}</button></div>
+          <div className="mt-5 rounded-2xl border border-[#d4af45]/40 bg-[#fffaf0] p-5">
+            <p className="font-bold text-[#08183d]">Authorize a new POS terminal</p><p className="mt-1 text-xs leading-5 text-slate-600">Generate a single-use code, then enter it on the new computer at POS device setup. The code expires in 15 minutes.</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]"><input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} placeholder="Example: Counter 2" className="min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm"/><input type="password" inputMode="numeric" autoComplete="off" value={securityPin} onChange={(event) => setSecurityPin(event.target.value.replace(/\D/g, "").slice(0, 6))} maxLength={6} placeholder="Security PIN" aria-label="Six-digit security PIN" className="min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm"/><button type="button" disabled={saving || newName.trim().length < 2 || securityPin.length !== 6} onClick={() => void createEnrollment()} className="rounded-xl bg-[#08183d] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">Generate enrollment code</button></div>
+            {createdCode && <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-4"><p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Show this code only on the new device</p><p className="mt-2 font-mono text-2xl font-bold tracking-widest text-[#08183d]">{createdCode.code}</p><p className="mt-1 text-xs text-slate-500">{createdCode.terminal_name} · expires {new Date(createdCode.expires_at).toLocaleTimeString()}</p><button type="button" onClick={() => void navigator.clipboard.writeText(createdCode.code)} className="mt-3 text-xs font-bold text-[#a47b12]">Copy code</button></div>}
+            {enrollments.length > 0 && <div className="mt-4 space-y-2">{enrollments.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm"><span><strong className="text-[#08183d]">{item.terminal_name}</strong><span className="ml-2 text-xs text-slate-500">Expires {new Date(item.expires_at).toLocaleTimeString()}</span></span><button disabled={saving} onClick={() => void cancelEnrollment(item.id)} className="text-xs font-bold text-red-700">Cancel</button></div>)}</div>}
+          </div>
           {message && <p role="status" className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-[#08183d]">{message}</p>}
           {loading ? <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Loading authorized POS devices…</p> : terminals.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No POS browser installation has been registered yet.</p> : (
             <div className="mt-4 space-y-3">{terminals.map((terminal) => <div key={terminal.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><div><div className="flex flex-wrap items-center gap-2"><p className="font-bold text-[#08183d]">{terminal.name}</p><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${terminal.is_active ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>{terminal.is_active ? "Authorized" : "Blocked"}</span></div><p className="mt-1 text-xs text-slate-500">Device code {terminal.receipt_code}{terminal.platform ? ` · ${terminal.platform}` : ""}</p><p className="mt-1 text-xs text-slate-500">Last sync: {terminal.last_synced_at ? new Date(terminal.last_synced_at).toLocaleString() : "Not synced yet"}{terminal.shifts[0] ? ` · Latest shift: ${terminal.shifts[0].status}` : ""}</p></div><button type="button" onClick={() => setPending({ terminal, action: terminal.is_active ? "deactivate" : "reactivate" })} className={`rounded-xl px-4 py-2 text-sm font-bold ${terminal.is_active ? "border border-red-300 text-red-700" : "bg-[#08183d] text-white"}`}>{terminal.is_active ? "Block device" : "Authorize again"}</button></div>)}</div>

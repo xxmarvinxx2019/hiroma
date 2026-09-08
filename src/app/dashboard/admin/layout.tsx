@@ -121,6 +121,11 @@ const navItems = [
   {
     section: 'Security',
     items: [
+      {
+        label: 'Maintenance',
+        href: '/dashboard/admin/maintenance',
+        icon: '🛠️',
+      },
       { label: 'Audit Logs', href: '/dashboard/admin/audit-logs', icon: '🛡️' },
       {
         label: 'Support Center',

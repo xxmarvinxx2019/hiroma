@@ -76,12 +76,34 @@ test('disabled POS terminals cannot silently reactivate during bootstrap', () =>
   assert.doesNotMatch(bootstrap, /data:\s*\{\s*platform,\s*is_active:\s*true\s*\}/)
 })
 
-test('active and new POS terminals retain their bootstrap lifecycle', () => {
+test('active POS terminals retain bootstrap while unknown devices require enrollment', () => {
   const bootstrap = fs.readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
 
   assert.match(bootstrap, /prisma\.posTerminal\.update/)
   assert.match(bootstrap, /data:\s*\{\s*platform\s*\}/)
-  assert.match(bootstrap, /prisma\.posTerminal\.create/)
+  assert.match(bootstrap, /POS_ENROLLMENT_REQUIRED/)
+  assert.doesNotMatch(bootstrap, /prisma\.posTerminal\.create/)
+})
+
+test('manager-controlled enrollment is expiring, single-use, scoped, and rate limited', () => {
+  const schema = fs.readFileSync('prisma/schema.prisma', 'utf8')
+  const managerRoute = fs.readFileSync('src/app/api/city/pos/terminals/route.ts', 'utf8')
+  const enrollRoute = fs.readFileSync('src/app/api/city/pos/enroll/route.ts', 'utf8')
+  const enrollmentHelper = fs.readFileSync('src/app/lib/posEnrollment.ts', 'utf8')
+  const setupPage = fs.readFileSync('src/app/dashboard/city/pos/setup/page.tsx', 'utf8')
+
+  assert.match(schema, /model PosTerminalEnrollment/)
+  assert.match(schema, /code_hash\s+String\s+@unique/)
+  assert.match(managerRoute, /if \(!user \|\| user\.role !== 'city' \|\| user\.is_staff\) return null/)
+  assert.match(managerRoute, /isSensitiveResellerPinAccepted\(pinVerification\)/)
+  assert.match(enrollmentHelper, /POS_ENROLLMENT_TTL_MS = 15 \* 60 \* 1000/)
+  assert.match(enrollmentHelper, /createHash\('sha256'\)/)
+  assert.match(enrollmentHelper, /request_count[\s\S]*<= 10/)
+  assert.match(enrollRoute, /enrollment\.owner_id !== user\.id/)
+  assert.match(enrollRoute, /used_at: null, revoked_at: null, expires_at: \{ gt: now \}/)
+  assert.match(enrollRoute, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/)
+  assert.match(enrollRoute, /pos_terminal_enrolled/)
+  assert.match(setupPage, /one-time enrollment code/i)
 })
 
 

@@ -73,6 +73,7 @@ export function adminStaffPermissionForPath(pathname: string, method = 'GET'): A
   if (pathname.startsWith('/api/auth/')) return null
   if (pathname.startsWith('/dashboard/admin/support-staff') || pathname.startsWith('/api/admin/support-staff') || pathname.startsWith('/dashboard/admin/area-managers') || pathname.startsWith('/api/admin/area-managers')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/settings') || pathname.startsWith('/api/admin/settings')) return '__owner_only__'
+  if (pathname.startsWith('/dashboard/admin/maintenance') || pathname.startsWith('/api/admin/maintenance')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/commission-testing') || pathname.startsWith('/api/admin/commission-testing')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/report-testing') || pathname.startsWith('/api/admin/report-testing')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/flushout') || pathname.startsWith('/api/admin/flushout')) return '__owner_only__'
