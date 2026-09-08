@@ -10,6 +10,7 @@ import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
 import { firstAdminStaffRoute, firstCityStaffRoute } from '@/app/lib/staffPermissions'
 import { consumeLoginAllowance, resetLoginAccountFailures } from '@/app/lib/loginRateLimit'
 import { normalizeLoginIdentifier } from '@/app/lib/loginRateLimitPolicy'
+import { getMaintenanceState } from '@/app/lib/maintenanceMode'
 
 const LOGIN_TIMING_DECOY_HASH = '$2b$12$Z2wP7Y3VVNwvktXxUkqwaunHHoM0EztrFeg3tHL.AHH.qQ5/3rovO'
 
@@ -107,6 +108,36 @@ export async function POST(req: NextRequest) {
         status:        'suspicious',
       })
       return NextResponse.json({ error: 'This system account cannot sign in.' }, { status: 403 })
+    }
+
+    // During a protected deployment only the actual Admin owner may sign in.
+    // Staff accounts whose owner is Admin are intentionally not a recovery path.
+    if (user.role !== 'admin') {
+      try {
+        const maintenance = await getMaintenanceState()
+        if (maintenance.enabled) {
+          createAuditLog({
+            user_id: user.id,
+            user_name: user.full_name,
+            user_role: user.role,
+            member_id: formatMemberId(user.id, user.role),
+            activity_type: 'maintenance_login_blocked',
+            category: 'auth',
+            description: 'Sign-in was paused by maintenance mode.',
+            ip_address,
+            device,
+            risk_level: 'low',
+            status: 'failed',
+          })
+          return NextResponse.json({ error: maintenance.message }, { status: 503 })
+        }
+      } catch (maintenanceError) {
+        console.error('[LOGIN MAINTENANCE CHECK ERROR]', maintenanceError)
+        return NextResponse.json(
+          { error: 'Hiroma is temporarily unavailable. Please try again later.' },
+          { status: 503 },
+        )
+      }
     }
 
     if (user.role !== 'staff' && !isRoleAllowedInPortal(user.role as UserRole, portal)) {

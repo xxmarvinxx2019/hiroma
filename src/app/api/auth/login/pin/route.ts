@@ -13,6 +13,8 @@ import { verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 import { createAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { isSecurityPinEligibleRole } from '@/app/lib/securityPinPolicy'
 import { isAccountSessionCurrent } from '@/app/lib/accountSession'
+import { canCompleteMaintenanceSecurityPin } from '@/app/lib/maintenancePolicy'
+import { getMaintenanceState } from '@/app/lib/maintenanceMode'
 
 export async function POST(req: NextRequest) {
   const { ip_address, device } = getClientInfo(req)
@@ -20,6 +22,34 @@ export async function POST(req: NextRequest) {
     const challenge = await getTwoFactorChallenge()
     if (!challenge || !isSecurityPinEligibleRole(challenge.role)) {
       return NextResponse.json({ error: 'Your sign-in verification has expired. Please sign in again.' }, { status: 401 })
+    }
+
+    try {
+      const maintenance = await getMaintenanceState()
+      if (!canCompleteMaintenanceSecurityPin({ active: maintenance.enabled, challengeRole: challenge.role })) {
+        await deleteTwoFactorChallengeCookie()
+        createAuditLog({
+          user_id: challenge.id,
+          user_name: challenge.full_name,
+          user_role: challenge.role,
+          member_id: formatMemberId(challenge.id, challenge.role),
+          activity_type: 'maintenance_login_blocked',
+          category: 'auth',
+          description: 'Security PIN sign-in completion was paused by maintenance mode.',
+          ip_address,
+          device,
+          risk_level: 'low',
+          status: 'failed',
+        })
+        return NextResponse.json({ error: maintenance.message }, { status: 503 })
+      }
+    } catch (maintenanceError) {
+      console.error('[LOGIN PIN MAINTENANCE CHECK ERROR]', maintenanceError)
+      await deleteTwoFactorChallengeCookie()
+      return NextResponse.json(
+        { error: 'Hiroma is temporarily unavailable. Please try again later.' },
+        { status: 503 },
+      )
     }
 
     const { pin } = await req.json()

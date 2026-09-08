@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { jwtVerify } from 'jose'
+import { jwtVerify, type JWTPayload as JoseJWTPayload } from 'jose'
 import { adminStaffPermissionForPath, firstAdminStaffRoute, firstCityStaffRoute } from '@/app/lib/staffPermissions'
+import { decideMaintenanceAccess } from '@/app/lib/maintenancePolicy'
+import { getMaintenanceState } from '@/app/lib/maintenanceMode'
 
 // ============================================================
 // CONFIG
@@ -29,6 +31,62 @@ const ROLE_ROUTES: Record<string, string> = {
 
 // ── Public routes that don't need auth ──
 const PUBLIC_ROUTES = ['/', '/login', '/login/member', '/login/distributor', '/login/admin', '/forgot-password', '/support']
+
+const MAINTENANCE_STATUS_ROUTE = '/api/system/maintenance'
+const MAINTENANCE_PAGE = '/maintenance'
+const STATIC_FILE_EXTENSION = /\.(?:avif|css|gif|ico|jpe?g|js|json|map|png|svg|txt|webmanifest|webp|woff2?|ttf)$/i
+
+interface MaintenanceProbe {
+  enabled: boolean
+  unavailable: boolean
+  message: string
+}
+
+async function readMaintenanceState(): Promise<MaintenanceProbe> {
+  try {
+    const state = await getMaintenanceState()
+    return {
+      enabled: state.enabled,
+      unavailable: false,
+      message: state.message,
+    }
+  } catch (error) {
+    console.error('[PROXY MAINTENANCE CHECK ERROR]', error)
+    // Fail closed when the authoritative setting cannot be read. Recovery
+    // routes remain available so the Admin owner can diagnose and restore it.
+    return {
+      enabled: true,
+      unavailable: true,
+      message: 'Hiroma is temporarily unavailable. Please try again later.',
+    }
+  }
+}
+
+async function readVerifiedPayload(req: NextRequest): Promise<JoseJWTPayload | null> {
+  const token = req.cookies.get(COOKIE_NAME)?.value
+  if (!token) return null
+  try {
+    return (await jwtVerify(token, JWT_SECRET)).payload
+  } catch {
+    return null
+  }
+}
+
+function maintenanceApiResponse(message: string) {
+  return NextResponse.json(
+    { error: message, maintenance: true },
+    { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '60' } },
+  )
+}
+
+function isStaticAssetPath(pathname: string): boolean {
+  if (pathname.startsWith('/_next/') || pathname.startsWith('/favicon')) return true
+  // Never let a dotted dynamic API/dashboard segment masquerade as a static
+  // file and bypass the maintenance or authorization gates.
+  return !pathname.startsWith('/api/') &&
+    !pathname.startsWith('/dashboard/') &&
+    STATIC_FILE_EXTENSION.test(pathname)
+}
 
 function requiredStaffPermission(pathname: string, method: string): string | null {
   if (pathname.startsWith('/dashboard/area-manager') || pathname.startsWith('/api/area-manager')) return 'area_audits'
@@ -73,8 +131,38 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
+  // Static assets and the status probe must never recurse through the
+  // maintenance check.
+  if (
+    pathname === MAINTENANCE_STATUS_ROUTE ||
+    isStaticAssetPath(pathname)
+  ) {
+    return NextResponse.next()
+  }
+
+  const payload = await readVerifiedPayload(req)
+  const isOwnerAdmin = payload?.role === 'admin' && payload.is_staff !== true
+  const maintenance = await readMaintenanceState()
+
+  const maintenanceDecision = decideMaintenanceAccess({
+    pathname,
+    method: req.method,
+    active: maintenance.enabled || maintenance.unavailable,
+    isOwnerAdmin,
+  })
+  if (maintenanceDecision === 'block-api') {
+    // Owner reads are useful for deployment verification. Every mutation,
+    // including cron/webhook GETs without an owner session, remains closed.
+    return maintenanceApiResponse(maintenance.message)
+  }
+  if (maintenanceDecision === 'redirect') {
+    const url = new URL(MAINTENANCE_PAGE, req.url)
+    if (maintenance.unavailable) url.searchParams.set('status', 'unavailable')
+    return NextResponse.redirect(url)
+  }
+
   // ── Allow public routes ──
-  if (PUBLIC_ROUTES.includes(pathname) || pathname.startsWith('/verify/')) {
+  if (pathname === MAINTENANCE_PAGE || PUBLIC_ROUTES.includes(pathname) || pathname.startsWith('/verify/')) {
     return NextResponse.next()
   }
 
@@ -87,9 +175,7 @@ export async function proxy(req: NextRequest) {
 
   // ── Allow static files ──
   if (
-    pathname.startsWith('/_next/') ||
-    pathname.startsWith('/favicon') ||
-    pathname.includes('.')
+    isStaticAssetPath(pathname)
   ) {
     return NextResponse.next()
   }
