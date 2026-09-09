@@ -12,6 +12,7 @@ interface Payout {
   transaction_number: string | null
   cutoff_date:        string | null
   payout_date:        string | null
+  batch_id:           string | null
   notes:              string | null
   requested_at:       string
   processed_at:       string | null
@@ -50,6 +51,9 @@ export default function AdminPayoutsPage() {
   const [cutoffInput, setCutoffInput]             = useState('15,31')
   const [payoutDateMap, setPayoutDateMap]         = useState<Record<string,string>>({'15':'18','31':'3'})
   const [payoutDateMapInput, setPayoutDateMapInput] = useState<Record<string,string>>({'15':'18','31':'3'})
+  const [minimumPayout, setMinimumPayout] = useState('500')
+  const [minimumPayoutInput, setMinimumPayoutInput] = useState('500')
+  const [settingsError, setSettingsError] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
   const [showSettings, setShowSettings]     = useState(false)
 
@@ -87,6 +91,7 @@ export default function AdminPayoutsPage() {
             setPayoutDateMap(m); setPayoutDateMapInput(m)
           } catch {}
         }
+        if (d.minimum_payout_amount) { setMinimumPayout(d.minimum_payout_amount); setMinimumPayoutInput(d.minimum_payout_amount) }
       })
   }, [])
 
@@ -94,15 +99,17 @@ export default function AdminPayoutsPage() {
   useEffect(() => { setPage(1) }, [statusFilter, search, cutoffFilter])
 
   const handleSaveSettings = async () => {
+    setSettingsError('')
     setSavingSettings(true)
     const res = await fetch('/api/admin/settings', {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ payout_cutoff_days: cutoffInput, payout_date_map: JSON.stringify(payoutDateMapInput) }),
+      body: JSON.stringify({ payout_cutoff_days: cutoffInput, payout_date_map: JSON.stringify(payoutDateMapInput), minimum_payout_amount: minimumPayoutInput }),
     })
     const data = await res.json()
     setSavingSettings(false)
-    if (data.success) { setCutoffSettings(cutoffInput); setPayoutDateMap(payoutDateMapInput); setShowSettings(false) }
+    if (data.success) { setCutoffSettings(cutoffInput); setPayoutDateMap(payoutDateMapInput); setMinimumPayout(minimumPayoutInput); setShowSettings(false) }
+    else setSettingsError(data.error || 'Unable to save payout settings.')
   }
 
   const handleAction = async () => {
@@ -146,9 +153,19 @@ export default function AdminPayoutsPage() {
       {/* Cutoff Settings Panel */}
       {showSettings && (
         <div className="bg-white rounded-xl border border-[#0D1B3E]/8 p-4 mb-5">
+          {settingsError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{settingsError}</p>}
+          <label className="mb-4 block max-w-xs">
+            <span className="mb-1 block text-sm font-semibold text-[#0D1B3E]">Minimum Payout Amount</span>
+            <span className="mb-2 block text-[10px] text-gray-400">Resellers cannot submit below this amount.</span>
+            <div className="flex items-center rounded-lg border border-[#0D1B3E]/15 px-3 focus-within:border-[#C9A84C]">
+              <span className="text-sm text-gray-400">₱</span>
+              <input type="number" min="0.01" max="1000000" step="0.01" value={minimumPayoutInput} onChange={(e) => setMinimumPayoutInput(e.target.value)} className="w-full px-2 py-2 text-sm text-[#0D1B3E] outline-none" />
+            </div>
+          </label>
           <p className="text-sm font-semibold text-[#0D1B3E] mb-1">Payout Cutoff Days</p>
           <p className="text-xs text-gray-400 mb-3">
-            Enter day numbers separated by commas. Use <span className="font-mono font-medium">31</span> for last day of month.
+            Enter unique day numbers separated by commas. Use <span className="font-mono font-medium">31</span> for last day of month.
+            The batch closes at 12:00 AM Asia/Manila on the cutoff date; requests on that date enter the next batch.
             <br/>Current: <span className="font-medium text-[#0D1B3E]">{cutoffSettings.split(',').map((d) => d === '31' ? 'Last day' : `${d}th`).join(' & ')} of every month</span>
           </p>
           <div className="flex gap-2 items-center">
@@ -162,7 +179,7 @@ export default function AdminPayoutsPage() {
               className="px-4 py-2 rounded-lg bg-[#010521] text-white text-sm font-medium hover:bg-[#162850] disabled:opacity-50 whitespace-nowrap">
               {savingSettings ? 'Saving...' : 'Save'}
             </button>
-            <button onClick={() => { setCutoffInput(cutoffSettings); setShowSettings(false) }}
+            <button onClick={() => { setCutoffInput(cutoffSettings); setMinimumPayoutInput(minimumPayout); setSettingsError(''); setShowSettings(false) }}
               className="px-4 py-2 rounded-lg border border-[#0D1B3E]/15 text-sm text-gray-500 hover:bg-gray-50">
               Cancel
             </button>
@@ -344,6 +361,10 @@ export default function AdminPayoutsPage() {
             {/* Expanded detail */}
             {expandedId === payout.id && (
               <div className="px-4 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/8 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-0.5">Immutable Batch</p>
+                  <p className="font-mono font-semibold text-[#0D1B3E]">{payout.batch_id || 'Legacy payout'}</p>
+                </div>
                 <div>
                   <p className="text-[10px] text-gray-400 mb-0.5">Transaction No.</p>
                   <p className="font-mono font-semibold text-[#0D1B3E]">{payout.transaction_number || '—'}</p>

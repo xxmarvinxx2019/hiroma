@@ -85,6 +85,7 @@ export default function AdminOrdersPage() {
   const [search, setSearch]             = useState('')
   const [page, setPage]                 = useState(1)
   const [expandedId, setExpandedId]     = useState<string | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [updatingId, setUpdatingId]     = useState<string | null>(null)
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
 
@@ -117,6 +118,22 @@ export default function AdminOrdersPage() {
   }, [statusFilter, typeFilter, levelFilter, page, search])
 
   useEffect(() => { fetchOrders() }, [fetchOrders])
+
+  useEffect(() => {
+    if (!selectedOrder) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedOrder(null)
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [selectedOrder])
 
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
     setUpdatingId(orderId)
@@ -278,15 +295,16 @@ export default function AdminOrdersPage() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                  <Link href={"/dashboard/admin/orders/" + (order.order_number || order.id)}
-                    onClick={(e) => e.stopPropagation()}
+                  <button type="button"
+                    onClick={() => setSelectedOrder(order)}
                     className="w-7 h-7 rounded-lg bg-[#eef0f8] hover:bg-[#C9A84C] flex items-center justify-center transition-colors group flex-shrink-0"
-                    title="View details">
+                    title="View details"
+                    aria-label={`View order ${order.order_number || order.id} details`}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                       <circle cx="12" cy="12" r="3"/>
                     </svg>
-                  </Link>
+                  </button>
                     {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
                         onClick={async () => {
@@ -381,6 +399,117 @@ export default function AdminOrdersPage() {
 
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
+
+      {/* Order Details Modal */}
+      {selectedOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#020817]/60 p-4 backdrop-blur-[2px]"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedOrder(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-order-details-title"
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-[#F7F8FC] shadow-2xl"
+          >
+            <header className="flex items-start justify-between gap-4 bg-[#010521] px-5 py-4 text-white">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[.18em] text-[#C9A84C]">Order Details</p>
+                <h2 id="admin-order-details-title" className="mt-1 text-lg font-extrabold">
+                  {selectedOrder.order_number || `#${selectedOrder.id.slice(0, 8).toUpperCase()}`}
+                </h2>
+                <p className="mt-1 text-xs text-white/55">
+                  {new Date(selectedOrder.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold capitalize ${STATUS_COLORS[selectedOrder.status] || 'bg-white/10 text-white'}`}>
+                  {selectedOrder.status}
+                </span>
+                <button type="button" onClick={() => setSelectedOrder(null)} aria-label="Close order details"
+                  className="rounded-lg p-1.5 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white">×</button>
+              </div>
+            </header>
+
+            <div className="overflow-y-auto p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  { label: 'Buyer', person: selectedOrder.buyer },
+                  { label: 'Seller', person: selectedOrder.seller },
+                ].map(({ label, person }) => (
+                  <div key={label} className="rounded-xl border border-[#0D1B3E]/8 bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
+                    <p className="mt-1 text-sm font-bold text-[#0D1B3E]">{person.full_name}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${ROLE_COLOR[person.role] || 'bg-gray-100 text-gray-600'}`}>
+                        {ROLE_LABEL[person.role] || person.role}
+                      </span>
+                      <span className="text-xs text-gray-400">@{person.username}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-xl border border-[#0D1B3E]/8 bg-white">
+                <div className="flex items-center justify-between border-b border-[#0D1B3E]/8 px-4 py-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-[#0D1B3E]">Order Items</h3>
+                  <span className="text-xs text-gray-400">{selectedOrder.items.reduce((sum, item) => sum + item.quantity, 0)} units</span>
+                </div>
+                {selectedOrder.items.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-xs text-gray-400">No item details available.</p>
+                ) : (
+                  <div className="divide-y divide-[#0D1B3E]/6">
+                    {selectedOrder.items.map((item, index) => (
+                      <div key={`${item.product.name}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3">
+                        <div>
+                          <p className="text-xs font-semibold text-[#0D1B3E]">{item.product.name}</p>
+                          <p className="mt-0.5 text-[10px] text-gray-400">{item.product.type} · {item.quantity} × ₱{Number(item.unit_price).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                        </div>
+                        <p className="text-xs font-bold text-[#0D1B3E]">₱{Number(item.subtotal).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between border-t border-[#0D1B3E]/10 bg-[#F8F9FC] px-4 py-3">
+                  <span className="text-xs font-bold text-gray-500">Total Amount</span>
+                  <span className="text-base font-extrabold text-[#0D1B3E]">₱{Number(selectedOrder.total_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-[#010521] p-4 text-white">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/45">Payment</p>
+                  <p className="mt-1 text-sm font-bold capitalize">{(selectedOrder.payment_method || 'Not specified').replaceAll('_', ' ')}</p>
+                  <p className={`mt-1 text-xs font-semibold ${selectedOrder.payment_status === 'paid' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                    {selectedOrder.payment_status === 'paid' ? '✓ Paid' : 'Pending payment'}
+                  </p>
+                  {selectedOrder.payment_reference && <p className="mt-2 break-all text-[10px] text-white/55">Reference: {selectedOrder.payment_reference}</p>}
+                </div>
+                <div className="rounded-xl border border-[#0D1B3E]/8 bg-white p-4">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Order Type</p>
+                  <p className="mt-1 text-sm font-bold capitalize text-[#0D1B3E]">{selectedOrder.order_type}</p>
+                  {selectedOrder.notes && <p className="mt-2 text-xs leading-relaxed text-gray-500">{selectedOrder.notes}</p>}
+                </div>
+              </div>
+            </div>
+
+            <footer className="flex items-center justify-between gap-3 border-t border-[#0D1B3E]/8 bg-white px-5 py-4">
+              <Link href={`/dashboard/admin/orders/${selectedOrder.order_number || selectedOrder.id}`}
+                className="text-xs font-semibold text-[#9a6f1e] hover:underline">
+                Open full page →
+              </Link>
+              <button type="button" onClick={() => setSelectedOrder(null)}
+                className="rounded-xl bg-[#010521] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#1A2F5E]">
+                Close
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
       {/* Cancel Confirmation Modal */}
       {cancelConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
