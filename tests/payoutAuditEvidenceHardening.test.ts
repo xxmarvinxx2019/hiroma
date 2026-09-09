@@ -77,7 +77,7 @@ test('deferred checks support the existing state-first audit-second order and ex
 test('all payout routes write the canonical metadata inside their state transaction', () => {
   assert.match(
     requestRoute,
-    /prisma\.\$transaction[\s\S]*activity_type: 'payout_requested'[\s\S]*metadata: \{ payout_id: created\.id, reseller_id: user\.id, amount: requestedAmount, payment_method: resolvedMethod \}/,
+    /prisma\.\$transaction[\s\S]*activity_type: 'payout_requested'[\s\S]*metadata: \{ payout_id: created\.id, reseller_id: user\.id, amount: requestedAmount, payment_method: resolvedMethod, batch_id: batchId \}/,
   )
   assert.match(
     adminRoute,
