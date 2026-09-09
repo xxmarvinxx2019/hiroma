@@ -69,17 +69,17 @@ export async function GET(req: NextRequest) {
     ])
 
     // Fetch new columns separately via raw SQL (safe if columns don't exist yet)
-    const extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; notes: string | null }> = {}
+    const extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null }> = {}
     try {
-      const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
-        SELECT id, transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})
+      const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null }[]>`
+        SELECT id, transaction_number, cutoff_date, payout_date, batch_id, notes FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})
       `
-      extras.forEach((e) => { extraData[e.id] = { transaction_number: e.transaction_number, cutoff_date: e.cutoff_date ? String(e.cutoff_date) : null, notes: e.notes } })
+      extras.forEach((e) => { extraData[e.id] = { transaction_number: e.transaction_number, cutoff_date: e.cutoff_date ? String(e.cutoff_date) : null, payout_date: e.payout_date ? String(e.payout_date) : null, batch_id: e.batch_id, notes: e.notes } })
     } catch {
       // Columns don't exist yet — run migration SQL to add them
     }
 
-    const enrichedPayouts = payouts.map((p) => ({ ...p, ...(extraData[p.id] || { transaction_number: null, cutoff_date: null, notes: null }) }))
+    const enrichedPayouts = payouts.map((p) => ({ ...p, ...(extraData[p.id] || { transaction_number: null, cutoff_date: null, payout_date: null, batch_id: null, notes: null }) }))
 
     return NextResponse.json({
       payouts: enrichedPayouts,

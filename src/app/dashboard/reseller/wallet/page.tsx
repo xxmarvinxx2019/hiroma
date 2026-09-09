@@ -11,6 +11,8 @@ import SecurityPinModal from '@/app/components/ui/SecurityPinModal'
 
 interface Wallet {
   balance: number
+  available_balance: number
+  reserved_balance: number
   total_earned: number
   total_withdrawn: number
 }
@@ -94,10 +96,12 @@ function formatCreditedAt(value: string) {
 
 function PayoutModal({
   balance,
+  minimumPayout,
   onClose,
   onSuccess,
 }: {
   balance: number
+  minimumPayout: number
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -128,7 +132,7 @@ function PayoutModal({
   const validatePayout = () => {
     setError('')
     if (!amount || parseFloat(amount) <= 0) return 'Enter a valid amount.'
-    if (parseFloat(amount) < 500) return 'Minimum payout request is ₱500.00.'
+    if (parseFloat(amount) < minimumPayout) return `Minimum payout request is ${fmt(minimumPayout)}.`
     if (parseFloat(amount) > balance) return 'Amount exceeds your balance.'
     if (!method) return 'Select an approved payment method.'
     return null
@@ -188,7 +192,7 @@ function PayoutModal({
               />
             </div>
             <div className="flex gap-2 mt-1.5">
-              {[500, 1000, 2000].map((v) => (
+              {[minimumPayout, minimumPayout * 2, minimumPayout * 4].map((v) => (
                 <button key={v} onClick={() => setAmount(String(Math.min(v, balance)))}
                   className="text-xs px-2 py-1 bg-[#F0F2F8] text-gray-500 rounded hover:bg-[#e4e6ef] transition-colors">
                   ₱{v}
@@ -294,6 +298,7 @@ export default function ResellerWalletPage() {
   const [historyDate, setHistoryDate]     = useState('')
   const [page, setPage]                   = useState(1)
   const [showPayout, setShowPayout]       = useState(false)
+  const [minimumPayout, setMinimumPayout] = useState(500)
 
   useEffect(() => { setPage(1) }, [tab])
 
@@ -310,6 +315,7 @@ export default function ResellerWalletPage() {
         if (data.commissions)        setCommissions(data.commissions)
         if (data.payouts)            setPayouts(data.payouts)
         if (data.meta)               setMeta(data.meta)
+        if (data.minimum_payout_amount) setMinimumPayout(Number(data.minimum_payout_amount))
       })
       .finally(() => setLoading(false))
   }, [tab, page, commissionFilter, historyDate])
@@ -367,7 +373,7 @@ export default function ResellerWalletPage() {
       {wallet && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: 'Available Balance', value: fmt(wallet.balance),         accent: '#A17820', icon: '💰', sub: selectedDateLabel ? `As of ${selectedDateLabel}` : 'Ready to withdraw' },
+            { label: 'Available Balance', value: fmt(wallet.available_balance), accent: '#A17820', icon: '💰', sub: selectedDateLabel ? `As of ${selectedDateLabel}` : wallet.reserved_balance > 0 ? `${fmt(wallet.reserved_balance)} reserved for payout` : 'Ready to withdraw' },
             { label: 'Total Earned',      value: fmt(wallet.total_earned),    accent: '#168052', icon: '📈', sub: selectedDateLabel ? `Earned on ${selectedDateLabel}` : 'Lifetime earnings'  },
             { label: 'Total Withdrawn',   value: fmt(wallet.total_withdrawn), accent: '#0D1B3E', icon: '💸', sub: selectedDateLabel ? `Paid out on ${selectedDateLabel}` : 'Paid out'           },
           ].map((c) => (
@@ -564,7 +570,8 @@ export default function ResellerWalletPage() {
       {/* Payout modal */}
       {showPayout && wallet && (
         <PayoutModal
-          balance={wallet.balance}
+          balance={wallet.available_balance}
+          minimumPayout={minimumPayout}
           onClose={() => setShowPayout(false)}
           onSuccess={() => { setShowPayout(false); fetchData() }}
         />

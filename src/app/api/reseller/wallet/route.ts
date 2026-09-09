@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
-import { getCutoffDays, getNextCutoffDate, getPayoutDateMap, getPayoutDateFromCutoff } from '@/app/api/admin/settings/route'
+import { getCutoffDays, getMinimumPayoutAmount, getPayoutDateMap } from '@/app/api/admin/settings/route'
+import { getNextPayoutSchedule } from '@/app/lib/payoutSchedule'
 import prisma from '@/app/lib/prisma'
 import { getResellerPayoutMode } from '@/app/lib/resellerPayoutPolicy'
 import {
@@ -190,7 +191,9 @@ export async function GET(req: NextRequest) {
         }
       : null
 
+    const minimumPayoutAmount = await getMinimumPayoutAmount()
     return NextResponse.json({
+      minimum_payout_amount: minimumPayoutAmount,
       wallet: {
         balance:         selectedDateWallet?.balance ?? Number(wallet?.balance || 0),
         reserved_balance: selectedDateWallet ? 0 : Number(wallet?.reserved_balance || 0),
@@ -200,7 +203,7 @@ export async function GET(req: NextRequest) {
       },
       commission_summary: summary,
       commissions: commissionsWithBalances,
-      payouts,
+      payouts: enrichedPayouts,
       meta: {
         total:      totalCount,
         page,
@@ -233,8 +236,9 @@ export async function POST(req: NextRequest) {
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       return NextResponse.json({ error: 'Invalid amount.' }, { status: 400 })
     }
-    if (parseFloat(amount) < 500) {
-      return NextResponse.json({ error: 'Minimum payout request is ₱500.00.' }, { status: 400 })
+    const minimumPayout = await getMinimumPayoutAmount()
+    if (parseFloat(amount) < minimumPayout) {
+      return NextResponse.json({ error: `Minimum payout request is ₱${minimumPayout.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.` }, { status: 400 })
     }
 
     let resolvedMethod = payoutMode === 'cash' ? 'Cash' : payoutMode === 'check' ? 'Check' : ''
@@ -268,8 +272,7 @@ export async function POST(req: NextRequest) {
     // Compute next cutoff and payout dates from admin settings
     const cutoffDays    = await getCutoffDays()
     const payoutDateMap = await getPayoutDateMap()
-    const cutoffDate    = getNextCutoffDate(cutoffDays)
-    const payoutDate    = getPayoutDateFromCutoff(cutoffDate, payoutDateMap, cutoffDays)
+    const { cutoffDate, payoutDate, batchId } = getNextPayoutSchedule(cutoffDays, payoutDateMap)
     // Create payout — do NOT deduct balance here
     // Balance is deducted only when admin approves the payout
     const payout = await prisma.$transaction(async (tx) => {
@@ -287,6 +290,7 @@ export async function POST(req: NextRequest) {
         payment_reference: resolvedReference || payment_reference?.trim() || null,
         cutoff_date:       cutoffDate,
         payout_date:       payoutDate,
+        batch_id:          batchId,
       } })
       await reservePayoutFunds(tx, created.id, user.id, requestedAmount)
       await createRequiredAuditLog(tx, {
@@ -297,7 +301,7 @@ export async function POST(req: NextRequest) {
         activity_type: 'payout_requested',
         category: 'payout',
         description: `Requested a source-backed payout of ₱${requestedAmount.toFixed(2)}.`,
-        metadata: { payout_id: created.id, reseller_id: user.id, amount: requestedAmount, payment_method: resolvedMethod },
+        metadata: { payout_id: created.id, reseller_id: user.id, amount: requestedAmount, payment_method: resolvedMethod, batch_id: batchId },
         ...getClientInfo(req),
         risk_level: 'medium',
         status: 'completed',

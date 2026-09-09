@@ -1248,6 +1248,7 @@ model Payout {
   transaction_number                  String?                           @unique
   cutoff_date                         DateTime?
   payout_date                         DateTime?
+  batch_id                            String?                           @db.VarChar(40)
   notes                               String?
   approved_by                         String?
   requested_at                        DateTime                          @default(now())
@@ -1258,6 +1259,7 @@ model Payout {
   direct_referral_payout_consumptions DirectReferralPayoutConsumption[]
 
   @@map("payouts")
+  @@index([batch_id, status])
 }
 
 model PasswordResetToken {

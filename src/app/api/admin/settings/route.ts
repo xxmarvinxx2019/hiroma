@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { DEFAULT_MINIMUM_PAYOUT, DEFAULT_PAYOUT_CUTOFF_DAYS, validatePayoutSchedule } from '@/app/lib/payoutSchedule'
 
 // Default cutoff days if not set
-export const DEFAULT_CUTOFF_DAYS = [15, 31] // 31 = last day of month
+export const DEFAULT_CUTOFF_DAYS = DEFAULT_PAYOUT_CUTOFF_DAYS // 31 = last day of month
 
 // ── Helper: get cutoff days from DB ──
 export async function getCutoffDays(): Promise<number[]> {
@@ -104,6 +105,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       payout_cutoff_days: map['payout_cutoff_days'] || '15,31',
       payout_date_map:    map['payout_date_map']    || '{"15":"18","31":"3"}',
+      minimum_payout_amount: map['minimum_payout_amount'] || String(DEFAULT_MINIMUM_PAYOUT),
       pu_reset_month:     map['pu_reset_month']     || '3',
       pu_reset_day:       map['pu_reset_day']       || '1',
     })
@@ -121,7 +123,17 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { payout_cutoff_days, payout_date_map, pu_reset_month, pu_reset_day } = await req.json()
+    const { payout_cutoff_days, payout_date_map, minimum_payout_amount, pu_reset_month, pu_reset_day } = await req.json()
+
+    if (payout_cutoff_days !== undefined || payout_date_map !== undefined) {
+      try {
+        const cutoffDays = String(payout_cutoff_days).split(',').map((value) => Number(value.trim()))
+        const dateMap = typeof payout_date_map === 'string' ? JSON.parse(payout_date_map) : payout_date_map
+        validatePayoutSchedule(cutoffDays, dateMap)
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid payout schedule.' }, { status: 400 })
+      }
+    }
 
     if (payout_cutoff_days !== undefined) {
       // Validate: must be comma-separated numbers between 1-31
@@ -137,11 +149,23 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (payout_date_map !== undefined) {
-      const mapValue = typeof payout_date_map === 'string' ? payout_date_map : JSON.stringify(payout_date_map)
+      const mapValue = JSON.stringify(typeof payout_date_map === 'string' ? JSON.parse(payout_date_map) : payout_date_map)
       await prisma.$executeRaw`
         INSERT INTO system_settings (id, key, value, updated_at, updated_by)
         VALUES (gen_random_uuid(), 'payout_date_map', ${mapValue}, NOW(), ${user.id})
         ON CONFLICT (key) DO UPDATE SET value = ${mapValue}, updated_at = NOW(), updated_by = ${user.id}
+      `
+    }
+
+    if (minimum_payout_amount !== undefined) {
+      const amount = Number(minimum_payout_amount)
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000 || Math.round(amount * 100) !== amount * 100) {
+        return NextResponse.json({ error: 'Minimum payout must be a valid amount from ₱0.01 to ₱1,000,000.00.' }, { status: 400 })
+      }
+      await prisma.$executeRaw`
+        INSERT INTO system_settings (id, key, value, updated_at, updated_by)
+        VALUES (gen_random_uuid(), 'minimum_payout_amount', ${amount.toFixed(2)}, NOW(), ${user.id})
+        ON CONFLICT (key) DO UPDATE SET value = ${amount.toFixed(2)}, updated_at = NOW(), updated_by = ${user.id}
       `
     }
 
@@ -172,4 +196,10 @@ export async function PATCH(req: NextRequest) {
     console.error('[ADMIN SETTINGS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
+}
+
+export async function getMinimumPayoutAmount(): Promise<number> {
+  const setting = await prisma.systemSetting.findUnique({ where: { key: 'minimum_payout_amount' } })
+  const amount = Number(setting?.value)
+  return Number.isFinite(amount) && amount > 0 ? amount : DEFAULT_MINIMUM_PAYOUT
 }

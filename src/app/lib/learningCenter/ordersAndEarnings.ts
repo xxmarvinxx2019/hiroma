@@ -88,7 +88,7 @@ export const ordersAndEarningsCourse = {
       summary: 'Complete the required account and security checks before submitting a withdrawal request.',
       points: [
         'Add and obtain approval for a payment method before requesting a payout.',
-        'The current minimum payout request is PHP 500, subject to the live policy shown in the system.',
+        'The minimum payout request is configured by Admin and shown live in the payout form.',
         'The account must have sufficient available balance and no other pending payout request.',
         'A configured and valid six-digit Security PIN is required for payout submission and other protected financial actions.',
         'Payout processing follows the current admin-configured cutoff and release schedule. Check the live payout page rather than relying on an old screenshot or message.',
@@ -140,6 +140,6 @@ export const ordersAndEarningsHiroKnowledge = [
   { id: 'earnings-sources', phrases: ['commission types', 'direct referral income', 'binary commission', 'product binary', 'where earnings come from'], answer: 'Hiroma separately records Direct Referral, Binary Commission, and Product Binary. Direct Referral comes from qualified registrations, Binary from payable left/right registration pairs, and Product Binary from 2 PU left plus 2 PU right using the qualified rank rate.' },
   { id: 'earnings-flashout', phrases: ['flashout meaning', 'daily cap', 'package difference', 'excess commission', 'ngano na flashout'], answer: 'Flashout is retained under an applicable rule and is not payable. It can come from a direct-referral cap or package difference, a Binary daily pair cap, or a Product Binary cap/inactivity rule. Reports must keep those sources separate.' },
   { id: 'earnings-carryover', phrases: ['carryover points', 'unmatched points', 'unpaired pu', 'is carryover money'], answer: 'Unmatched Binary points and unpaired Product Binary PU may carry forward under the plan rules. They are volume, not cash reserve, liability, or withdrawable balance.' },
-  { id: 'payout-requirements', phrases: ['how to payout', 'payout requirements', 'minimum withdrawal', 'withdraw wallet', 'request payout'], answer: 'A payout request currently requires an approved payment method, at least PHP 500 available balance, no conflicting pending request, and a configured valid Security PIN. Processing follows the live admin-configured cutoff and release schedule.' },
+  { id: 'payout-requirements', phrases: ['how to payout', 'payout requirements', 'minimum withdrawal', 'withdraw wallet', 'request payout'], answer: 'A payout request requires an approved payment method, enough available balance for the live Admin-configured minimum, no conflicting pending request, and a configured valid Security PIN. Processing follows the live cutoff and release schedule.' },
   { id: 'earnings-discrepancy', phrases: ['wrong commission', 'missing earning', 'earning discrepancy', 'incorrect wallet', 'report payout problem'], answer: 'First match the date range, transaction status, commission source, and detailed ledger. If it still differs, create a Support Ticket with the date, type, amount, order/member reference, expected result, and a safe screenshot—never your password, PIN, OTP, or passkey.' },
 ] as const
