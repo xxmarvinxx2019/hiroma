@@ -100,6 +100,9 @@ export async function GET(req: NextRequest) {
       provinceSales,
       citySales,
       resellerSales,
+      pinRevenueBreakdown,
+      commissionExpenseBreakdown,
+      distributionProfitBreakdown,
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'reseller' } }),
       prisma.distributorProfile.count({ where: { is_active: true } }),
@@ -377,6 +380,33 @@ export async function GET(req: NextRequest) {
         ORDER BY total DESC
         LIMIT 10
       `,
+      prisma.$queryRaw<{ package_name: string; channel: string; registrations: number; amount: number }[]>`
+        SELECT package_name_snapshot package_name, registration_channel channel,
+               COUNT(*)::int registrations, COALESCE(SUM(pin_allocation),0)::float amount
+        FROM registration_financials
+        WHERE created_at >= ${periodStart} AND created_at < ${periodEnd}
+        GROUP BY package_name_snapshot, registration_channel
+        ORDER BY amount DESC, package_name_snapshot, registration_channel
+      `,
+      prisma.$queryRaw<{ commission_type: string; entries: number; amount: number }[]>`
+        SELECT type commission_type, COUNT(*)::int entries,
+               COALESCE(SUM(amount),0)::float amount
+        FROM commissions
+        WHERE type IN ('direct_referral', 'binary_pairing', 'multilevel')
+          AND is_pair_overflow = false
+          AND created_at >= ${periodStart} AND created_at < ${periodEnd}
+        GROUP BY type ORDER BY amount DESC, type
+      `,
+      adminId ? prisma.$queryRaw<{ product_name: string; units: number; revenue: number; cost: number; profit: number }[]>`
+        SELECT p.name product_name, COALESCE(SUM(oi.quantity),0)::int units,
+               COALESCE(SUM(oi.subtotal),0)::float revenue,
+               COALESCE(SUM(p.cost_price*oi.quantity),0)::float cost,
+               COALESCE(SUM(oi.subtotal-p.cost_price*oi.quantity),0)::float profit
+        FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN products p ON p.id=oi.product_id
+        WHERE o.seller_id::text=${adminId} AND o.status='delivered'
+          AND o.updated_at >= ${periodStart} AND o.updated_at < ${periodEnd}
+        GROUP BY p.id,p.name ORDER BY profit DESC,p.name
+      ` : Promise.resolve([]),
     ])
 
     // ── Compute values ──
@@ -459,6 +489,11 @@ export async function GET(req: NextRequest) {
         totalRevenue, overallNetProfit,
         chainRevenue: totalRevenue,
         totalUnitsSold,
+        revenueBreakdown: {
+          pinRevenue: pinRevenueBreakdown,
+          commissionExpense: commissionExpenseBreakdown,
+          distributionProfit: distributionProfitBreakdown,
+        },
         topProducts:        topProductsRaw as any[],
         recentOrders,
         ordersByStatus,

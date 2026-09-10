@@ -53,6 +53,21 @@ interface ProductStock {
   price: number; cost_price: number; regional_price: number; provincial_price: number
   city_price: number; branch_price: number; reseller_price: number
   total_distributed: number; is_low_stock: boolean; admin_stock: number
+  reseller_units: number; admin_reserved: number; admin_available: number
+}
+
+interface CompanyStockSummary {
+  on_hand_units: number
+  reserved_units: number
+  available_units: number
+  current_cost_value: number
+  products_with_stock: number
+  low_stock_products: number
+  distributed_units: number
+  reseller_units: number
+  admin_breakdown: { product_name: string; on_hand: number; reserved: number; available: number; current_cost_value: number; low_stock_threshold: number }[]
+  network_breakdown: { product_name: string; level: string; units: number }[]
+  reseller_breakdown: { product_name: string; units: number }[]
 }
 
 interface CartItem {
@@ -694,6 +709,17 @@ export default function AdminInventoryPage() {
   const [saving, setSaving]             = useState(false)
   const [adminRevenue, setAdminRevenue]         = useState(0)
   const [adminTotalOrders, setAdminTotalOrders] = useState(0)
+  const [companyStockSummary, setCompanyStockSummary] = useState<CompanyStockSummary>({ on_hand_units: 0, reserved_units: 0, available_units: 0, current_cost_value: 0, products_with_stock: 0, low_stock_products: 0, distributed_units: 0, reseller_units: 0, admin_breakdown: [], network_breakdown: [], reseller_breakdown: [] })
+  const [selectedStockCard, setSelectedStockCard] = useState<'on_hand' | 'available' | 'cost' | 'network' | 'reseller' | 'low_stock' | null>(null)
+
+  useEffect(() => {
+    if (!selectedStockCard) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedStockCard(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [selectedStockCard])
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 400)
@@ -729,6 +755,7 @@ export default function AdminInventoryPage() {
         setStockReceipts(data.stockReceipts || [])
         setAdminRevenue(data.adminRevenue || 0)
         setAdminTotalOrders(data.adminTotalOrders || 0)
+        if (data.companyStockSummary) setCompanyStockSummary(data.companyStockSummary)
         if (data.meta)      setMeta(data.meta)
         if (data.stockMeta) setStockMeta(data.stockMeta)
       })
@@ -748,9 +775,6 @@ export default function AdminInventoryPage() {
     setEditingId(null)
     fetchData()
   }
-
-  const lowStockCount  = productStock.filter((p) => p.is_low_stock).length
-  const totalDistUnits = productStock.reduce((s, p) => s + p.total_distributed, 0)
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -778,31 +802,41 @@ export default function AdminInventoryPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Total Revenue',     value: `₱${adminRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#1a7a4a' },
-          { label: 'Stock Assignments', value: adminTotalOrders.toLocaleString(),  accent: '#2563eb' },
-          { label: 'Units Distributed', value: totalDistUnits.toLocaleString(),    accent: '#0D1B3E' },
+          { id: 'on_hand' as const, label: 'Company Stock on Hand', value: `${companyStockSummary.on_hand_units.toLocaleString()} units`, accent: '#0D1B3E', sub: `${companyStockSummary.products_with_stock} products currently stocked` },
+          { id: 'available' as const, label: 'Available to Distribute', value: `${companyStockSummary.available_units.toLocaleString()} units`, accent: '#1a7a4a', sub: `${companyStockSummary.reserved_units.toLocaleString()} units reserved` },
+          { id: 'cost' as const, label: 'Current Stock Cost Value', value: `₱${companyStockSummary.current_cost_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#9a6f1e', sub: 'On-hand units × current acquisition cost' },
+          { id: null, label: 'Total Revenue', value: `₱${adminRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, accent: '#1a7a4a', sub: 'Delivered Admin inventory sales' },
+          { id: null, label: 'Stock Assignments', value: adminTotalOrders.toLocaleString(), accent: '#2563eb', sub: 'Admin-issued inventory orders' },
+          { id: 'network' as const, label: 'Current Distributor Network Stock', value: `${companyStockSummary.distributed_units.toLocaleString()} units`, accent: '#2563eb', sub: 'Regional, Provincial, City, and Branch only' },
+          { id: 'reseller' as const, label: 'Recorded Reseller Purchases', value: `${companyStockSummary.reseller_units.toLocaleString()} units`, accent: '#8b5cf6', sub: 'Excluded from company and distributor stock' },
           {
+            id: 'low_stock' as const,
             label: 'Low Stock Alerts',
-            value: lowStockCount.toLocaleString(),
-            accent: lowStockCount > 0 ? '#e05252' : '#1a7a4a',
+            value: companyStockSummary.low_stock_products.toLocaleString(),
+            accent: companyStockSummary.low_stock_products > 0 ? '#e05252' : '#1a7a4a',
+            sub: 'Admin products at or below threshold',
           },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+          <button type="button" key={s.label} disabled={!s.id} onClick={() => s.id && setSelectedStockCard(s.id)} className="rounded-xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:hover:translate-y-0"
             style={{ background: `linear-gradient(145deg, rgba(255,255,255,.15), rgba(0,0,0,.14)), ${s.accent}`, borderColor: 'rgba(255,255,255,.3)', boxShadow: `0 8px 20px ${s.accent}38` }}>
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/80">{s.label}</p>
             <p className="text-2xl font-extrabold text-white">{s.value}</p>
-          </div>
+            {'sub' in s && s.sub && <p className="mt-1 text-[10px] text-white/70">{s.sub}</p>}
+            {s.id && <span className="mt-2 block text-[9px] font-semibold text-white/55">View explanation and breakdown →</span>}
+          </button>
         ))}
       </div>
+
+      {selectedStockCard && <StockSummaryModal selected={selectedStockCard} summary={companyStockSummary} onClose={() => setSelectedStockCard(null)} />}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">
         {([
           { key: 'stock',       label: '📦 Product Stock Overview' },
           { key: 'receipts',    label: '🧾 Stock Receipt Ledger' },
-          { key: 'distributed', label: '📋 Distributor Inventory' },
+          { key: 'distributed', label: '📋 Network & Reseller Records' },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-[#010521] text-white' : 'text-gray-400 hover:text-[#0D1B3E]'}`}>
@@ -818,7 +852,7 @@ export default function AdminInventoryPage() {
             <div>
               <p className="text-sm font-semibold text-[#0D1B3E]">Product Stock Summary</p>
               <p className="text-xs text-gray-400 mt-0.5">
-                Total units distributed — <span className="text-[#e05252] font-medium">red = low stock</span>
+                Company, network, and reseller records shown separately — <span className="text-[#e05252] font-medium">red = low Admin stock</span>
               </p>
             </div>
             <input
@@ -828,8 +862,8 @@ export default function AdminInventoryPage() {
               className="bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] placeholder:text-gray-400 w-60"
             />
           </div>
-          <div className="grid min-w-[1180px] grid-cols-10 px-4 py-2 bg-[#F0F2F8]">
-            {['Product', 'Cost', 'Regional ₱', 'Provincial ₱', 'City ₱', 'Branch ₱', 'Reseller ₱', 'SRP ₱', 'Admin Stock', 'Distributed'].map((h) => (
+          <div className="grid min-w-[1300px] grid-cols-11 px-4 py-2 bg-[#F0F2F8]">
+            {['Product', 'Cost', 'Regional ₱', 'Provincial ₱', 'City ₱', 'Branch ₱', 'Reseller ₱', 'SRP ₱', 'Admin Stock', 'Network Stock', 'Reseller Purchases'].map((h) => (
               <p key={h} className="text-xs text-gray-400 uppercase tracking-wide font-medium">{h}</p>
             ))}
           </div>
@@ -838,7 +872,7 @@ export default function AdminInventoryPage() {
           ) : (
             productStock.map((p) => (
               <div key={p.id}
-                className={`grid min-w-[1180px] grid-cols-10 px-4 py-3 border-b border-[#0D1B3E]/5 items-center transition-colors ${
+                className={`grid min-w-[1300px] grid-cols-11 px-4 py-3 border-b border-[#0D1B3E]/5 items-center transition-colors ${
                   p.is_low_stock ? 'bg-[#fdecea]/30' : 'hover:bg-[#F0F2F8]/50'
                 }`}>
                 <div>
@@ -871,6 +905,7 @@ export default function AdminInventoryPage() {
                     {p.admin_stock.toLocaleString()}
                     <span className="text-xs font-normal text-gray-400 ml-1">units</span>
                   </p>
+                  <p className="text-[10px] text-gray-400">{p.admin_available.toLocaleString()} available · {p.admin_reserved.toLocaleString()} reserved</p>
                   {p.admin_stock === 0 && <p className="text-[10px] text-[#e05252]">⚠ Manufacture now</p>}
                   {p.admin_stock > 0 && p.admin_stock <= 10 && <p className="text-[10px] text-[#9a6f1e]">⚠ Running low</p>}
                 </div>
@@ -879,6 +914,13 @@ export default function AdminInventoryPage() {
                     {p.total_distributed.toLocaleString()}
                     <span className="text-xs font-normal text-gray-400 ml-1">units</span>
                   </p>
+                </div>
+                <div>
+                  <p className={`text-sm font-semibold ${p.reseller_units === 0 ? 'text-gray-300' : 'text-[#C9A84C]'}`}>
+                    {p.reseller_units.toLocaleString()}
+                    <span className="text-xs font-normal text-gray-400 ml-1">units</span>
+                  </p>
+                  <p className="text-[9px] text-gray-400">excluded from stock</p>
                 </div>
               </div>
             ))
@@ -921,6 +963,9 @@ export default function AdminInventoryPage() {
       {/* ── DISTRIBUTOR INVENTORY ── */}
       {tab === 'distributed' && (
         <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-x-auto">
+          <div className="border-b border-[#0D1B3E]/8 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-900">
+            Regional, Provincial, City, and Branch quantities count as current network stock. Reseller rows are retained only as purchase/assignment audit records and are excluded from company and network stock totals.
+          </div>
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
             <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}
@@ -1073,4 +1118,40 @@ export default function AdminInventoryPage() {
       )}
     </div>
   )
+}
+
+function StockSummaryModal({ selected, summary, onClose }: {
+  selected: 'on_hand' | 'available' | 'cost' | 'network' | 'reseller' | 'low_stock'
+  summary: CompanyStockSummary
+  onClose: () => void
+}) {
+  const money = (value: number) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const definitions = {
+    on_hand: { title: 'Company Stock on Hand', value: `${summary.on_hand_units.toLocaleString()} units`, explanation: 'Physical products currently recorded in the Admin/Hiroma warehouse. Reserved units remain physically on hand until released or transferred.' },
+    available: { title: 'Available to Distribute', value: `${summary.available_units.toLocaleString()} units`, explanation: `Company stock on hand (${summary.on_hand_units}) minus reserved stock (${summary.reserved_units}). This is the quantity currently safe to assign or transfer.` },
+    cost: { title: 'Current Stock Cost Value', value: money(summary.current_cost_value), explanation: 'Current company stock on hand multiplied by each product’s current acquisition cost. This is an operational valuation, not sales revenue.' },
+    network: { title: 'Current Distributor Network Stock', value: `${summary.distributed_units.toLocaleString()} units`, explanation: 'Current recorded stock held by Regional, Provincial, City, and Branch locations. Reseller-held products are intentionally excluded.' },
+    reseller: { title: 'Recorded Reseller Purchases', value: `${summary.reseller_units.toLocaleString()} units`, explanation: 'Products already sold or assigned to resellers. These are outside company and distributor-network stock because resellers may sell them face-to-face to end customers.' },
+    low_stock: { title: 'Company Low Stock Alerts', value: summary.low_stock_products.toLocaleString(), explanation: 'Active physical products whose Admin stock is at or below the configured threshold, including products without an Admin inventory balance.' },
+  } as const
+  const definition = definitions[selected]
+  const rows: Array<Array<string | number>> = selected === 'network'
+    ? summary.network_breakdown.map(row => [row.level, row.product_name, row.units])
+    : selected === 'reseller'
+      ? summary.reseller_breakdown.map(row => [row.product_name, row.units])
+      : summary.admin_breakdown
+          .filter(row => selected !== 'low_stock' || row.on_hand <= row.low_stock_threshold)
+          .map(row => selected === 'cost'
+            ? [row.product_name, row.on_hand, money(row.current_cost_value)]
+            : [row.product_name, row.on_hand, row.reserved, row.available, row.low_stock_threshold])
+  const headings = selected === 'network'
+    ? ['Distributor level', 'Product', 'Current units']
+    : selected === 'reseller'
+      ? ['Product', 'Recorded units']
+      : selected === 'cost'
+        ? ['Product', 'On hand', 'Current cost value']
+        : ['Product', 'On hand', 'Reserved', 'Available', 'Low-stock threshold']
+  return <div role="dialog" aria-modal="true" aria-labelledby="stock-summary-title" className="fixed inset-0 z-50 flex items-center justify-center bg-[#06102A]/65 p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><header className="sticky top-0 z-10 flex items-start justify-between border-b bg-white px-5 py-4"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-[#C9A84C]">Inventory audit breakdown</p><h2 id="stock-summary-title" className="mt-1 text-lg font-bold text-[#0D1B3E]">{definition.title}: {definition.value}</h2></div><button type="button" onClick={onClose} className="rounded-lg border px-3 py-1.5 text-sm">Close</button></header><div className="space-y-4 p-5"><p className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-gray-600">{definition.explanation}</p><div className="overflow-x-auto rounded-xl border"><table className="w-full min-w-[560px] text-left text-xs"><thead className="bg-slate-50 text-gray-500"><tr>{headings.map(heading => <th key={heading} className="px-3 py-2">{heading}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row,index) => <tr key={index}>{row.map((value,column) => <td key={column} className={`px-3 py-2 ${column === row.length-1 ? 'font-bold text-[#0D1B3E]' : ''}`}>{value}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="px-3 py-8 text-center text-gray-400">No matching inventory records.</td></tr>}</tbody></table></div><p className="text-xs text-gray-400">Read-only explanation. Opening this breakdown does not change inventory quantities or movements.</p></div></section>
+  </div>
 }

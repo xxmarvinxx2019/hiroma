@@ -39,6 +39,11 @@ interface Stats {
   totalRevenue: number
   overallNetProfit: number
   totalUnitsSold: number
+  revenueBreakdown: {
+    pinRevenue: { package_name: string; channel: string; registrations: number; amount: number }[]
+    commissionExpense: { commission_type: string; entries: number; amount: number }[]
+    distributionProfit: { product_name: string; units: number; revenue: number; cost: number; profit: number }[]
+  }
   monthlyRevenue: { month: string; revenue: number }[]
   lastMonthRevenue: number
   thisMonthRevenue: number
@@ -188,6 +193,7 @@ const parsePinSaleNote = (notes: string | null) => {
 
 export default function AdminDashboardPage() {
   const [stats, setStats]                     = useState<Stats | null>(null)
+  const [selectedRevenueCard, setSelectedRevenueCard] = useState<'pin' | 'commission' | 'digital' | 'distribution' | null>(null)
   const [recentResellers, setRecentResellers] = useState<RecentReseller[]>([])
   const [recentPayouts, setRecentPayouts]     = useState<RecentPayout[]>([])
   const [pinSales, setPinSales]               = useState<PinSale[]>([])
@@ -234,6 +240,15 @@ export default function AdminDashboardPage() {
 
     return () => controller.abort()
   }, [appliedQuery])
+
+  useEffect(() => {
+    if (!selectedRevenueCard) return
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedRevenueCard(null)
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [selectedRevenueCard])
 
   const applyPeriod = () => {
     const params = new URLSearchParams({ period: periodKey })
@@ -590,17 +605,19 @@ export default function AdminDashboardPage() {
           <p className="text-sm font-bold text-[#0D1B3E] mb-4">Today&apos;s Revenue Breakdown</p>
           <div className="space-y-3">
             {[
-              { label: 'PIN Revenue', value: stats?.pinRevenueToday || 0, color: '#9a6f1e', icon: '🔑' },
-              { label: 'MLM Commission Expense', value: stats?.digitalCommissionExpenseToday || 0, color: '#e05252', icon: '💸' },
-              { label: 'Digital Net', value: stats?.digitalNetToday || 0, color: '#1a7a4a', icon: '📈' },
-              { label: 'Distribution Gross Profit', value: stats?.distributionGrossProfitToday || 0, color: '#2563eb', icon: '🧴' },
+              { id: 'pin' as const, label: 'PIN Revenue', value: stats?.pinRevenueToday || 0, color: '#9a6f1e', icon: '🔑' },
+              { id: 'commission' as const, label: 'MLM Commission Expense', value: stats?.digitalCommissionExpenseToday || 0, color: '#e05252', icon: '💸' },
+              { id: 'digital' as const, label: 'Digital Net', value: stats?.digitalNetToday || 0, color: '#1a7a4a', icon: '📈' },
+              { id: 'distribution' as const, label: 'Distribution Gross Profit', value: stats?.distributionGrossProfitToday || 0, color: '#2563eb', icon: '🧴' },
             ].map(s => {
               const total = stats?.totalRevenueToday || 0
               const pct   = total > 0 ? Math.round((s.value / total) * 100) : 0
               return (
-                <div
+                <button
+                  type="button"
                   key={s.label}
-                  className="group relative overflow-hidden rounded-xl border border-white/10 border-l-[3px] bg-[#0D1B3E] p-3 text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  onClick={() => setSelectedRevenueCard(s.id)}
+                  className="group relative w-full overflow-hidden rounded-xl border border-white/10 border-l-[3px] bg-[#0D1B3E] p-3 text-left text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#C9A84C] focus:ring-offset-2"
                   style={{
                     borderLeftColor: s.color,
                   }}
@@ -631,7 +648,8 @@ export default function AdminDashboardPage() {
                     </div>
                     <span className="w-7 text-right text-[10px] font-bold text-white/85">{pct}%</span>
                   </div>
-                </div>
+                  <span className="relative mt-2 block text-[9px] font-semibold text-white/55">View explanation and audit breakdown →</span>
+                </button>
               )
             })}
 
@@ -889,6 +907,49 @@ export default function AdminDashboardPage() {
         ))}
       </div>
 
+      {selectedRevenueCard && stats && (
+        <RevenueBreakdownModal
+          selected={selectedRevenueCard}
+          stats={stats}
+          periodLabel={period?.label || 'Selected period'}
+          onClose={() => setSelectedRevenueCard(null)}
+        />
+      )}
+
     </div>
   )
+}
+
+function RevenueBreakdownModal({ selected, stats, periodLabel, onClose }: {
+  selected: 'pin' | 'commission' | 'digital' | 'distribution'
+  stats: Stats
+  periodLabel: string
+  onClose: () => void
+}) {
+  const pinRows = stats.revenueBreakdown?.pinRevenue || []
+  const commissionRows = stats.revenueBreakdown?.commissionExpense || []
+  const distributionRows = stats.revenueBreakdown?.distributionProfit || []
+  const definitions = {
+    pin: { title: 'PIN Revenue', amount: stats.pinRevenueToday, formula: 'Sum of immutable PIN allocations from completed new-reseller registrations.', note: 'This is the digital allocation assigned to Hiroma when a registration PIN is consumed. It is not the full package payment and it does not include product-order revenue.' },
+    commission: { title: 'MLM Commission Expense', amount: stats.digitalCommissionExpenseToday, formula: 'Direct Referral + payable Binary Pairing + Multilevel commissions.', note: 'These are member commission obligations created during the selected period. Binary flashout retained by Hiroma is excluded.' },
+    digital: { title: 'Digital Net', amount: stats.digitalNetToday, formula: `${fmt(stats.pinRevenueToday)} PIN Revenue − ${fmt(stats.digitalCommissionExpenseToday)} MLM Commission Expense = ${fmt(stats.digitalNetToday)}`, note: 'Digital Net is not another PIN charge. It is the remainder after deducting MLM commission expense from PIN Revenue.' },
+    distribution: { title: 'Distribution Gross Profit', amount: stats.distributionGrossProfitToday, formula: `Delivered product revenue ${fmt(stats.orderRevenueToday)} − product acquisition cost ${fmt(stats.orderRevenueToday-stats.distributionGrossProfitToday)} = ${fmt(stats.distributionGrossProfitToday)}`, note: 'This covers delivered product orders sold directly by Admin. It is gross profit before operating expenses, taxes, and other adjustments.' },
+  } as const
+  const selectedDefinition = definitions[selected]
+  const commissionLabels: Record<string,string> = { direct_referral: 'Direct Referral', binary_pairing: 'Binary Pairing', multilevel: 'Multilevel' }
+  return <div role="dialog" aria-modal="true" aria-labelledby="revenue-breakdown-title" className="fixed inset-0 z-50 flex items-center justify-center bg-[#06102A]/65 p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+      <header className="sticky top-0 z-10 flex items-start justify-between border-b bg-white px-5 py-4"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-[#C9A84C]">{periodLabel} audit explanation</p><h2 id="revenue-breakdown-title" className="mt-1 text-lg font-bold text-[#0D1B3E]">{selectedDefinition.title}: {fmt(selectedDefinition.amount)}</h2></div><button type="button" onClick={onClose} className="rounded-lg border px-3 py-1.5 text-sm">Close</button></header>
+      <div className="space-y-4 p-5"><section className="rounded-xl border border-blue-100 bg-blue-50 p-4"><p className="text-sm font-semibold text-[#0D1B3E]">What this means</p><p className="mt-2 text-sm text-gray-600">{selectedDefinition.note}</p><p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm font-bold text-[#0D1B3E]">{selectedDefinition.formula}</p></section>
+      {selected === 'pin' && <AuditTable headings={['Package','Channel','Registrations','PIN allocation']} rows={pinRows.map(row => [row.package_name,row.channel,row.registrations,fmt(row.amount)])} empty="No completed registration PIN allocations in this period." />}
+      {selected === 'commission' && <AuditTable headings={['Commission type','Entries','Expense']} rows={commissionRows.map(row => [commissionLabels[row.commission_type] || row.commission_type,row.entries,fmt(row.amount)])} empty="No payable MLM commissions created in this period." />}
+      {selected === 'digital' && <AuditTable headings={['Component','Treatment','Amount']} rows={[["PIN Revenue","Add",fmt(stats.pinRevenueToday)],["MLM Commission Expense","Subtract",fmt(stats.digitalCommissionExpenseToday)],["Digital Net","Result",fmt(stats.digitalNetToday)]]} empty="No digital activity in this period." />}
+      {selected === 'distribution' && <AuditTable headings={['Product','Units','Revenue','Cost','Gross profit']} rows={distributionRows.map(row => [row.product_name,row.units,fmt(row.revenue),fmt(row.cost),fmt(row.profit)])} empty="No delivered Admin product orders in this period." />}
+      <p className="text-xs text-gray-400">This modal is read-only and uses the same server totals and selected reporting period as the dashboard card.</p></div>
+    </section>
+  </div>
+}
+
+function AuditTable({ headings, rows, empty }: { headings: string[]; rows: Array<Array<string | number>>; empty: string }) {
+  return <div className="overflow-x-auto rounded-xl border"><table className="w-full min-w-[560px] text-left text-xs"><thead className="bg-slate-50 text-gray-500"><tr>{headings.map(heading => <th key={heading} className="px-3 py-2">{heading}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row,index) => <tr key={index}>{row.map((value,column) => <td key={column} className={`px-3 py-2 ${column === row.length-1 ? 'font-bold text-[#0D1B3E]' : ''}`}>{value}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="px-3 py-8 text-center text-gray-400">{empty}</td></tr>}</tbody></table></div>
 }

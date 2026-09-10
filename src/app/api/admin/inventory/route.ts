@@ -205,15 +205,22 @@ export async function GET(req: NextRequest) {
       where:  { owner: { role: { in: ['regional', 'provincial', 'city', 'reseller'] } } },
       select: {
         quantity: true, low_stock_threshold: true,
-        product:  { select: { id: true } },
+        owner: { select: { role: true, distributor_profile: { select: { dist_level: true } } } },
+        product:  { select: { id: true, name: true } },
       },
     })
 
     const distributedMap = new Map<string, number>()
+    const resellerMap    = new Map<string, number>()
     const lowStockSet    = new Set<string>()
     for (const inv of allInventory) {
       const pid = (inv.product as any).id
-      distributedMap.set(pid, (distributedMap.get(pid) || 0) + inv.quantity)
+      const level = inv.owner.distributor_profile?.dist_level || inv.owner.role
+      if (level === 'reseller' || inv.owner.role === 'reseller') {
+        resellerMap.set(pid, (resellerMap.get(pid) || 0) + inv.quantity)
+      } else {
+        distributedMap.set(pid, (distributedMap.get(pid) || 0) + inv.quantity)
+      }
       if (inv.quantity <= inv.low_stock_threshold) lowStockSet.add(pid)
     }
 
@@ -240,14 +247,18 @@ export async function GET(req: NextRequest) {
     const productStockSummary = products.map((p) => ({
       ...p,
       total_distributed: distributedMap.get(p.id) || 0,
+      reseller_units:    resellerMap.get(p.id) || 0,
       is_low_stock:      lowStockSet.has(p.id),
     }))
 
     const adminOwnStock = await prisma.inventory.findMany({
       where:  { owner_id: user.id },
-      select: { product_id: true, quantity: true },
+      select: {
+        product_id: true, quantity: true, reserved_quantity: true, low_stock_threshold: true,
+        product: { select: { name: true, cost_price: true, type: true } },
+      },
     })
-    const adminStockMap = new Map(adminOwnStock.map((i) => [i.product_id, i.quantity]))
+    const adminStockMap = new Map(adminOwnStock.map((i) => [i.product_id, i]))
     const stockReceipts = await prisma.adminStockReceipt.findMany({
       where: { admin_id: user.id },
       orderBy: [{ received_at: 'desc' }, { id: 'desc' }],
@@ -257,8 +268,56 @@ export async function GET(req: NextRequest) {
 
     const productStockSummaryWithAdmin = productStockSummary.map((p) => ({
       ...p,
-      admin_stock: adminStockMap.get(p.id) ?? 0,
+      admin_stock: adminStockMap.get(p.id)?.quantity ?? 0,
+      admin_reserved: adminStockMap.get(p.id)?.reserved_quantity ?? 0,
+      admin_available: Math.max(0, (adminStockMap.get(p.id)?.quantity ?? 0) - (adminStockMap.get(p.id)?.reserved_quantity ?? 0)),
+      is_low_stock: (adminStockMap.get(p.id)?.quantity ?? 0) <= (adminStockMap.get(p.id)?.low_stock_threshold ?? 0),
     }))
+    const adminPhysicalStock = adminOwnStock.filter((item) => item.product.type === 'physical')
+    const activePhysicalProducts = await prisma.product.findMany({
+      where: { is_active: true, type: 'physical' },
+      select: { id: true, name: true, cost_price: true },
+      orderBy: { name: 'asc' },
+    })
+    const companyStockSummary = adminPhysicalStock.reduce((summary, item) => {
+      summary.on_hand_units += item.quantity
+      summary.reserved_units += item.reserved_quantity
+      summary.available_units += Math.max(0, item.quantity - item.reserved_quantity)
+      summary.current_cost_value += item.quantity * Number(item.product.cost_price || 0)
+      if (item.quantity > 0) summary.products_with_stock += 1
+      if (item.quantity <= item.low_stock_threshold) summary.low_stock_products += 1
+      return summary
+    }, { on_hand_units: 0, reserved_units: 0, available_units: 0, current_cost_value: 0, products_with_stock: 0, low_stock_products: 0 })
+    companyStockSummary.low_stock_products += Math.max(0, activePhysicalProducts.length - adminPhysicalStock.length)
+    const networkStock = new Map<string, { product_name: string; level: string; units: number }>()
+    const resellerStock = new Map<string, { product_name: string; units: number }>()
+    for (const item of allInventory) {
+      const level = item.owner.distributor_profile?.dist_level || item.owner.role
+      if (level === 'reseller' || item.owner.role === 'reseller') {
+        const current = resellerStock.get(item.product.id) || { product_name: item.product.name, units: 0 }
+        current.units += item.quantity
+        resellerStock.set(item.product.id, current)
+      } else {
+        const key = `${level}:${item.product.id}`
+        const current = networkStock.get(key) || { product_name: item.product.name, level, units: 0 }
+        current.units += item.quantity
+        networkStock.set(key, current)
+      }
+    }
+    const networkStockBreakdown = [...networkStock.values()].sort((a, b) => b.units - a.units || a.product_name.localeCompare(b.product_name))
+    const resellerStockBreakdown = [...resellerStock.values()].sort((a, b) => b.units - a.units || a.product_name.localeCompare(b.product_name))
+    const totalDistributedUnits = networkStockBreakdown.reduce((sum, item) => sum + item.units, 0)
+    const resellerUnits = resellerStockBreakdown.reduce((sum, item) => sum + item.units, 0)
+    const adminStockBreakdown = activePhysicalProducts.map((product) => {
+      const item = adminStockMap.get(product.id)
+      return {
+      product_name: product.name,
+      on_hand: item?.quantity ?? 0,
+      reserved: item?.reserved_quantity ?? 0,
+      available: Math.max(0, (item?.quantity ?? 0) - (item?.reserved_quantity ?? 0)),
+      current_cost_value: (item?.quantity ?? 0) * Number(product.cost_price || 0),
+      low_stock_threshold: item?.low_stock_threshold ?? 0,
+    }}).sort((a, b) => b.on_hand - a.on_hand || a.product_name.localeCompare(b.product_name))
 
     return NextResponse.json({
       items: itemsWithMovement,
@@ -266,6 +325,14 @@ export async function GET(req: NextRequest) {
       recipients:    recipientList,
       recipientMeta: { total: recipientTotal, totalPages: Math.max(1, Math.ceil(recipientTotal / recipient_size)) },
       productStockSummary: productStockSummaryWithAdmin,
+      companyStockSummary: {
+        ...companyStockSummary,
+        distributed_units: totalDistributedUnits,
+        reseller_units: resellerUnits,
+        admin_breakdown: adminStockBreakdown,
+        network_breakdown: networkStockBreakdown,
+        reseller_breakdown: resellerStockBreakdown,
+      },
       stockReceipts: stockReceipts.map((receipt) => ({
         ...receipt,
         items: receipt.items.map((item) => ({ ...item, unit_cost: Number(item.unit_cost) })),
