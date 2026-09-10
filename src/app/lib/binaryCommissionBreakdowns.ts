@@ -111,8 +111,7 @@ export async function loadBinaryCommissionBreakdowns(from: Date, to: Date) {
         LEFT JOIN reseller_profiles r ON r.user_id=c.user_id
         LEFT JOIN packages pkg ON pkg.id=r.package_id
         WHERE p.status='approved'
-          AND COALESCE(p.processed_at,pc.allocated_at) >= ${from}
-          AND COALESCE(p.processed_at,pc.allocated_at) <= ${to}
+          AND COALESCE(p.processed_at,p.requested_at) <= ${to}
         GROUP BY COALESCE(e.package_name_snapshot,pkg.name,'Unknown'),
                  COALESCE(e.pair_value_snapshot,pkg.pairing_bonus_value * 0.5,0)
         ORDER BY 1,2
@@ -131,8 +130,8 @@ export async function loadBinaryCommissionBreakdowns(from: Date, to: Date) {
         LEFT JOIN reseller_profiles r ON r.user_id=c.user_id
         LEFT JOIN packages pkg ON pkg.id=r.package_id
         WHERE p.status='released'
-          AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) >= ${from}
-          AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) <= ${to}
+          AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) >= ${from}
+          AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) <= ${to}
         GROUP BY COALESCE(e.package_name_snapshot,pkg.name,'Unknown'),
                  COALESCE(e.pair_value_snapshot,pkg.pairing_bonus_value * 0.5,0)
         ORDER BY 1,2
@@ -177,13 +176,13 @@ export async function loadBinaryCommissionBreakdowns(from: Date, to: Date) {
           SELECT lot.commission_id, SUM(pc.amount)::numeric amount
           FROM binary_payout_consumptions pc JOIN binary_payable_lots lot ON lot.id=pc.payable_lot_id
           JOIN payouts p ON p.id=pc.payout_id
-          WHERE p.status='released' AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) < ${from}
+          WHERE p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) < ${from}
           GROUP BY lot.commission_id
         ), through_period AS (
           SELECT lot.commission_id, SUM(pc.amount)::numeric amount
           FROM binary_payout_consumptions pc JOIN binary_payable_lots lot ON lot.id=pc.payable_lot_id
           JOIN payouts p ON p.id=pc.payout_id
-          WHERE p.status='released' AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) <= ${to}
+          WHERE p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) <= ${to}
           GROUP BY lot.commission_id
         )
         SELECT COALESCE(e.package_name_snapshot,p.name,'Unknown') package_name,

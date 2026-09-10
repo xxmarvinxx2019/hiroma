@@ -26,7 +26,7 @@ export async function loadBinaryFundingPosition(cutoff: Date) {
       JOIN binary_payable_lots lot ON lot.id=pc.payable_lot_id
       JOIN payouts p ON p.id=pc.payout_id
       WHERE p.status='released'
-        AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) <= ${cutoff}
+        AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) <= ${cutoff}
       GROUP BY lot.commission_id
     )
     SELECT
@@ -61,7 +61,7 @@ export async function loadBinaryFundingMovement(from: Date, to: Date) {
       JOIN binary_payable_lots lot ON lot.id=pc.payable_lot_id
       JOIN payouts p ON p.id=pc.payout_id
       WHERE p.status='released'
-        AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) < ${from}
+        AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) < ${from}
       GROUP BY lot.commission_id
     ), released_to AS (
       SELECT lot.commission_id, SUM(pc.amount)::numeric released_amount
@@ -69,7 +69,7 @@ export async function loadBinaryFundingMovement(from: Date, to: Date) {
       JOIN binary_payable_lots lot ON lot.id=pc.payable_lot_id
       JOIN payouts p ON p.id=pc.payout_id
       WHERE p.status='released'
-        AND COALESCE(p.payout_date,p.processed_at,pc.allocated_at) <= ${to}
+        AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at) <= ${to}
       GROUP BY lot.commission_id
     )
     SELECT

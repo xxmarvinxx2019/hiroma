@@ -24,6 +24,33 @@ type BreakdownRow = {
   details: string;
   data_quality: "exact" | "mixed" | "reconstructed";
 };
+type BinaryLedgerRow = {
+  id: string; created_at: string; recipient_name: string; recipient_username: string;
+  package_name: string; source_name: string; source_username: string; source_kind: string;
+  source_leg: string; source_points: number; points_per_pair: number; completed_pairs: number;
+  payable_pairs: number; cap_flashout_pairs: number; inactive_flashout_pairs: number;
+  payable_amount: number; flashout_amount: number; pair_value: number; peso_per_point: number;
+  opening_left_points: number | null; opening_right_points: number | null;
+  closing_left_points: number | null; closing_right_points: number | null;
+  consumed_left_points: number; consumed_right_points: number; pairing_day: string | null;
+  opening_daily_count: number | null; closing_daily_count: number | null;
+  cap_enabled: boolean; cap_limit: number | null; package_snapshot_source: string;
+  source_event_id: string | null; normal_commission_id: string | null;
+  flashout_commission_id: string | null; funded_amount: number; unfunded_amount: number;
+  wallet_ledger_id: string | null; approved_amount: number; released_amount: number;
+  payout_references: string | null;
+  source_financial_id: string | null; source_package: string | null;
+  source_channel: string | null; source_payment_status: string | null;
+  source_paid_at: string | null; source_outlet_name: string | null;
+  source_outlet_username: string | null; source_customer_payment: number;
+  source_product_cost: number; source_direct_allocation: number;
+  source_binary_allocation: number;
+};
+type LiabilityRow = {
+  id: string; allocated_at: string; recipient_name: string; recipient_username: string;
+  package_name: string; original_amount: number; released_amount: number;
+  forfeited_amount: number; remaining_amount: number; commission_id: string; age_days: number;
+};
 
 type Data = {
   accounting_ready: boolean;
@@ -35,6 +62,7 @@ type Data = {
     total_binary_income: number;
     total_approved: number;
     total_paid: number;
+    total_forfeited: number;
     opening_payable_liability: number;
     payable_liability: number;
     total_flashout: number;
@@ -63,25 +91,13 @@ type Data = {
     flashout_amount: number;
     members_reached_cap: number;
   }>;
-  ledger: Array<{
-    id: string;
-    created_at: string;
-    recipient_name: string;
-    recipient_username: string;
-    package_name: string;
-    source_name: string;
-    source_username: string;
-    source_kind: string;
-    source_leg: string;
-    source_points: number;
-    points_per_pair: number;
-    completed_pairs: number;
-    payable_pairs: number;
-    cap_flashout_pairs: number;
-    inactive_flashout_pairs: number;
-    payable_amount: number;
-    flashout_amount: number;
-  }>;
+  ledger: BinaryLedgerRow[];
+  ledger_page: { page: number; page_size: number; total: number; total_pages: number };
+  liability_ledger: LiabilityRow[];
+  reconciliation: {
+    event_count: number; pair_mismatch_count: number; money_mismatch_count: number;
+    completed_pairs: number; classified_pairs: number; expected_value: number; classified_value: number;
+  };
   breakdowns: Record<BreakdownKey, BreakdownRow[]>;
   notes: Record<string, string>;
 };
@@ -103,13 +119,22 @@ export default function BinaryCommissionPage() {
   const [error, setError] = useState("");
   const [selectedBreakdown, setSelectedBreakdown] =
     useState<BreakdownKey | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<BinaryLedgerRow | null>(null);
+  const [search, setSearch] = useState("");
+  const [eventFilter, setEventFilter] = useState("all");
+  const [showLiability, setShowLiability] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const load = async (start = from, end = to) => {
+  const reportUrl = (start: string, end: string, page = 1, pageSize = 100) => {
+    const params = new URLSearchParams({ from: start, to: end, page: String(page), page_size: String(pageSize), search: search.trim(), event_filter: eventFilter });
+    return `/api/admin/commission-testing/binary-commission?${params.toString()}`;
+  };
+  const load = async (start = from, end = to, page = 1) => {
     setLoading(true);
     setError("");
     try {
       const response = await fetch(
-        `/api/admin/commission-testing/binary-commission?from=${start}&to=${end}`,
+        reportUrl(start, end, page),
         { cache: "no-store" },
       );
       const payload = await response.json();
@@ -135,6 +160,15 @@ export default function BinaryCommissionPage() {
     // Initial report range is intentionally fixed to the current month.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!selectedEvent && !selectedBreakdown) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setSelectedEvent(null); setSelectedBreakdown(null); }
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [selectedBreakdown, selectedEvent]);
 
   const applyPreset = (preset: Exclude<DateRangePreset, "custom">) => {
     const range = getDateRangePreset(preset);
@@ -236,13 +270,37 @@ export default function BinaryCommissionPage() {
     (sum, row) => sum + row.quantity,
     0,
   );
+  const filteredLedger = data?.ledger || [];
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const allRows: BinaryLedgerRow[] = [];
+      let exportPage = 1;
+      let totalPages = 1;
+      do {
+        const response = await fetch(reportUrl(from, to, exportPage, 500), { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to export Binary Commission data.");
+        allRows.push(...(payload.ledger || []));
+        totalPages = payload.ledger_page?.total_pages || 1;
+        exportPage += 1;
+      } while (exportPage <= totalPages);
+    const safe = (value: unknown) => { const text=String(value ?? ""); const protectedText=/^[=+\-@]/.test(text) ? `'${text}` : text; return `"${protectedText.replaceAll('"','""')}"`; };
+    const headings=["Created","Receiver","Receiver username","Source","Source username","Source kind","Source event ID","Source financial ID","Outlet","Outlet username","Package / channel","Payment status","Paid at","Customer payment","Product cost","Direct allocation","Binary allocation","Leg","Source points","Opening left","Opening right","Completed pairs","Payable pairs","Cap flashout pairs","Inactive flashout pairs","Closing left","Closing right","Pair value","Payable amount","Flashout amount","Funded","Unfunded","Approved awaiting release","Released","Commission ID","Flashout commission ID","Wallet ledger ID","Payout references"];
+    const rows=allRows.map((r)=>[r.created_at,r.recipient_name,r.recipient_username,r.source_name,r.source_username,r.source_kind,r.source_event_id,r.source_financial_id,r.source_outlet_name,r.source_outlet_username,`${r.source_package || r.package_name} / ${r.source_channel || r.source_kind}`,r.source_payment_status,r.source_paid_at,r.source_customer_payment,r.source_product_cost,r.source_direct_allocation,r.source_binary_allocation,r.source_leg,r.source_points,r.opening_left_points,r.opening_right_points,r.completed_pairs,r.payable_pairs,r.cap_flashout_pairs,r.inactive_flashout_pairs,r.closing_left_points,r.closing_right_points,r.pair_value,r.payable_amount,r.flashout_amount,r.funded_amount,r.unfunded_amount,r.approved_amount,r.released_amount,r.normal_commission_id,r.flashout_commission_id,r.wallet_ledger_id,r.payout_references]);
+    const blob=new Blob([[headings,...rows].map((row)=>row.map(safe).join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob); const anchor=document.createElement("a"); anchor.href=url; anchor.download=`binary-commission-audit-${from}-to-${to}.csv`; anchor.click(); URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Unable to export Binary Commission data.");
+    } finally { setExporting(false); }
+  };
 
   return (
     <main className="mx-auto w-full max-w-7xl p-6 sm:p-8">
       <header className="flex flex-col gap-4 border-b border-[#0D1B3E]/10 pb-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#C9A84C]">
-            Commission Testing
+            Commission Audit
           </p>
           <h1 className="mt-1 text-2xl font-bold text-[#0D1B3E]">
             Binary Commission
@@ -422,6 +480,12 @@ export default function BinaryCommissionPage() {
                   {peso.format(data.summary.total_paid)}
                 </dd>
               </div>
+              <div className="flex justify-between">
+                <dt>- Forfeited on deactivation</dt>
+                <dd className="font-semibold text-gray-600">
+                  {peso.format(data.summary.total_forfeited)}
+                </dd>
+              </div>
               <div className="flex justify-between border-t pt-2">
                 <dt>Closing payable liability</dt>
                 <dd className="font-bold text-violet-700">
@@ -433,6 +497,9 @@ export default function BinaryCommissionPage() {
               Approved but unreleased ({peso.format(data.summary.total_approved)})
               is included in closing liability and is not yet paid.
             </p>
+            <button type="button" onClick={() => setShowLiability((value) => !value)} className="mt-3 rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">
+              {showLiability ? "Hide liability records" : `View records behind ${peso.format(data.summary.payable_liability)}`}
+            </button>
           </article>
           <article className="rounded-xl border border-[#0D1B3E]/10 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-bold text-[#0D1B3E]">
@@ -500,6 +567,8 @@ export default function BinaryCommissionPage() {
         </section>
       )}
 
+      {showLiability && data && <BinaryLiabilityTable rows={data.liability_ledger} headline={data.summary.payable_liability} />}
+
       <section className="mt-6 overflow-hidden rounded-xl border border-[#0D1B3E]/10 bg-white shadow-sm">
         <div className="border-b px-5 py-4">
           <h2 className="text-sm font-bold text-[#0D1B3E]">
@@ -561,6 +630,16 @@ export default function BinaryCommissionPage() {
             One immutable row per affected upline and triggering registration or
             upgrade.
           </p>
+          {data && <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${data.reconciliation.pair_mismatch_count + data.reconciliation.money_mismatch_count === 0 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-300 bg-red-50 text-red-700"}`}>
+            <b>{data.reconciliation.pair_mismatch_count + data.reconciliation.money_mismatch_count === 0 ? "Reconciled" : "Discrepancy detected"}</b>: {data.reconciliation.completed_pairs} completed pairs = {data.reconciliation.classified_pairs} payable/flashout pairs; {peso.format(data.reconciliation.expected_value)} expected = {peso.format(data.reconciliation.classified_value)} classified. {data.reconciliation.event_count} event{data.reconciliation.event_count === 1 ? "" : "s"} checked.
+          </div>}
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search receiver, source, package, or reference…" className="min-w-0 flex-1 rounded-lg border border-[#0D1B3E]/15 px-3 py-2 text-sm" />
+            <select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)} className="rounded-lg border border-[#0D1B3E]/15 bg-white px-3 py-2 text-sm"><option value="all">All events</option><option value="payable">Payable pairs</option><option value="cap">Cap flashout</option><option value="inactive">Inactive flashout</option><option value="no_pair">No pair completed</option></select>
+            <button type="button" onClick={() => void load(from, to, 1)} className="rounded-lg border border-[#0D1B3E]/20 bg-white px-4 py-2 text-sm font-semibold text-[#0D1B3E]">Apply</button>
+            <button type="button" disabled={!data?.ledger_page.total || exporting} onClick={() => void exportCsv()} className="rounded-lg bg-[#0D1B3E] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{exporting ? "Exporting all pages…" : "Export complete filtered CSV"}</button>
+          </div>
+          <p className="mt-2 text-xs text-gray-400">Showing {filteredLedger.length} events on page {data?.ledger_page.page || 1} of {data?.ledger_page.total_pages || 1}; {data?.ledger_page.total || 0} filtered events in total.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1100px] w-full text-left text-sm">
@@ -572,21 +651,21 @@ export default function BinaryCommissionPage() {
                 <th className="px-4 py-3">Leg / points</th>
                 <th className="px-4 py-3">Pairs</th>
                 <th className="px-4 py-3">Payable</th>
-                <th className="px-4 py-3">Flashout</th>
+                <th className="px-4 py-3">Flashout</th><th className="px-4 py-3">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {!loading && data?.ledger.length === 0 && (
+              {!loading && filteredLedger.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center text-gray-400"
                   >
                     No exact binary audit events for this period.
                   </td>
                 </tr>
               )}
-              {data?.ledger.map((row) => (
+              {filteredLedger.map((row) => (
                 <tr key={row.id}>
                   <td className="whitespace-nowrap px-4 py-3 text-xs">
                     {new Date(row.created_at).toLocaleString("en-PH", {
@@ -624,11 +703,13 @@ export default function BinaryCommissionPage() {
                     {row.cap_flashout_pairs + row.inactive_flashout_pairs} ·{" "}
                     {peso.format(row.flashout_amount)}
                   </td>
+                  <td className="px-4 py-3"><button type="button" onClick={() => setSelectedEvent(row)} className="rounded-lg border px-3 py-1.5 text-xs font-semibold text-[#0D1B3E] hover:bg-slate-50">View audit</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {data && data.ledger_page.total_pages > 1 && <div className="flex items-center justify-between border-t bg-slate-50 px-5 py-3 text-sm"><button type="button" disabled={loading || data.ledger_page.page <= 1} onClick={() => void load(from,to,data.ledger_page.page-1)} className="rounded-lg border bg-white px-4 py-2 font-semibold disabled:opacity-40">Previous</button><span>Page {data.ledger_page.page} of {data.ledger_page.total_pages}</span><button type="button" disabled={loading || data.ledger_page.page >= data.ledger_page.total_pages} onClick={() => void load(from,to,data.ledger_page.page+1)} className="rounded-lg border bg-white px-4 py-2 font-semibold disabled:opacity-40">Next</button></div>}
       </section>
 
       <section className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
@@ -741,6 +822,24 @@ export default function BinaryCommissionPage() {
           </section>
         </div>
       )}
+
+      {selectedEvent && <BinaryEventModal row={selectedEvent} onClose={() => setSelectedEvent(null)} />}
     </main>
   );
+}
+
+function BinaryLiabilityTable({ rows, headline }: { rows: LiabilityRow[]; headline: number }) {
+  const loaded=rows.reduce((sum,row)=>sum+Number(row.remaining_amount||0),0);
+  return <section className="mt-6 overflow-hidden rounded-xl border border-violet-200 bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="text-sm font-bold text-[#0D1B3E]">Records Behind Closing Binary Liability</h2><p className="mt-1 text-xs text-gray-500">Original earning − released payout − lawful deactivation forfeiture = remaining unpaid. Age supports stale-liability review.</p></div><div className="overflow-x-auto"><table className="min-w-[940px] w-full text-left text-xs"><thead className="bg-violet-50 text-gray-600"><tr>{["Created","Age","Receiver","Package","Original","Released","Forfeited","Remaining","Commission ID"].map((x)=><th key={x} className="px-3 py-2">{x}</th>)}</tr></thead><tbody className="divide-y">{rows.map((r)=><tr key={r.id}><td className="px-3 py-2">{new Date(r.allocated_at).toLocaleString("en-PH")}</td><td className="px-3 py-2">{r.age_days} days</td><td className="px-3 py-2"><b>{r.recipient_name}</b><small className="block text-gray-400">@{r.recipient_username}</small></td><td className="px-3 py-2">{r.package_name}</td><td className="px-3 py-2">{peso.format(r.original_amount)}</td><td className="px-3 py-2">{peso.format(r.released_amount)}</td><td className="px-3 py-2">{peso.format(r.forfeited_amount)}</td><td className="px-3 py-2 font-bold text-violet-700">{peso.format(r.remaining_amount)}</td><td className="max-w-44 break-all px-3 py-2 text-gray-400">{r.commission_id}</td></tr>)}{rows.length===0&&<tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">No unpaid Binary Commission records as of this date.</td></tr>}</tbody><tfoot className="border-t bg-slate-50 font-bold"><tr><td colSpan={7} className="px-3 py-2 text-right">Loaded / headline liability</td><td colSpan={2} className={Math.abs(loaded-headline)<0.005?"px-3 py-2 text-emerald-700":"px-3 py-2 text-red-700"}>{peso.format(loaded)} / {peso.format(headline)}</td></tr></tfoot></table></div>{rows.length>=500&&<p className="border-t bg-amber-50 px-4 py-3 text-xs text-amber-800">Showing the oldest 500 open lots. Use a narrower end date for a bounded review.</p>}</section>;
+}
+
+function BinaryEventModal({ row, onClose }: { row: BinaryLedgerRow; onClose: () => void }) {
+  const groups: Array<[string,Array<[string,string]>]>=[
+    ["Source and recipient",[["Receiver",`${row.recipient_name} (@${row.recipient_username})`],["Source member",`${row.source_name} (@${row.source_username})`],["Source kind",row.source_kind],["Source event ID",row.source_event_id||"Legacy / unavailable"],["Source financial ID",row.source_financial_id||"Legacy / unavailable"],["Outlet",row.source_outlet_name?`${row.source_outlet_name} (@${row.source_outlet_username})`:"Legacy / unavailable"],["Package / channel",`${row.source_package||row.package_name} / ${row.source_channel||row.source_kind}`],["Payment status / paid at",`${row.source_payment_status||"Unknown"} / ${row.source_paid_at?new Date(row.source_paid_at).toLocaleString("en-PH"):"Unavailable"}`],["Leg",row.source_leg],["Package snapshot",row.package_name],["Snapshot quality",row.package_snapshot_source]]],
+    ["Source transaction economics",[["Customer payment",peso.format(row.source_customer_payment)],["Product acquisition cost",peso.format(row.source_product_cost)],["Direct Referral allocation",peso.format(row.source_direct_allocation)],["Binary reserve allocation",peso.format(row.source_binary_allocation)]]],
+    ["Points and pair calculation",[["Source points",String(row.source_points)],["Opening left / right",`${row.opening_left_points??"—"} / ${row.opening_right_points??"—"}`],["Consumed left / right",`${row.consumed_left_points} / ${row.consumed_right_points}`],["Closing left / right",`${row.closing_left_points??"—"} / ${row.closing_right_points??"—"}`],["Points per pair",String(row.points_per_pair)],["Peso per point",peso.format(row.peso_per_point)],["Pair value",peso.format(row.pair_value)],["Completed pairs",String(row.completed_pairs)]]],
+    ["Payable and flashout",[["Payable pairs",String(row.payable_pairs)],["Cap flashout pairs",String(row.cap_flashout_pairs)],["Inactive flashout pairs",String(row.inactive_flashout_pairs)],["Payable amount",peso.format(row.payable_amount)],["Flashout retained by Hiroma",peso.format(row.flashout_amount)],["Daily cap",row.cap_enabled?`${row.cap_limit??0} pairs/day`:"Disabled"],["Daily count before / after",`${row.opening_daily_count??"—"} / ${row.closing_daily_count??"—"}`]]],
+    ["Funding, wallet, and payout",[["Funded from reserve",peso.format(row.funded_amount)],["Unfunded amount",peso.format(row.unfunded_amount)],["Approved awaiting release",peso.format(row.approved_amount)],["Released as of selected date",peso.format(row.released_amount)],["Payout references",row.payout_references||"None"],["Commission ID",row.normal_commission_id||"None"],["Flashout commission ID",row.flashout_commission_id||"None"],["Wallet ledger ID",row.wallet_ledger_id||"None"],["Pair event ID",row.id]]],
+  ];
+  return <div role="dialog" aria-modal="true" aria-labelledby="binary-event-title" className="fixed inset-0 z-50 flex items-center justify-center bg-[#06102A]/65 p-4" onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}><section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><header className="sticky top-0 flex justify-between border-b bg-white px-5 py-4"><div><h2 id="binary-event-title" className="font-bold text-[#0D1B3E]">Binary Commission audit details</h2><p className="text-xs text-gray-500">Immutable pair, funding, wallet, and payout evidence</p></div><button type="button" onClick={onClose} className="rounded-lg border px-3 py-1.5 text-sm">Close</button></header><div className="grid gap-4 p-5 md:grid-cols-2">{groups.map(([title,items])=><section key={title} className="rounded-xl border p-4"><h3 className="text-sm font-bold text-[#0D1B3E]">{title}</h3><dl className="mt-3 divide-y">{items.map(([label,value])=><div key={label} className="grid gap-1 py-2 text-xs sm:grid-cols-[170px_1fr]"><dt className="text-gray-500">{label}</dt><dd className="break-all font-medium text-[#0D1B3E]">{value}</dd></div>)}</dl></section>)}</div></section></div>;
 }
