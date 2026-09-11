@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { maskPayoutDestination } from '@/app/lib/payoutDestination'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,15 +30,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!payout) return NextResponse.json({ error: 'Payout not found.' }, { status: 404 })
 
     // Fetch new columns via raw SQL
-    let extra = { transaction_number: null, cutoff_date: null, notes: null }
+    let extra: Record<string, string | null> = { transaction_number: null, cutoff_date: null, payout_date: null, notes: null, disbursement_provider: null, external_reference: null, disbursed_amount: null, disbursed_at: null, released_at: null, released_by_name: null }
     try {
-      const rows = await prisma.$queryRaw<{ transaction_number: string | null; cutoff_date: string | null; notes: string | null }[]>`
-        SELECT transaction_number, cutoff_date, payout_date, notes FROM payouts WHERE id::text = ${id}
+      const rows = await prisma.$queryRaw<Record<string, string | null>[]>`
+        SELECT payout.transaction_number, payout.cutoff_date::text, payout.payout_date::text, payout.notes,
+               payout.disbursement_provider, payout.external_reference, payout.disbursed_amount::text,
+               payout.disbursed_at::text, payout.released_at::text, releaser.full_name AS released_by_name
+        FROM payouts payout LEFT JOIN users releaser ON releaser.id = payout.released_by
+        WHERE payout.id::text = ${id}
       `
-      if (rows[0]) extra = rows[0] as any
+      if (rows[0]) extra = rows[0]
     } catch {}
 
-    return NextResponse.json({ payout: { ...payout, ...extra } })
+    return NextResponse.json({ payout: { ...payout, payment_reference: maskPayoutDestination(payout.payment_reference), ...extra } })
   } catch (error) {
     console.error('[ADMIN PAYOUT DETAIL ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

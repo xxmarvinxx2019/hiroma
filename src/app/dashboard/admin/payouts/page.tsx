@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import PayoutBatchTools from './PayoutBatchTools'
 
 interface Payout {
   id:                 string
@@ -16,12 +17,24 @@ interface Payout {
   notes:              string | null
   requested_at:       string
   processed_at:       string | null
+  disbursement_provider: string | null
+  external_reference: string | null
+  disbursed_amount: string | null
+  disbursed_at: string | null
+  released_at: string | null
   user:               { id: string; full_name: string; username: string; role: string }
   approver:           { full_name: string } | null
 }
 
 const fmt    = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
+const maskDestination = (value: string | null) => {
+  if (!value) return '—'
+  const parts = value.split('·').map((part) => part.trim())
+  const account = parts.at(-1) || ''
+  const masked = account.length > 4 ? `${'*'.repeat(Math.min(7, account.length - 4))}${account.slice(-4)}` : '****'
+  return [...parts.slice(0, -1), masked].join(' · ')
+}
 
 const STATUS_STYLE: Record<string, string> = {
   pending:  'bg-[#fef9ee] text-[#9a6f1e] border border-[#C9A84C]/30',
@@ -222,6 +235,9 @@ export default function AdminPayoutsPage() {
       )}
 
       {/* Summary cards */}
+      <PayoutBatchTools onReleased={fetchPayouts} />
+
+      {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
         {[
           { label: 'Pending Requests', value: String(summary.pending_count), color: '#9a6f1e', sub: 'Awaiting approval' },
@@ -299,7 +315,7 @@ export default function AdminPayoutsPage() {
               <div>
                 <p className="text-xs text-[#0D1B3E] capitalize">{payout.payment_method || '—'}</p>
                 {payout.payment_reference && (
-                  <p className="text-[10px] text-gray-400 font-mono">{payout.payment_reference}</p>
+                  <p className="text-[10px] text-gray-400 font-mono">{maskDestination(payout.payment_reference)}</p>
                 )}
               </div>
 
@@ -381,6 +397,13 @@ export default function AdminPayoutsPage() {
                   <p className="text-[10px] text-gray-400 mb-0.5">Approved by</p>
                   <p className="text-[#0D1B3E]">{payout.approver?.full_name || '—'}</p>
                 </div>
+                {payout.status === 'released' && (
+                  <div className="col-span-2 md:col-span-4 rounded-lg border border-green-100 bg-green-50 p-3">
+                    <p className="text-[10px] font-bold uppercase text-green-700">External disbursement evidence</p>
+                    <p className="mt-1 font-mono text-xs text-[#0D1B3E]">{payout.disbursement_provider || '—'} · {payout.external_reference || '—'}</p>
+                    <p className="mt-1 text-[10px] text-gray-500">{payout.disbursed_at ? new Date(payout.disbursed_at).toLocaleString('en-PH') : 'Time unavailable'} · {payout.disbursed_amount ? fmt(Number(payout.disbursed_amount)) : 'Amount unavailable'}</p>
+                  </div>
+                )}
                 {payout.notes && (
                   <div className="col-span-2 md:col-span-4">
                     <p className="text-[10px] text-gray-400 mb-0.5">Notes</p>

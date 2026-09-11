@@ -19,12 +19,14 @@ test('concurrent payout requests for one reseller are serialized', () => {
   assert.match(route, /reservePayoutFunds\(tx, created\.id, user\.id, requestedAmount\)/)
 })
 
-test('admin and cron status changes use compare-and-set transitions', () => {
+test('admin and evidence-backed release status changes use compare-and-set transitions', () => {
   const admin = readFileSync('src/app/api/admin/payouts/route.ts', 'utf8')
   const cron = readFileSync('src/app/api/cron/release-payouts/route.ts', 'utf8')
+  const batch = readFileSync('src/app/api/admin/payouts/batch/route.ts', 'utf8')
   assert.match(admin, /where: \{ id: payout_id, status: 'pending' \}/)
-  assert.match(cron, /where: \{ id: payout\.id, status: 'approved' \}/)
-  assert.match(cron, /if \(claimed\.count !== 1\) return false/)
+  assert.match(batch, /where: \{ id: payout\.id, status: 'approved' \}/)
+  assert.match(batch, /if \(claimed\.count !== 1\) throw new Error/)
+  assert.doesNotMatch(cron, /status:\s*'released'/)
   assert.match(cron, /CURRENT_TIMESTAMP AT TIME ZONE 'Asia\/Manila'/)
 })
 

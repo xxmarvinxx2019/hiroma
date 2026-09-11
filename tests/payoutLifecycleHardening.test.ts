@@ -8,6 +8,7 @@ const migration = readFileSync(
 )
 const adminRoute = readFileSync('src/app/api/admin/payouts/route.ts', 'utf8')
 const releaseRoute = readFileSync('src/app/api/cron/release-payouts/route.ts', 'utf8')
+const batchReleaseRoute = readFileSync('src/app/api/admin/payouts/batch/route.ts', 'utf8')
 const integrityRoute = readFileSync('src/app/api/admin/commission-testing/reserve-ledger/route.ts', 'utf8')
 const integrityPage = readFileSync('src/app/dashboard/admin/commission-testing/reserve-ledger/page.tsx', 'utf8')
 
@@ -37,7 +38,9 @@ test('every payout status requires exact wallet-ledger and payable-lot evidence 
 
 test('application payout transitions write their matching protected ledger entries transactionally', () => {
   assert.match(adminRoute, /prisma\.\$transaction[\s\S]*releasePayoutFunds\(tx,/)
-  assert.match(releaseRoute, /prisma\.\$transaction[\s\S]*finalizePayoutFunds\(tx,/)
+  assert.match(batchReleaseRoute, /prisma\.\$transaction[\s\S]*finalizePayoutFunds\(tx,/)
+  assert.doesNotMatch(releaseRoute, /finalizePayoutFunds/)
+  assert.match(releaseRoute, /remain approved until external disbursement evidence is confirmed/)
 })
 
 test('audit evidence is append-only and payout lifecycle mismatches remain visible to Admin', () => {

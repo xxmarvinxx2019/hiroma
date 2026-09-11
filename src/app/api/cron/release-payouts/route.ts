@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
-import { finalizePayoutFunds } from '@/app/lib/payoutFunds'
-import { createRequiredAuditLog } from '@/app/lib/auditLog'
 
 export const maxDuration = 60
 
@@ -35,51 +33,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, released: 0, message: 'No payouts due today.' })
     }
 
-    let released = 0
-    const errors: string[] = []
-
-    for (const payout of duePayouts) {
-      try {
-        const didRelease = await prisma.$transaction(async (tx) => {
-          const claimed = await tx.payout.updateMany({
-            where: { id: payout.id, status: 'approved' },
-            data:  { status: 'released', released_at: new Date() },
-          })
-          if (claimed.count !== 1) return false
-          await finalizePayoutFunds(tx, payout.id, payout.user_id, Number(payout.amount))
-          await createRequiredAuditLog(tx, {
-            user_id: payout.user_id,
-            user_name: 'Hiroma payout scheduler',
-            user_role: 'system',
-            activity_type: 'payout_released',
-            category: 'payout',
-            description: `Released source-backed payout ${payout.id}.`,
-            metadata: {
-              payout_id: payout.id,
-              reseller_id: payout.user_id,
-              amount: Number(payout.amount),
-              transaction_number: payout.transaction_number,
-              actor_type: 'system',
-            },
-            risk_level: 'high',
-            status: 'completed',
-          })
-          return true
-        })
-        if (didRelease) released++
-      } catch (e) {
-        errors.push(`Payout ${payout.id}: ${e}`)
-      }
-    }
-
-    console.log(`[CRON] Released ${released}/${duePayouts.length} payouts`)
-    if (errors.length) console.error('[CRON] Errors:', errors)
-
+    // Reaching the scheduled date never proves that money was sent. Keep the
+    // payout approved until an authorized maker file supplies validated bank
+    // or e-wallet evidence through the payout batch workflow.
+    console.log(`[CRON] ${duePayouts.length} payouts are due and awaiting disbursement evidence`)
     return NextResponse.json({
       success: true,
-      released,
-      total:   duePayouts.length,
-      errors:  errors.length ? errors : undefined,
+      released: 0,
+      due: duePayouts.length,
+      message: 'Due payouts remain approved until external disbursement evidence is confirmed.',
     })
   } catch (error) {
     console.error('[CRON RELEASE PAYOUTS ERROR]', error)

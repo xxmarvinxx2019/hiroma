@@ -9,6 +9,7 @@ import {
 import { Role } from '@prisma/client'
 import { canReadPaymentMethodTarget } from '@/app/lib/paymentMethodAccess'
 import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
+import { claimPayoutDestinationOwner, PayoutDestinationOwnershipError } from '@/app/lib/payoutDestinationOwner'
 
 async function resolveAuthorizedSupplier(user: { id: string; role: string }, req: NextRequest): Promise<string | null> {
   if (user.role === 'regional') return prisma.user.findFirst({ where: { role: 'admin', status: 'active' }, select: { id: true } }).then((item) => item?.id || null)
@@ -201,20 +202,31 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    await prisma.paymentMethod.create({
-      data: {
-        user_id: user.id,
-        type,
-        account_name: account_name.trim().replace(/\s+/g, ' '),
-        account_number: account_number.trim(),
-        bank_name: bank_name?.trim() || null,
-        status: user.role === 'admin' ? 'approved' : 'pending',
-      },
-    })
+    const methodData = {
+      user_id: user.id,
+      type,
+      account_name: account_name.trim().replace(/\s+/g, ' '),
+      account_number: account_number.trim(),
+      bank_name: bank_name?.trim() || null,
+      status: user.role === 'admin' ? 'approved' : 'pending',
+    }
+    if (user.role === 'reseller') {
+      const identity = await prisma.user.findUnique({ where: { id: user.id }, select: { identity_document_hash: true } })
+      if (!identity?.identity_document_hash) return NextResponse.json({ error: 'Complete identity verification before registering a payout account.' }, { status: 403 })
+      await prisma.$transaction(async (tx) => {
+        await claimPayoutDestinationOwner(tx, { type, bankName: methodData.bank_name, accountNumber: methodData.account_number, identityHash: identity.identity_document_hash!, userId: user.id })
+        await tx.paymentMethod.create({ data: methodData })
+      })
+    } else {
+      await prisma.paymentMethod.create({ data: methodData })
+    }
 
     return NextResponse.json({ success: true, message: 'Payment method submitted for approval.' })
   } catch (error) {
     console.error('[PAYMENT METHODS POST]', error)
+    if (error instanceof PayoutDestinationOwnershipError || (error instanceof Error && error.message.includes('permanently registered to another verified person'))) {
+      return NextResponse.json({ error: 'This GCash or bank destination belongs to another verified person and cannot be reused.' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
 }
