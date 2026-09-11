@@ -54,6 +54,7 @@ model User {
   orders_sold                       Order[]                 @relation("OrderSeller")
   payment_methods                   PaymentMethod[]
   payouts_approved                  Payout[]                @relation("PayoutApprover")
+  payouts_released                  Payout[]                @relation("PayoutReleaser")
   payouts                           Payout[]                @relation("PayoutUser")
   pins_sold                         Pin[]                   @relation("PinSoldTo")
   pins_generated                    Pin[]                   @relation("PinGenerator")
@@ -1254,12 +1255,19 @@ model Payout {
   requested_at                        DateTime                          @default(now())
   processed_at                        DateTime?
   released_at                         DateTime?                         @db.Timestamptz(6)
+  disbursement_provider               String?                           @db.VarChar(80)
+  external_reference                  String?                           @db.VarChar(160)
+  disbursed_amount                    Decimal?                          @db.Decimal(10, 2)
+  disbursed_at                        DateTime?                         @db.Timestamptz(6)
+  released_by                         String?
   approver                            User?                             @relation("PayoutApprover", fields: [approved_by], references: [id])
+  releaser                            User?                             @relation("PayoutReleaser", fields: [released_by], references: [id])
   user                                User                              @relation("PayoutUser", fields: [user_id], references: [id])
   direct_referral_payout_consumptions DirectReferralPayoutConsumption[]
 
-  @@map("payouts")
+  @@unique([disbursement_provider, external_reference])
   @@index([batch_id, status])
+  @@map("payouts")
 }
 
 model PasswordResetToken {
@@ -1808,6 +1816,20 @@ model PaymentMethod {
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("payment_methods")
+}
+
+// Permanent ownership boundary for reseller payout destinations. Only a hash
+// of the provider/account tuple is stored; one verified identity may reuse the
+// destination across its allowed accounts, but another identity cannot claim it.
+model PayoutDestinationOwner {
+  destination_hash    String   @id @db.VarChar(64)
+  identity_hash       String   @db.VarChar(64)
+  first_registered_by String
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([identity_hash])
+  @@map("payout_destination_owners")
 }
 
 model SystemSetting {

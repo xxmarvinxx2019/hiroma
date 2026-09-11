@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { releasePayoutFunds } from '@/app/lib/payoutFunds'
 import { generatePayoutTransactionNumber } from '@/app/lib/payoutTransactionNumber'
+import { maskPayoutDestination } from '@/app/lib/payoutDestination'
 
 function isPayoutSourceAllocationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -69,17 +70,20 @@ export async function GET(req: NextRequest) {
     ])
 
     // Fetch new columns separately via raw SQL (safe if columns don't exist yet)
-    const extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null }> = {}
+    const extraData: Record<string, { transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null; disbursement_provider: string | null; external_reference: string | null; disbursed_amount: string | null; disbursed_at: string | null; released_at: string | null }> = {}
     try {
-      const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null }[]>`
-        SELECT id, transaction_number, cutoff_date, payout_date, batch_id, notes FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})
+      const extras = await prisma.$queryRaw<{ id: string; transaction_number: string | null; cutoff_date: string | null; payout_date: string | null; batch_id: string | null; notes: string | null; disbursement_provider: string | null; external_reference: string | null; disbursed_amount: string | null; disbursed_at: string | null; released_at: string | null }[]>`
+        SELECT id, transaction_number, cutoff_date, payout_date, batch_id, notes,
+               disbursement_provider, external_reference, disbursed_amount::text,
+               disbursed_at::text, released_at::text
+        FROM payouts WHERE id::text = ANY(${payouts.map(p => p.id)})
       `
-      extras.forEach((e) => { extraData[e.id] = { transaction_number: e.transaction_number, cutoff_date: e.cutoff_date ? String(e.cutoff_date) : null, payout_date: e.payout_date ? String(e.payout_date) : null, batch_id: e.batch_id, notes: e.notes } })
+      extras.forEach((e) => { extraData[e.id] = { ...e, cutoff_date: e.cutoff_date ? String(e.cutoff_date) : null, payout_date: e.payout_date ? String(e.payout_date) : null } })
     } catch {
       // Columns don't exist yet — run migration SQL to add them
     }
 
-    const enrichedPayouts = payouts.map((p) => ({ ...p, ...(extraData[p.id] || { transaction_number: null, cutoff_date: null, payout_date: null, batch_id: null, notes: null }) }))
+    const enrichedPayouts = payouts.map((p) => ({ ...p, payment_reference: maskPayoutDestination(p.payment_reference), ...(extraData[p.id] || { transaction_number: null, cutoff_date: null, payout_date: null, batch_id: null, notes: null, disbursement_provider: null, external_reference: null, disbursed_amount: null, disbursed_at: null, released_at: null }) }))
 
     return NextResponse.json({
       payouts: enrichedPayouts,

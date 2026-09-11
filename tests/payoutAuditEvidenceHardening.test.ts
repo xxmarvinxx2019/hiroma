@@ -11,6 +11,7 @@ const migration = readFileSync(
 const adminRoute = readFileSync('src/app/api/admin/payouts/route.ts', 'utf8')
 const requestRoute = readFileSync('src/app/api/reseller/wallet/route.ts', 'utf8')
 const releaseRoute = readFileSync('src/app/api/cron/release-payouts/route.ts', 'utf8')
+const batchReleaseRoute = readFileSync('src/app/api/admin/payouts/batch/route.ts', 'utf8')
 
 test('legacy payout audit chains are proved before the unique lifecycle-action boundary is installed', () => {
   const lock = migration.indexOf('LOCK TABLE')
@@ -68,7 +69,8 @@ test('deferred checks support the existing state-first audit-second order and ex
   assert.ok(requestRoute.indexOf('const created = await tx.payout.create') < requestRoute.indexOf("activity_type: 'payout_requested'"))
   assert.ok(adminRoute.indexOf("status: 'approved'") < adminRoute.indexOf("activity_type: 'payout_approved'"))
   assert.ok(adminRoute.indexOf("status: 'rejected'") < adminRoute.indexOf("activity_type: 'payout_rejected'"))
-  assert.ok(releaseRoute.indexOf("status: 'released'") < releaseRoute.indexOf("activity_type: 'payout_released'"))
+  assert.match(batchReleaseRoute, /prisma\.\$transaction[\s\S]*activity_type: 'payout_released'[\s\S]*status: 'released'/)
+  assert.doesNotMatch(releaseRoute, /status:\s*'released'/)
   assert.match(migration, /Legacy stage timestamps predate database authorship/)
   assert.match(migration, /audit\."metadata" \? 'reseller_id'/)
   assert.match(migration, /NEW\."metadata"->>'reseller_id' IS DISTINCT FROM payout_row\."user_id"/)
@@ -87,8 +89,8 @@ test('all payout routes write the canonical metadata inside their state transact
     adminRoute,
     /prisma\.\$transaction[\s\S]*activity_type: 'payout_rejected'[\s\S]*metadata: \{ payout_id, reseller_id: payout\.user_id, amount: Number\(payout\.amount\), notes: notes \|\| null \}/,
   )
-  assert.match(releaseRoute, /activity_type: 'payout_released'[\s\S]*reseller_id: payout\.user_id/)
-  assert.match(releaseRoute, /activity_type: 'payout_released'[\s\S]*actor_type: 'system'/)
+  assert.match(batchReleaseRoute, /activity_type: 'payout_released'[\s\S]*reseller_id: payout\.user_id/)
+  assert.match(batchReleaseRoute, /activity_type: 'payout_released'[\s\S]*actor_type: 'system'/)
 })
 
 test('payout transaction numbers are collision-free for distinct payout IDs and stable on retry', () => {

@@ -16,6 +16,12 @@ interface PayoutDetail {
   notes:              string | null
   requested_at:       string
   processed_at:       string | null
+  disbursement_provider: string | null
+  external_reference: string | null
+  disbursed_amount: string | null
+  disbursed_at: string | null
+  released_at: string | null
+  released_by_name: string | null
   user: {
     full_name:  string
     username:   string
@@ -28,6 +34,12 @@ interface PayoutDetail {
 
 const fmt     = (n: number) => `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtDate = (d: string)  => new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+const maskDestination = (value: string | null) => {
+  if (!value) return '—'
+  const parts = value.split('·').map((part) => part.trim())
+  const account = parts.at(-1) || ''
+  return [...parts.slice(0, -1), account.length > 4 ? `*******${account.slice(-4)}` : '****'].join(' · ')
+}
 
 const STATUS_STEPS = [
   { key: 'pending',  label: 'Requested', icon: '📋', desc: 'Payout request submitted and awaiting admin review.' },
@@ -179,7 +191,7 @@ export default function AdminPayoutDetailPage() {
             {payout.payment_reference && (
               <div className="flex justify-between">
                 <span className="text-xs text-gray-400">Reference</span>
-                <span className="text-xs font-mono text-[#0D1B3E]">{payout.payment_reference}</span>
+                <span className="text-xs font-mono text-[#0D1B3E]">{maskDestination(payout.payment_reference)}</span>
               </div>
             )}
             {payout.transaction_number && (
@@ -224,6 +236,12 @@ export default function AdminPayoutDetailPage() {
               <div className="pt-2 border-t border-[#0D1B3E]/8">
                 <p className="text-xs text-gray-400 mb-1">Notes</p>
                 <p className="text-xs text-[#0D1B3E]">{payout.notes}</p>
+              </div>
+            )}
+            {payout.status === 'released' && (
+              <div className="rounded-xl border border-green-100 bg-green-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-green-700">External disbursement evidence</p>
+                <div className="mt-2 space-y-1 text-xs text-[#0D1B3E]"><p><b>Provider:</b> {payout.disbursement_provider || '—'}</p><p><b>Bank/GCash reference:</b> <span className="font-mono">{payout.external_reference || '—'}</span></p><p><b>Amount sent:</b> {payout.disbursed_amount ? fmt(Number(payout.disbursed_amount)) : '—'}</p><p><b>Transaction time:</b> {payout.disbursed_at ? fmtDate(payout.disbursed_at) : '—'}</p><p><b>Recorded by:</b> {payout.released_by_name || '—'}</p></div>
               </div>
             )}
           </div>
