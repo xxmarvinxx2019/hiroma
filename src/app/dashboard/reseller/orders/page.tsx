@@ -25,6 +25,11 @@ interface Order {
   payment_method:    string | null
   payment_reference: string | null
   payment_status:    string | null
+  cancelled_at: string | null
+  cancelled_by_actor_id: string | null
+  cancelled_by_name: string | null
+  cancelled_by_role: string | null
+  cancellation_reason: string | null
   fulfillment_method?: string
   shipping_status?: string | null
   shipping_fee?: number
@@ -1153,8 +1158,9 @@ export default function ResellerOrdersPage() {
                   <div className="rounded-xl bg-[#fdecea] border border-[#e05252]/20 px-4 py-3 flex items-center gap-3">
                     <span className="w-9 h-9 rounded-full bg-[#e05252] text-white flex items-center justify-center font-bold">×</span>
                     <div>
-                      <p className="text-xs font-semibold text-[#a03030]">This order was cancelled</p>
-                      <p className="text-[10px] text-[#a03030]/70 mt-0.5">No further processing or delivery will occur.</p>
+                      <p className="text-xs font-semibold text-[#a03030]">{selectedOrder.cancelled_by_role === 'reseller' ? 'Cancelled by you' : selectedOrder.cancelled_by_name ? `Cancelled by ${selectedOrder.cancelled_by_role?.replaceAll('_', ' ') || 'authorized staff'} — ${selectedOrder.cancelled_by_name}` : 'Cancellation attribution unavailable (legacy order)'}</p>
+                      {selectedOrder.cancelled_at && <p className="text-[10px] text-[#a03030]/70 mt-0.5">{new Date(selectedOrder.cancelled_at).toLocaleString('en-PH')}</p>}
+                      <p className="text-[10px] text-[#a03030]/70 mt-0.5">{selectedOrder.cancellation_reason || 'No cancellation reason recorded.'}</p>
                     </div>
                   </div>
                 ) : (

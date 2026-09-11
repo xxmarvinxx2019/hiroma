@@ -8,6 +8,7 @@ const migration = read('prisma/migrations/20260903130000_harden_pin_and_product_
 const adminPins = read('src/app/api/admin/pins/route.ts')
 const pinTransfers = read('src/app/api/pin-transfers/[id]/route.ts')
 const pinRequests = read('src/app/api/pin-requests/route.ts')
+const pinRequestPayments = read('src/app/api/pin-requests/[id]/payment/route.ts')
 const adminInventory = read('src/app/api/admin/inventory/route.ts')
 const productReceiving = read('src/app/api/inventory/transfers/[id]/route.ts')
 const pinSales = read('src/app/api/admin/pins/sales/route.ts')
@@ -43,7 +44,9 @@ test('Branch receiving is all-or-nothing and only then activates transferred PIN
 
 test('paid requests are City-only and record the actual approval actor', () => {
   assert.match(pinRequests, /acquisitionTier === 'branch'/)
-  assert.match(pinRequests, /\['gcash', 'bank_transfer'\]\.includes\(paymentMethod\)/)
+  assert.match(pinRequests, /type: \{ in: \['gcash', 'bank_transfer'\] \}/)
+  assert.match(pinRequestPayments, /payment_status: 'payment_submitted'/)
+  assert.match(pinRequestPayments, /status: action === 'verify' \? 'verified' : 'rejected'/)
   assert.match(pinRequests, /generated_by_actor_id: actorId/)
   assert.match(pinRequests, /approvedByActorId: actorId/)
   assert.match(migration, /New PIN requests require an active City Distributor and complete electronic payment evidence/)

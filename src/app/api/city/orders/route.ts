@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
 import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { cityOrderListScope } from '@/app/lib/orderSecurity'
@@ -152,6 +153,11 @@ export async function GET(req: NextRequest) {
           payment_method:    true,
           payment_reference: true,
           payment_status:    true,
+          cancelled_at: true,
+          cancelled_by_actor_id: true,
+          cancelled_by_name: true,
+          cancelled_by_role: true,
+          cancellation_reason: true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -348,7 +354,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status, payment_status } = await req.json()
+    const { order_id, status, payment_status, cancellation_reason } = await req.json()
     const allowed = ['pending', 'processing', 'ready_for_pickup', 'delivered', 'cancelled']
 
     if (!order_id || (!status && !payment_status)) {
@@ -409,6 +415,13 @@ export async function PATCH(req: NextRequest) {
       select: { role: true },
     }))?.role === 'reseller'
 
+    const cancellingProfile = status === 'cancelled'
+      ? await prisma.distributorProfile.findUnique({
+          where: { user_id: user.id },
+          select: { dist_level: true },
+        })
+      : null
+
     const cashCollectedAtPickup = status === 'delivered'
       && order.payment_method === 'cash_on_pickup'
       && order.payment_status !== 'paid'
@@ -420,6 +433,7 @@ export async function PATCH(req: NextRequest) {
           data: {
             status,
             ...(payment_status && { payment_status }),
+            ...(status === 'cancelled' && buildOrderCancellationEvidence(user, cancellation_reason, cancellingProfile?.dist_level || 'city')),
             ...(cashCollectedAtPickup && { payment_status: 'paid' }),
             ...(status === 'delivered' && { delivered_at: new Date() }),
             ...((payment_status === 'paid' || cashCollectedAtPickup) && order.payment_status !== 'paid' && { paid_at: new Date() }),

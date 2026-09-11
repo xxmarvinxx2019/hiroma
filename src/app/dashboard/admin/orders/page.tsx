@@ -28,6 +28,11 @@ interface Order {
   payment_sender_name: string | null
   payment_datetime:    string | null
   payment_status:      string | null
+  cancelled_at: string | null
+  cancelled_by_actor_id: string | null
+  cancelled_by_name: string | null
+  cancelled_by_role: string | null
+  cancellation_reason: string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
@@ -478,6 +483,15 @@ export default function AdminOrdersPage() {
                   <span className="text-base font-extrabold text-[#0D1B3E]">₱{Number(selectedOrder.total_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
+
+              {selectedOrder.status === 'cancelled' && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+                  <p className="text-[10px] font-bold uppercase tracking-wide">Cancellation audit</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedOrder.cancelled_by_name ? `Cancelled by ${selectedOrder.cancelled_by_role?.replaceAll('_', ' ') || 'authorized actor'} — ${selectedOrder.cancelled_by_name}` : 'Cancellation attribution unavailable (legacy order)'}</p>
+                  {selectedOrder.cancelled_at && <p className="mt-1 text-xs">{new Date(selectedOrder.cancelled_at).toLocaleString('en-PH')}</p>}
+                  <p className="mt-1 text-xs">{selectedOrder.cancellation_reason || 'No cancellation reason recorded.'}</p>
+                </div>
+              )}
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-[#010521] p-4 text-white">

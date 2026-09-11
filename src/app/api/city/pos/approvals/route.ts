@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
@@ -84,7 +85,7 @@ export async function PATCH(req: NextRequest) {
             data: { quantity: { increment: item.quantity } },
           })
         }
-        await tx.order.update({ where: { id: transaction.order.id }, data: { status: 'cancelled', payment_status: 'rejected' } })
+        await tx.order.update({ where: { id: transaction.order.id }, data: { status: 'cancelled', payment_status: 'rejected', ...buildOrderCancellationEvidence(user, notes, user.is_staff ? 'outlet_staff' : 'outlet') } })
       } else if (action === 'approve') {
         await tx.order.update({ where: { id: transaction.order.id }, data: { status: 'delivered', payment_status: 'paid', paid_at: new Date(), delivered_at: new Date() } })
         await recordInventoryOutEvents(tx, {

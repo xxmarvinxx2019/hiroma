@@ -10,6 +10,10 @@ import Pagination, { PaginationMeta } from "@/app/components/ui/Pagination"
 interface Reseller {
   id: string
   full_name: string
+  first_name: string | null
+  middle_name: string | null
+  last_name: string | null
+  name_suffix: string | null
   username: string
   email: string | null
   mobile: string
@@ -36,6 +40,8 @@ interface Stats {
   inactive: number
 }
 
+type ResellerSort = 'latest' | 'oldest' | 'name_asc' | 'name_desc'
+
 // ============================================================
 // PAGE
 // ============================================================
@@ -44,6 +50,8 @@ export default function ResellersPage() {
   const [resellers, setResellers] = useState<Reseller[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<ResellerSort>('latest')
+  const [pageSize, setPageSize] = useState(15)
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [selected, setSelected]   = useState<Reseller | null>(null)
   const [showEdit, setShowEdit]     = useState(false)
@@ -63,30 +71,45 @@ export default function ResellersPage() {
 
   // Debounce search
   useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), 400)
+    const t = setTimeout(() => {
+      setPage(1)
+      setSearch(searchInput.trim())
+    }, 400)
     return () => clearTimeout(t)
   }, [searchInput])
 
-  useEffect(() => { setPage(1) }, [statusFilter, search])
-
-  const fetchResellers = useCallback(() => {
+  const fetchResellers = useCallback((signal?: AbortSignal) => {
     setLoading(true)
     const params = new URLSearchParams({
-      page: String(page), pageSize: '15',
+      page: String(page), pageSize: String(pageSize), sort,
       ...(statusFilter !== 'all' && { status: statusFilter }),
       ...(search && { search }),
     })
-    fetch(`/api/admin/resellers?${params}`)
-      .then((r) => r.json())
+    fetch(`/api/admin/resellers?${params}`, { signal })
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || 'Unable to load resellers.')
+        return data
+      })
       .then((data) => {
         setResellers(data.resellers || [])
         if (data.meta)  setMeta(data.meta)
         if (data.stats) setStats(data.stats)
-        setLoading(false)
       })
-  }, [page, statusFilter, search])
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setResellers([])
+      })
+      .finally(() => {
+        if (!signal?.aborted) setLoading(false)
+      })
+  }, [page, pageSize, sort, statusFilter, search])
 
-  useEffect(() => { fetchResellers() }, [fetchResellers])
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchResellers(controller.signal)
+    return () => controller.abort()
+  }, [fetchResellers])
 
   const filtered = resellers
 
@@ -219,18 +242,35 @@ export default function ResellersPage() {
       <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
 
         {/* Search & Filter */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-[#0D1B3E]/8">
           <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, username or city..."
-            className="flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name, username or mobile..."
+            className="min-w-64 flex-1 bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400"
           />
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            Sort
+            <select value={sort} onChange={(e) => { setPage(1); setSort(e.target.value as ResellerSort) }} className="rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
+              <option value="latest">Latest registered</option>
+              <option value="oldest">Oldest registered</option>
+              <option value="name_asc">Last name A–Z</option>
+              <option value="name_desc">Last name Z–A</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            Rows
+            <select value={pageSize} onChange={(e) => { setPage(1); setPageSize(Number(e.target.value)) }} className="rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]">
+              <option value={15}>15</option>
+              <option value={30}>30</option>
+              <option value={50}>50</option>
+            </select>
+          </label>
           <div className="flex gap-1">
             {(['all', 'active', 'inactive'] as const).map((f) => (
               <button
                 key={f}
-                onClick={() => setStatusFilter(f)}
+                onClick={() => { setPage(1); setStatusFilter(f) }}
                 className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   statusFilter === f
                     ? 'bg-[#010521] text-white'

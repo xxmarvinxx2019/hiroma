@@ -24,6 +24,11 @@ interface Order {
   payment_method:      string | null
   payment_reference:   string | null
   payment_status:      string | null
+  cancelled_at: string | null
+  cancelled_by_actor_id: string | null
+  cancelled_by_name: string | null
+  cancelled_by_role: string | null
+  cancellation_reason: string | null
   buyer:  { full_name: string; username: string; role: string }
   seller: { full_name: string; username: string; role: string }
   items: OrderItem[]
