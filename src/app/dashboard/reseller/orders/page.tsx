@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
+import OrderConversation from '@/app/components/orders/OrderConversation'
+import OrderPaymentPanel from '@/app/components/orders/OrderPaymentPanel'
 
 // ============================================================
 // TYPES
@@ -25,12 +27,17 @@ interface Order {
   payment_method:    string | null
   payment_reference: string | null
   payment_status:    string | null
+  payment_method_id: string | null
+  payment_due_at: string | null
+  payment_destination_snapshot: { type?: string; account_name?: string; account_number?: string; bank_name?: string | null } | null
   cancelled_at: string | null
   cancelled_by_actor_id: string | null
   cancelled_by_name: string | null
   cancelled_by_role: string | null
   cancellation_reason: string | null
   fulfillment_method?: string
+  pickup_scheduled_at?: string | null
+  pickup_schedule_timezone?: string | null
   shipping_status?: string | null
   shipping_fee?: number
   seller: { full_name: string; username: string; role: string }
@@ -155,9 +162,11 @@ function CreateOrderModal({
   const [error, setError]                 = useState('')
   const [search, setSearch]               = useState('')
   const [loadingProducts, setLoadingProducts] = useState(false)
-  const [paymentMethod, setPaymentMethod]     = useState('cash_on_pickup')
-  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentMethodId, setPaymentMethodId] = useState('cash_on_pickup')
+  const [acceptsCash, setAcceptsCash] = useState(false)
+  const [pickupScheduledAt, setPickupScheduledAt] = useState('')
   const [paymentMethods, setPaymentMethods]   = useState<PaymentMethodInfo[]>([])
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null)
   const recommendationRequestId = useRef(0)
   // The chosen fulfillment method is the source of truth. This prevents a late
   // pickup-recommendation response from changing a nationwide order's seller.
@@ -313,7 +322,7 @@ function CreateOrderModal({
   }, [addressSource, deliveryAddress, deliveryLocation, fulfillmentMethod, loadFulfillmentRecommendation])
 
   useEffect(() => {
-    if (!fulfillmentSellerId) { setProducts([]); setLoadingProducts(false); setPaymentMethods([]); return }
+    if (!fulfillmentSellerId) { setProducts([]); setLoadingProducts(false); setPaymentMethods([]); setAcceptsCash(false); return }
     setLoadingProducts(true)
     // Fetch products and payment methods in parallel
     Promise.all([
@@ -330,10 +339,11 @@ function CreateOrderModal({
     ]).then(([prodData, pmData]) => {
       setProducts(prodData.products || [])
       setPaymentMethods(pmData.methods || [])
+      setAcceptsCash(Boolean(pmData.accepts_cash_on_pickup))
+      setPaymentMethodId(pmData.accepts_cash_on_pickup ? 'cash_on_pickup' : (pmData.methods?.[0]?.id || ''))
     }).finally(() => setLoadingProducts(false))
     setCart([])
-    setPaymentMethod(fulfillmentMethod === 'nationwide_delivery' ? 'payment_after_shipping_quote' : 'cash_on_pickup')
-    setPaymentReference('')
+    setPaymentMethodId(fulfillmentMethod === 'nationwide_delivery' ? 'payment_after_shipping_quote' : '')
   }, [fulfillmentSellerId, fulfillmentMethod, deliveryAddress, deliveryLocation.region_name, deliveryLocation.province_name, deliveryLocation.city_muni_name, deliveryLocation.barangay_name])
 
   const filtered = products.filter((p) =>
@@ -377,7 +387,7 @@ function CreateOrderModal({
       setLoadingDists(true)
       await loadFulfillmentRecommendation(deliveryAddress, addressSource === 'manual' ? deliveryLocation : undefined)
     } else if (!nationwideSeller) {
-      setError('Hiroma Main is temporarily unavailable for nationwide delivery.'); return
+      setError('Hiroma Main is temporarily unavailable for door-to-door delivery.'); return
     }
     setStep('order')
   }
@@ -437,10 +447,11 @@ function CreateOrderModal({
     if (!fulfillmentSellerId) { setError('No active fulfillment location is available.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
     if (hasQuantityErrors) { setError('Correct the highlighted quantity before placing the order.'); return }
-    if (fulfillmentMethod === 'partner_pickup' && paymentMethod !== 'cash_on_pickup' && !paymentReference.trim()) {
-      setError('Please enter the payment reference number.')
+    if (fulfillmentMethod === 'partner_pickup' && !pickupScheduledAt) {
+      setError('Select your preferred pickup date and time.')
       return
     }
+    if (fulfillmentMethod === 'partner_pickup' && !paymentMethodId) { setError('This outlet has no payment method available.'); return }
     setSubmitting(true)
     setError('')
     const res = await fetch('/api/reseller/orders', {
@@ -457,8 +468,8 @@ function CreateOrderModal({
           barangay: deliveryLocation.barangay_name,
         },
         notes,
-        payment_method:    paymentMethod,
-        payment_reference: paymentReference.trim() || null,
+        payment_method_id: paymentMethodId,
+        pickup_scheduled_at: fulfillmentMethod === 'partner_pickup' ? pickupScheduledAt : null,
         items: cart.map((c) => ({
           product_id: c.product.id,
           quantity:   c.quantity,
@@ -468,8 +479,13 @@ function CreateOrderModal({
     })
     const data = await res.json()
     setSubmitting(false)
-    if (res.ok) onSuccess()
+    if (res.ok) setCreatedOrder(data.order)
     else setError(data.error || 'Something went wrong.')
+  }
+
+  if (createdOrder) {
+    const destination = createdOrder.payment_destination_snapshot
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><h2 className="text-lg font-bold text-[#0D1B3E]">Order placed</h2><p className="mt-1 text-xs text-gray-500">{createdOrder.order_number || `Order #${createdOrder.id.slice(0, 8)}`}</p>{destination ? <div className="mt-5 rounded-xl border border-[#C9A84C]/30 bg-[#fef9ee] p-4"><p className="text-xs font-bold text-[#0D1B3E]">Pay to this verified account</p><p className="mt-2 text-sm font-semibold">{destination.bank_name || (destination.type === 'gcash' ? 'GCash' : 'Bank Transfer')}</p><p className="text-sm">{destination.account_name}</p><p className="font-mono text-base font-bold">{destination.account_number}</p><p className="mt-3 text-xs text-[#a03030]">Pay the exact ₱{Number(createdOrder.total_amount).toLocaleString()} and upload proof before {createdOrder.payment_due_at ? new Date(createdOrder.payment_due_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : 'the deadline'}.</p></div> : <p className="mt-5 rounded-xl bg-[#e8f7ef] p-4 text-sm text-[#1a7a4a]">Cash on Pickup selected. No advance payment proof is required.</p>}<button onClick={() => { onSuccess(); onClose() }} className="mt-5 w-full rounded-xl bg-[#010521] py-3 text-sm font-semibold text-white">View my orders</button></div></div>
   }
 
   if (step === 'address') {
@@ -482,12 +498,12 @@ function CreateOrderModal({
           </div>
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button type="button" onClick={() => { setFulfillmentMethod('partner_pickup'); setSelectedDistId(recommendedDist?.id || ''); setPaymentMethod('cash_on_pickup'); setPaymentReference(''); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'partner_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
+              <button type="button" onClick={() => { setFulfillmentMethod('partner_pickup'); setSelectedDistId(recommendedDist?.id || ''); setPaymentMethodId(''); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'partner_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
                 <span className="block text-sm font-semibold text-[#0D1B3E]">📍 Partner Pickup</span>
                 <span className="block text-xs leading-5 text-gray-600 mt-1">Pick up from the nearest available Hiroma partner or branch. No courier shipping fee.</span>
               </button>
-              <button type="button" onClick={() => { setFulfillmentMethod('nationwide_delivery'); setSelectedDistId(nationwideSeller?.id || ''); setPaymentMethod('payment_after_shipping_quote'); setPaymentReference(''); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'nationwide_delivery' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
-                <span className="block text-sm font-semibold text-[#0D1B3E]">🚚 Nationwide Delivery</span>
+              <button type="button" onClick={() => { setFulfillmentMethod('nationwide_delivery'); setSelectedDistId(nationwideSeller?.id || ''); setPaymentMethodId('payment_after_shipping_quote'); setError('') }} className={`text-left rounded-xl border-2 p-4 transition-colors ${fulfillmentMethod === 'nationwide_delivery' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/25'}`}>
+                <span className="block text-sm font-semibold text-[#0D1B3E]">🚚 Door-to-Door Delivery</span>
                 <span className="block text-xs leading-5 text-gray-600 mt-1">Hiroma Main processes and ships the order. Shipping is quoted before payment.</span>
               </button>
             </div>
@@ -528,7 +544,7 @@ function CreateOrderModal({
               </div>
             )}
             {((addressSource === 'registered' && deliveryAddress.trim()) || (addressSource === 'manual' && deliveryLocation.city_muni_code)) && <div className="rounded-xl border border-[#C9A84C]/40 bg-[#fef9ee] px-4 py-3">
-              <p className="text-[10px] uppercase tracking-wide text-[#9a6f1e] font-semibold">{fulfillmentMethod === 'partner_pickup' ? 'Recommended Hiroma partner / branch' : 'Nationwide fulfillment'}</p>
+              <p className="text-[10px] uppercase tracking-wide text-[#9a6f1e] font-semibold">{fulfillmentMethod === 'partner_pickup' ? 'Recommended Hiroma partner / branch' : 'Door-to-door fulfillment'}</p>
               {fulfillmentMethod === 'nationwide_delivery' ? (nationwideSeller ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">Hiroma Main</p><p className="text-xs text-gray-600 mt-1">Your order goes directly to Hiroma Main. The courier and shipping fee will remain pending until an official quote is recorded.</p></> : <p className="text-xs text-[#a03030] mt-1">Hiroma Main is temporarily unavailable.</p>) : loadingDists ? <p className="text-xs text-gray-400 mt-1">Finding a nearby partner…</p> : recommendedDist ? <><p className="text-sm font-semibold text-[#0D1B3E] mt-1">{recommendedDist.full_name}</p><p className="text-xs text-gray-500">@{recommendedDist.username}{recommendedDist.distributor_profile?.coverage_area ? ` · ${recommendedDist.distributor_profile.coverage_area}` : ''}</p><p className="text-[11px] text-[#9a6f1e] mt-1.5">{recommendationLabel[recommendationBasis] || 'Available pickup partner'}</p>{pickupDistanceKm !== null && <p className="text-[11px] font-medium text-[#0D1B3E] mt-1">Approximately {pickupDistanceKm.toLocaleString(undefined, { maximumFractionDigits: 1 })} km from this address <span className="font-normal text-gray-500">(straight-line)</span></p>}<p className="text-[11px] text-gray-500 mt-1">Final stock is checked again before the order is placed.</p></> : <p className="text-xs text-[#a03030] mt-1">No active Hiroma partner or branch is available.</p>}
             </div>}
             {error && <p className="text-xs text-[#a03030]">{error}</p>}
@@ -551,7 +567,7 @@ function CreateOrderModal({
           <div>
             <h2 className="text-sm font-semibold text-[#0D1B3E]">Place New Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {fulfillmentMethod === 'nationwide_delivery' ? 'Nationwide Delivery · Fulfilled by Hiroma Main' : recommendedDist ? `Partner Pickup · ${recommendedDist.full_name}` : 'No pickup partner available'}
+              {fulfillmentMethod === 'nationwide_delivery' ? 'Door-to-Door Delivery · Fulfilled by Hiroma Main' : recommendedDist ? `Partner Pickup · ${recommendedDist.full_name}` : 'No pickup partner available'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
@@ -570,7 +586,7 @@ function CreateOrderModal({
 
               {/* Fulfillment distributor is selected from the delivery address; it is not the referral sponsor. */}
               <div>
-                <label className="block text-xs text-gray-500 mb-1">{fulfillmentMethod === 'partner_pickup' ? 'Hiroma pickup partner / branch' : 'Nationwide fulfillment center'}</label>
+                <label className="block text-xs text-gray-500 mb-1">{fulfillmentMethod === 'partner_pickup' ? 'Hiroma pickup partner / branch' : 'Door-to-door fulfillment center'}</label>
                 {loadingDists ? (
                   <div className="h-[58px] rounded-xl bg-[#F0F2F8] animate-pulse" />
                 ) : (
@@ -743,25 +759,32 @@ function CreateOrderModal({
               </div>
 
               {/* Payment method */}
+              {fulfillmentMethod === 'partner_pickup' && (
+                <div>
+                  <label className="mb-1 block text-xs text-gray-500">Preferred pickup date and time <span className="text-[#a03030]">*</span></label>
+                  <input type="datetime-local" value={pickupScheduledAt} onChange={(event) => { setPickupScheduledAt(event.target.value); setError('') }} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-2.5 py-2 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+                  <p className="mt-1 text-[10px] leading-4 text-gray-500">Philippine time · at least 15 minutes from now · up to 30 days ahead. Reserved units cannot be sold to walk-in customers.</p>
+                </div>
+              )}
+
               <div className={fulfillmentMethod === 'nationwide_delivery' ? 'hidden' : ''}>
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
-                  {/* Cash on pickup — always available */}
-                  <div onClick={() => { setPaymentMethod('cash_on_pickup'); setPaymentReference('') }}
+                  {acceptsCash && <div onClick={() => setPaymentMethodId('cash_on_pickup')}
                     className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${
-                      paymentMethod === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
+                      paymentMethodId === 'cash_on_pickup' ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
                     }`}>
                     <span className="text-sm">💵</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-[10px] font-medium text-[#0D1B3E]">Cash on Pickup</p>
                     </div>
-                    {paymentMethod === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
-                  </div>
+                    {paymentMethodId === 'cash_on_pickup' && <span className="text-[#C9A84C] text-xs">✓</span>}
+                  </div>}
                   {/* Approved payment methods */}
                   {paymentMethods.map((pm) => (
-                    <div key={pm.id} onClick={() => setPaymentMethod(pm.type)}
+                    <div key={pm.id} onClick={() => setPaymentMethodId(pm.id)}
                       className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border-2 cursor-pointer transition-colors ${
-                        paymentMethod === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
+                        paymentMethodId === pm.id ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'
                       }`}>
                       <span className="text-sm">{pm.type === 'gcash' ? '📱' : '🏦'}</span>
                       <div className="flex-1 min-w-0">
@@ -769,21 +792,11 @@ function CreateOrderModal({
                         {pm.bank_name && <p className="text-[9px] text-gray-400 truncate">{pm.bank_name}</p>}
                         <p className="text-[9px] text-gray-400 truncate">{pm.account_name} · {pm.account_number}</p>
                       </div>
-                      {paymentMethod === pm.type && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
+                      {paymentMethodId === pm.id && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
                     </div>
                   ))}
                 </div>
-                {/* Reference number */}
-                {paymentMethod !== 'cash_on_pickup' && (
-                  <div className="mt-2">
-                    <input
-                      value={paymentReference}
-                      onChange={(e) => setPaymentReference(e.target.value)}
-                      placeholder="Reference number *"
-                      className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#C9A84C] placeholder:text-gray-400"
-                    />
-                  </div>
-                )}
+                {paymentMethodId && paymentMethodId !== 'cash_on_pickup' && <p className="mt-2 rounded-lg bg-[#fef9ee] px-3 py-2 text-[10px] leading-4 text-[#7a5717]">Place the order first. You will then receive the exact verified account and up to 48 hours (or before pickup, whichever comes first) to pay and upload proof.</p>}
               </div>
 
               {fulfillmentMethod === 'nationwide_delivery' && (
@@ -794,12 +807,12 @@ function CreateOrderModal({
               )}
 
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Notes (optional)" rows={2}
+                placeholder="Message to City/Branch (optional)" aria-label="Initial message to City or Branch" rows={2}
                 className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-2 py-1.5 text-xs text-[#0D1B3E] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-gray-400 resize-none" />
 
               {error && <p className="text-xs text-[#a03030]">{error}</p>}
 
-              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || hasQuantityErrors}
+              <button onClick={handleSubmit} disabled={submitting || cart.length === 0 || hasQuantityErrors || (fulfillmentMethod === 'partner_pickup' && !pickupScheduledAt)}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium">
                 {submitting ? 'Placing...' : 'Place Order'}
               </button>
@@ -885,7 +898,7 @@ export default function ResellerOrdersPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#0D1B3E]">Shop &amp; My Orders</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Place a pickup or nationwide delivery order, then track it here.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Place a pickup or door-to-door delivery order, then track it here.</p>
         </div>
         <button onClick={() => setShowCreate(true)}
           className="bg-[#C9A84C] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#b8963e] transition-colors font-medium">
@@ -1080,6 +1093,7 @@ export default function ResellerOrdersPage() {
                 <p className="text-xs text-white/50 mt-1">
                   Placed on {new Date(selectedOrder.created_at).toLocaleString('en-PH')}
                 </p>
+                {selectedOrder.pickup_scheduled_at && <p className="mt-1 text-xs font-medium text-[#E8C96A]">Pickup: {new Date(selectedOrder.pickup_scheduled_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}</p>}
               </div>
               <button onClick={() => setSelectedOrder(null)}
                 className="relative w-9 h-9 rounded-xl bg-white/10 text-white/60 hover:text-white hover:bg-white/20 text-lg transition-colors">
@@ -1211,6 +1225,9 @@ export default function ResellerOrdersPage() {
                   <p className="text-xs text-[#7a5717] mt-1">{selectedOrder.notes}</p>
                 </div>
               )}
+
+              <OrderPaymentPanel orderId={selectedOrder.id} onChanged={() => void fetchOrders()} />
+              <OrderConversation orderId={selectedOrder.id} />
 
               <button onClick={() => setSelectedOrder(null)}
                 className="w-full bg-[#010521] text-white hover:bg-[#0D1B3E] text-sm font-medium py-3 rounded-xl hover:shadow-lg hover:shadow-[#0D1B3E]/15 transition-all">

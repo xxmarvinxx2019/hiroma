@@ -9,6 +9,7 @@ interface PaymentMethod {
   account_number: string
   bank_name:      string | null
   status:         string
+  is_enabled:     boolean
   created_at:     string
 }
 
@@ -36,6 +37,8 @@ export default function CityPaymentMethodsPage() {
   const [error, setError]           = useState('')
   const [success, setSuccess]       = useState('')
   const [deleting, setDeleting]     = useState<string | null>(null)
+  const [acceptsCash, setAcceptsCash] = useState(true)
+  const [savingControl, setSavingControl] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     type:           'gcash',
@@ -48,7 +51,7 @@ export default function CityPaymentMethodsPage() {
     setLoading(true)
     fetch('/api/payment-methods')
       .then((r) => r.json())
-      .then((d) => setMethods(d.methods || []))
+      .then((d) => { setMethods(d.methods || []); setAcceptsCash(Boolean(d.accepts_cash_on_pickup)) })
       .finally(() => setLoading(false))
   }
 
@@ -90,6 +93,15 @@ export default function CityPaymentMethodsPage() {
     if (res.ok) fetchMethods()
   }
 
+  const updateControl = async (body: Record<string, unknown>, key: string) => {
+    setSavingControl(key); setError(''); setSuccess('')
+    const res = await fetch('/api/payment-methods', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const data = await res.json()
+    setSavingControl(null)
+    if (!res.ok) setError(data.error || 'Unable to update payment acceptance.')
+    else { setSuccess('Payment acceptance settings updated.'); fetchMethods() }
+  }
+
   return (
     <div className="max-w-3xl mx-auto">
 
@@ -119,8 +131,13 @@ export default function CityPaymentMethodsPage() {
         <p className="text-xs text-gray-500">
           Submit your GCash or bank details below. Admin will review and approve them.
           Once approved, resellers ordering from you can select these as payment options.
-          Cash on pickup is always available by default.
+          You control whether Cash on Pickup and each approved account are offered at checkout.
         </p>
+      </div>
+
+      <div className="mb-4 flex items-center justify-between rounded-xl border border-[#0D1B3E]/8 bg-white p-4">
+        <div><p className="text-sm font-semibold text-[#0D1B3E]">💵 Accept Cash on Pickup</p><p className="mt-1 text-xs text-gray-500">When off, resellers must use one of your enabled approved accounts.</p></div>
+        <button type="button" disabled={savingControl === 'cash'} onClick={() => updateControl({ action: 'toggle_cash_on_pickup', enabled: !acceptsCash }, 'cash')} className={`rounded-full px-4 py-2 text-xs font-semibold ${acceptsCash ? 'bg-[#1a7a4a] text-white' : 'bg-gray-200 text-gray-600'}`}>{acceptsCash ? 'Enabled' : 'Disabled'}</button>
       </div>
 
       {/* Methods list */}
@@ -170,6 +187,7 @@ export default function CityPaymentMethodsPage() {
                       {deleting === m.id ? 'Removing...' : 'Remove'}
                     </button>
                   )}
+                  {m.status === 'approved' && <button type="button" disabled={savingControl === m.id} onClick={() => updateControl({ action: 'toggle_method', id: m.id, enabled: !m.is_enabled }, m.id)} className={`rounded-full px-3 py-1 text-[10px] font-semibold ${m.is_enabled ? 'bg-[#1a7a4a] text-white' : 'bg-gray-200 text-gray-600'}`}>{m.is_enabled ? 'Offered at checkout' : 'Not offered'}</button>}
                 </div>
               </div>
               {m.status === 'pending' && (

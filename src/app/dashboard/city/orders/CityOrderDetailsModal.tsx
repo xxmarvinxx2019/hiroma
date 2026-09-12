@@ -1,5 +1,8 @@
 'use client'
 
+import OrderConversation from '@/app/components/orders/OrderConversation'
+import OrderPaymentPanel from '@/app/components/orders/OrderPaymentPanel'
+
 interface CityOrderDetails {
   id: string
   order_number: string | null
@@ -12,6 +15,9 @@ interface CityOrderDetails {
   payment_method: string | null
   payment_reference: string | null
   payment_status: string | null
+  fulfillment_method: string
+  pickup_scheduled_at: string | null
+  pickup_schedule_timezone: string | null
   cancelled_at: string | null
   cancelled_by_actor_id: string | null
   cancelled_by_name: string | null
@@ -50,9 +56,12 @@ export default function CityOrderDetailsModal({ order, onClose }: { order: CityO
       </header>
       <div className="max-h-[calc(92vh-88px)] space-y-4 overflow-y-auto p-5">
         <div className="grid gap-4 md:grid-cols-2"><section className="rounded-2xl border border-[#0D1B3E]/8 bg-white p-4 shadow-sm"><p className="mb-2 text-[10px] uppercase tracking-wide text-gray-400">Buyer</p><p className="text-sm font-semibold text-[#0D1B3E]">{counterparty.full_name}</p><p className="text-xs text-gray-400">@{counterparty.username}</p></section><section className="rounded-2xl border border-[#0D1B3E]/8 bg-white p-4 shadow-sm"><p className="mb-2 text-[10px] uppercase tracking-wide text-gray-400">Payment</p><p className="text-sm font-medium text-[#0D1B3E]">{PAYMENT_LABEL[order.payment_method || 'cash_on_pickup'] || order.payment_method || 'Not specified'}</p><p className={`mt-1 text-xs ${order.payment_status === 'paid' ? 'text-[#1a7a4a]' : 'text-[#9a6f1e]'}`}>{order.payment_status === 'paid' ? '✓ Paid' : 'Pending payment'}</p>{order.payment_reference && <p className="mt-1 text-xs text-gray-400">Reference: {order.payment_reference}</p>}</section></div>
+        {order.pickup_scheduled_at && <section className="rounded-2xl border border-[#C9A84C]/30 bg-[#fef9ee] p-4 shadow-sm"><p className="text-[10px] uppercase tracking-wide text-[#9a6f1e]">Scheduled pickup</p><p className="mt-1 text-sm font-bold text-[#0D1B3E]">{new Date(order.pickup_scheduled_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'full', timeStyle: 'short' })}</p><p className="mt-1 text-xs text-gray-600">Prepare these reserved items before the reseller arrives. They are excluded from walk-in available stock.</p></section>}
         <section className="overflow-hidden rounded-2xl border border-[#0D1B3E]/8 bg-white shadow-sm"><div className="flex items-center justify-between border-b border-[#0D1B3E]/6 px-4 py-3"><p className="text-xs font-semibold text-[#0D1B3E]">Order Items</p><span className="rounded-full bg-[#eef0f8] px-2 py-1 text-[10px] text-[#0D1B3E]">{order.items.reduce((total, item) => total + item.quantity, 0)} units</span></div>{order.items.map((item, index) => <div key={`${item.product.name}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#0D1B3E]/5 px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0F2F8]">📦</span><div><p className="text-xs font-medium text-[#0D1B3E]">{item.product.name}</p><p className="text-[10px] text-gray-400">₱{Number(item.unit_price).toLocaleString()} × {item.quantity}</p></div></div><p className="text-xs font-semibold text-[#0D1B3E]">₱{Number(item.subtotal).toLocaleString()}</p></div>)}<div className="flex items-center justify-between bg-gradient-to-r from-[#F8F9FC] to-[#fef9ee] px-4 py-4"><p className="text-sm font-semibold text-[#0D1B3E]">Total Amount</p><p className="text-lg font-bold text-[#C9A84C]">₱{Number(order.total_amount).toLocaleString()}</p></div></section>
         <section className="rounded-2xl border border-[#0D1B3E]/8 bg-white p-5 shadow-sm"><p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Order journey</p><p className="mt-0.5 text-sm font-semibold text-[#0D1B3E]">{order.status === 'cancelled' ? 'Order cancelled' : 'Track order progress'}</p>{order.status === 'cancelled' ? <div className="mt-4 rounded-xl border border-[#e05252]/20 bg-[#fdecea] px-4 py-3 text-[#a03030]"><p className="text-xs font-semibold">{cancellationActorLabel(order)}</p>{order.cancelled_at && <p className="mt-1 text-[10px] opacity-75">{new Date(order.cancelled_at).toLocaleString('en-PH')}</p>}<p className="mt-1 text-[10px] opacity-75">{order.cancellation_reason || 'No cancellation reason recorded.'}</p></div> : <div className="relative mt-5 grid grid-cols-4 gap-1"><div className="absolute left-[12.5%] right-[12.5%] top-5 h-1 rounded-full bg-[#e6e8ef]" />{steps.map(([status, label, description], index) => { const reached = index <= currentIndex; const current = index === currentIndex; return <div key={status} className="relative z-10 text-center"><div className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full border-4 border-white text-sm font-bold shadow-sm ${reached ? 'bg-[#C9A84C] text-white' : 'bg-[#e6e8ef] text-gray-400'} ${current ? 'ring-4 ring-[#C9A84C]/15' : ''}`}>{reached ? '✓' : index + 1}</div><p className={`mt-2 text-[10px] font-semibold sm:text-xs ${reached ? 'text-[#0D1B3E]' : 'text-gray-300'}`}>{label}</p><p className="mt-0.5 hidden text-[9px] text-gray-400 sm:block">{description}</p></div> })}</div>}</section>
         {order.notes && <section className="rounded-xl border border-[#C9A84C]/30 bg-[#fef9ee] px-4 py-3"><p className="text-[10px] uppercase text-[#9a6f1e]">Order note</p><p className="mt-1 text-xs text-[#7a5717]">{order.notes}</p></section>}
+        {!order.is_non_member_sale && <OrderPaymentPanel orderId={order.id} />}
+        {!order.is_non_member_sale && <OrderConversation orderId={order.id} />}
         <button type="button" onClick={onClose} className="w-full rounded-xl bg-[#010521] py-3 text-sm font-medium text-white hover:bg-[#0D1B3E]">Close</button>
       </div>
     </div>

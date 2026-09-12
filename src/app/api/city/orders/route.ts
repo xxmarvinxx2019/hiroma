@@ -151,8 +151,14 @@ export async function GET(req: NextRequest) {
           customer_name:     true,
           notes:             true,
           payment_method:    true,
+          payment_method_id: true,
+          payment_due_at: true,
+          payment_destination_snapshot: true,
           payment_reference: true,
           payment_status:    true,
+          fulfillment_method: true,
+          pickup_scheduled_at: true,
+          pickup_schedule_timezone: true,
           cancelled_at: true,
           cancelled_by_actor_id: true,
           cancelled_by_name: true,
@@ -385,6 +391,9 @@ export async function PATCH(req: NextRequest) {
     if (payment_status && !canUpdateOrderPaymentStatus(user.id, order)) {
       return NextResponse.json({ error: 'Only the seller can confirm payment.' }, { status: 403 })
     }
+    if (payment_status && ['gcash', 'bank_transfer'].includes(order.payment_method || '')) {
+      return NextResponse.json({ error: 'Electronic payments must be verified from their submitted proof.' }, { status: 403 })
+    }
 
     // Allow payment_status updates even on finalized orders
     if ((order.status === 'delivered' || order.status === 'cancelled') && status) {
@@ -404,6 +413,10 @@ export async function PATCH(req: NextRequest) {
 
     if (status === 'processing' && order.payment_method !== 'cash_on_pickup' && order.payment_status !== 'paid') {
       return NextResponse.json({ error: 'Confirm payment before processing this order.' }, { status: 400 })
+    }
+    const electronicPayment = ['gcash', 'bank_transfer'].includes(order.payment_method || '')
+    if (status === 'cancelled' && electronicPayment && ['verification_pending', 'paid'].includes(order.payment_status || '')) {
+      return NextResponse.json({ error: 'Resolve or refund the submitted electronic payment before cancelling this order.' }, { status: 409 })
     }
 
     if (order.buyer_id === user.id && order.seller_id !== user.id && status && status !== 'cancelled') {
@@ -429,7 +442,11 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.$transaction(async (tx) => {
       if (status) {
         const claimed = await tx.order.updateMany({
-          where: { id: order_id, status: order.status },
+          where: {
+            id: order_id,
+            status: order.status,
+            ...(status === 'cancelled' && electronicPayment ? { payment_status: { notIn: ['verification_pending', 'paid'] } } : {}),
+          },
           data: {
             status,
             ...(payment_status && { payment_status }),

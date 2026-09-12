@@ -574,7 +574,7 @@ export default function ResellerDashboardPage() {
           <div className="w-11 h-11 rounded-xl bg-[#C9A84C]/15 flex items-center justify-center text-2xl flex-shrink-0">🛒</div>
           <div>
             <p className="text-base font-bold text-[#0D1B3E]">Need to order Hiroma products?</p>
-            <p className="text-sm leading-5 text-gray-600 mt-1">Choose pickup from a nearby Hiroma partner or request nationwide delivery from Hiroma Main.</p>
+            <p className="text-sm leading-5 text-gray-600 mt-1">Choose pickup from a nearby Hiroma partner or request door-to-door delivery from Hiroma Main.</p>
           </div>
         </div>
         <Link href="/dashboard/reseller/orders#place-order" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#b8963e] transition-colors whitespace-nowrap">

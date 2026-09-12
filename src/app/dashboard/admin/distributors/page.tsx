@@ -186,6 +186,11 @@ export default function DistributorsPage() {
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
+  const [territoryCheck, setTerritoryCheck] = useState<{
+    loading: boolean
+    available: boolean | null
+    holder?: { level: string; coverage_area: string; holder_name: string; holder_username: string } | null
+  }>({ loading: false, available: null })
 
   const [parentOptions, setParentOptions] = useState<
     {
@@ -370,6 +375,33 @@ export default function DistributorsPage() {
       .catch(() => setBarangays([]))
       .finally(() => setLoadingBarangays(false))
   }, [form.city_muni_code])
+
+  // Confirm availability against the server whenever the exclusive coverage changes.
+  useEffect(() => {
+    const code = form.dist_level === 'regional'
+      ? form.region_code
+      : form.dist_level === 'provincial'
+        ? form.province_code
+        : form.city_muni_code
+    if (!code || code === 'DIRECT') {
+      setTerritoryCheck({ loading: false, available: null })
+      return
+    }
+    const controller = new AbortController()
+    setTerritoryCheck({ loading: true, available: null })
+    const params = new URLSearchParams({ territory_level: form.dist_level, territory_code: code })
+    fetch(`/api/admin/distributors?${params}`, { signal: controller.signal })
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || 'Unable to check territory.')
+        setTerritoryCheck({ loading: false, available: Boolean(data.available), holder: data.territory })
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setTerritoryCheck({ loading: false, available: null })
+      })
+    return () => controller.abort()
+  }, [form.dist_level, form.region_code, form.province_code, form.city_muni_code])
 
   // Fetch parent options when level changes
   useEffect(() => {
@@ -631,6 +663,12 @@ export default function DistributorsPage() {
   const filtered = distributors
 
   const handleFormSubmit = async () => {
+    if (territoryCheck.loading || territoryCheck.available !== true) {
+      setFormError(territoryCheck.available === false
+        ? 'The selected territory is already taken. Choose another location or deactivate/reconcile the existing assignment first.'
+        : 'Wait for the territory availability check before registering.')
+      return
+    }
     if (
       !form.full_name ||
       !form.username ||
@@ -1313,6 +1351,34 @@ export default function DistributorsPage() {
                     </p>
                   </div>
                 )}
+                {(territoryCheck.loading || territoryCheck.available !== null) && (
+                  <div className={`rounded-lg border px-3 py-2 ${
+                    territoryCheck.loading
+                      ? 'border-slate-200 bg-slate-50'
+                      : territoryCheck.available
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-red-200 bg-red-50'
+                  }`}>
+                    <p className={`text-xs font-semibold ${
+                      territoryCheck.loading
+                        ? 'text-slate-500'
+                        : territoryCheck.available
+                          ? 'text-emerald-700'
+                          : 'text-red-700'
+                    }`}>
+                      {territoryCheck.loading
+                        ? 'Checking territory availability...'
+                        : territoryCheck.available
+                          ? '✓ Territory available'
+                          : 'Territory already taken'}
+                    </p>
+                    {!territoryCheck.available && territoryCheck.holder && (
+                      <p className="mt-1 text-[11px] text-red-600">
+                        Assigned to {territoryCheck.holder.holder_name} (@{territoryCheck.holder.holder_username}) as {territoryCheck.holder.level}. Contact Admin before changing this assignment.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
@@ -1412,7 +1478,7 @@ export default function DistributorsPage() {
                 </button>
                 <button
                   onClick={handleFormSubmit}
-                  disabled={formLoading}
+                  disabled={formLoading || territoryCheck.loading || territoryCheck.available !== true}
                   className="flex-1 bg-[#C9A84C] text-[#0D1B3E] font-semibold text-sm rounded-lg py-2.5 hover:bg-[#E8C96A] transition-colors disabled:opacity-60"
                 >
                   {formLoading

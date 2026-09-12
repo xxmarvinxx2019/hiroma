@@ -5,6 +5,8 @@ import prisma from '@/app/lib/prisma'
 import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
 import { InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
+import { InvalidPickupScheduleError, parsePickupSchedule, PICKUP_TIME_ZONE } from '@/app/lib/pickupSchedule'
+import { isElectronicOrderPayment, orderPaymentDeadline } from '@/app/lib/orderPayment'
 // ── GET reseller's orders + their city distributor as supplier ──
 export async function GET(req: NextRequest) {
   try {
@@ -62,7 +64,12 @@ export async function GET(req: NextRequest) {
           cancelled_by_role: true,
           cancellation_reason: true,
           payment_method: true,
+          payment_method_id: true,
+          payment_due_at: true,
+          payment_destination_snapshot: true,
           fulfillment_method: true,
+          pickup_scheduled_at: true,
+          pickup_schedule_timezone: true,
           shipping_status: true,
           shipping_fee: true,
           total_amount:   true,
@@ -118,15 +125,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { notes, items, payment_method, payment_reference, city_dist_id, delivery_address, delivery_location, fulfillment_method } = await req.json()
+    const { notes, items, payment_method_id, city_dist_id, delivery_address, delivery_location, fulfillment_method, pickup_scheduled_at } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
     }
 
     if (!['partner_pickup', 'nationwide_delivery'].includes(fulfillment_method)) {
-      return NextResponse.json({ error: 'Choose Partner Pickup or Nationwide Delivery.' }, { status: 400 })
+      return NextResponse.json({ error: 'Choose Partner Pickup or Door-to-Door Delivery.' }, { status: 400 })
     }
+    const pickupScheduledAt = fulfillment_method === 'partner_pickup'
+      ? parsePickupSchedule(pickup_scheduled_at)
+      : null
 
     if (!delivery_address || typeof delivery_address !== 'string' || !delivery_address.trim()) {
       return NextResponse.json({ error: 'A delivery address is required.' }, { status: 400 })
@@ -174,7 +184,7 @@ export async function POST(req: NextRequest) {
     const seller = fulfillment_method === 'nationwide_delivery' ? nationwideSeller : pickupPartner
 
     if (!seller) {
-      return NextResponse.json({ error: fulfillment_method === 'nationwide_delivery' ? 'Hiroma Main is temporarily unavailable for nationwide delivery.' : 'No active Hiroma partner or branch is available for pickup.' }, { status: 400 })
+      return NextResponse.json({ error: fulfillment_method === 'nationwide_delivery' ? 'Hiroma Main is temporarily unavailable for door-to-door delivery.' : 'No active Hiroma partner or branch is available for pickup.' }, { status: 400 })
     }
     if (fulfillment_method === 'partner_pickup' && city_dist_id && city_dist_id !== seller.id) {
       return NextResponse.json({ error: 'The fulfillment recommendation changed. Refresh the order and try again.' }, { status: 409 })
@@ -184,7 +194,7 @@ export async function POST(req: NextRequest) {
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const sellerProfile = await prisma.distributorProfile.findUnique({
       where: { user_id: seller.id },
-      select: { dist_level: true },
+      select: { dist_level: true, accepts_cash_on_pickup: true },
     })
     const sellerIsBranch = sellerProfile?.dist_level === 'branch'
     const products = await prisma.product.findMany({
@@ -229,6 +239,38 @@ export async function POST(req: NextRequest) {
       return { product_id: item.product_id, quantity: item.quantity, unit_price, unit_acquisition_cost, subtotal }
     })
 
+    let paymentMethod = 'cash_on_pickup'
+    let selectedPaymentMethodId: string | null = null
+    let paymentDestinationSnapshot: Record<string, string | null> | null = null
+    let paymentDueAt: Date | null = null
+    if (fulfillment_method === 'partner_pickup') {
+      if (payment_method_id === 'cash_on_pickup') {
+        if (!sellerProfile?.accepts_cash_on_pickup) {
+          return NextResponse.json({ error: 'This pickup location does not accept Cash on Pickup.' }, { status: 400 })
+        }
+      } else {
+        if (typeof payment_method_id !== 'string' || !payment_method_id) {
+          return NextResponse.json({ error: 'Select an available payment method.' }, { status: 400 })
+        }
+        const method = await prisma.paymentMethod.findFirst({
+          where: { id: payment_method_id, user_id: seller.id, status: 'approved', is_enabled: true },
+          select: { id: true, type: true, account_name: true, account_number: true, bank_name: true },
+        })
+        if (!method) return NextResponse.json({ error: 'That payment destination is no longer available. Refresh and choose another method.' }, { status: 409 })
+        paymentMethod = method.type
+        selectedPaymentMethodId = method.id
+        paymentDestinationSnapshot = {
+          type: method.type,
+          account_name: method.account_name,
+          account_number: method.account_number,
+          bank_name: method.bank_name,
+        }
+        paymentDueAt = orderPaymentDeadline(new Date(), pickupScheduledAt)
+      }
+    } else {
+      paymentMethod = 'payment_after_shipping_quote'
+    }
+
     const order = await prisma.$transaction(async (tx) => {
       await reserveOrderStock(tx, seller.id, items)
       return tx.order.create({ data: {
@@ -239,17 +281,23 @@ export async function POST(req: NextRequest) {
         total_amount,
         is_cross_purchase: false,
         fulfillment_method,
+        pickup_scheduled_at: pickupScheduledAt,
+        pickup_schedule_timezone: pickupScheduledAt ? PICKUP_TIME_ZONE : null,
         shipping_status:   fulfillment_method === 'nationwide_delivery' ? 'quote_pending' : null,
         shipping_fee:      0,
         delivery_address:   delivery_address.trim(),
         notes:             notes?.trim() || null,
-        payment_method:      fulfillment_method === 'nationwide_delivery' ? 'payment_after_shipping_quote' : (payment_method || 'cash_on_pickup'),
-        payment_reference:   payment_reference?.trim()   || null,
-        payment_status:      'unpaid',
+        payment_method:      paymentMethod,
+        payment_method_id:   selectedPaymentMethodId,
+        payment_due_at:      paymentDueAt,
+        payment_destination_snapshot: paymentDestinationSnapshot,
+        payment_reference:   null,
+        payment_status:      selectedPaymentMethodId ? 'awaiting_payment' : 'unpaid',
         items:             { create: orderItems },
       },
       select: {
-        id: true, status: true, total_amount: true, created_at: true,
+        id: true, order_number: true, status: true, total_amount: true, created_at: true,
+        payment_method: true, payment_status: true, payment_due_at: true, payment_destination_snapshot: true,
         seller: { select: { full_name: true, username: true } },
       } })
     })
@@ -261,6 +309,9 @@ export async function POST(req: NextRequest) {
       order,
     })
   } catch (error) {
+    if (error instanceof InvalidPickupScheduleError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     if (error instanceof InsufficientStockError) {
       return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved the remaining quantity.' }, { status: 409 })
     }
@@ -291,25 +342,24 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     }
 
-    if (action === 'mark_paid') {
-      const updated = await prisma.order.update({
-        where: { id: order_id },
-        data:  {
-          payment_status: 'paid',
-          ...(order.payment_status !== 'paid' && { paid_at: new Date() }),
-        },
-      })
-      return NextResponse.json({ success: true, order: updated })
-    }
+    if (action === 'mark_paid') return NextResponse.json({ error: 'Electronic payments require proof and seller verification.' }, { status: 403 })
 
     // Default: cancel
     if (order.status !== 'pending') {
       return NextResponse.json({ error: 'Only pending orders can be cancelled.' }, { status: 400 })
     }
+    if (isElectronicOrderPayment(order.payment_method) && ['verification_pending', 'paid'].includes(order.payment_status || '')) {
+      return NextResponse.json({ error: 'This order cannot be cancelled while its electronic payment is submitted or paid.' }, { status: 409 })
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
-        where: { id: order_id, buyer_id: user.id, status: 'pending' },
+        where: {
+          id: order_id,
+          buyer_id: user.id,
+          status: 'pending',
+          ...(isElectronicOrderPayment(order.payment_method) ? { payment_status: { notIn: ['verification_pending', 'paid'] } } : {}),
+        },
         data: { status: 'cancelled', ...buildOrderCancellationEvidence(user, cancellation_reason, 'reseller') },
       })
       if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')

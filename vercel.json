@@ -5,6 +5,7 @@
     { "path": "/api/cron/release-payouts", "schedule": "0 16 * * *" },
     { "path": "/api/cron/process-product-binary", "schedule": "0 16 * * *" },
     { "path": "/api/cron/reset-ranks", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/expire-pin-requests", "schedule": "0 16 * * *" }
+    { "path": "/api/cron/expire-pin-requests", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/expire-unpaid-orders", "schedule": "0 16 * * *" }
   ]
 }

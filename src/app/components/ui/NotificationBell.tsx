@@ -19,6 +19,7 @@ function notificationIcon(type: string) {
   if (type.startsWith('payout')) return '💸'
   if (type.startsWith('order')) return '🛒'
   if (type.startsWith('payment_method')) return '💳'
+  if (type.startsWith('pin_request')) return '🔑'
   if (type.startsWith('branch_deposit')) return '🏦'
   if (type.startsWith('security')) return '🛡️'
   return '🔔'
