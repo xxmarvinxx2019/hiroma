@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma, UserStatus } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+
+const ALLOWED_STATUSES = new Set(['active', 'inactive', 'suspended'])
+const ALLOWED_SORTS = new Set(['latest', 'oldest', 'name_asc', 'name_desc'])
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,14 +14,40 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
-    const search   = searchParams.get('search') || ''
-    const status   = searchParams.get('status') || 'all'
-    const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
-    const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '15')))
+    const search   = (searchParams.get('search') || '').trim().slice(0, 100)
+    const requestedStatus = searchParams.get('status') || 'all'
+    const status = ALLOWED_STATUSES.has(requestedStatus) ? requestedStatus as UserStatus : null
+    const requestedSort = searchParams.get('sort') || 'latest'
+    const sort = ALLOWED_SORTS.has(requestedSort) ? requestedSort : 'latest'
+    const parsedPage = Number(searchParams.get('page') || '1')
+    const parsedPageSize = Number(searchParams.get('pageSize') || '15')
+    const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? Math.min(10_000, parsedPage) : 1
+    const pageSize = Math.min(
+      50,
+      Number.isSafeInteger(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : 15,
+    )
 
-    const where: any = {
+    const orderBy: Prisma.UserOrderByWithRelationInput[] = sort === 'name_asc'
+      ? [
+          { last_name: { sort: 'asc', nulls: 'last' } },
+          { first_name: { sort: 'asc', nulls: 'last' } },
+          { full_name: 'asc' },
+          { id: 'asc' },
+        ]
+      : sort === 'name_desc'
+        ? [
+            { last_name: { sort: 'desc', nulls: 'last' } },
+            { first_name: { sort: 'asc', nulls: 'last' } },
+            { full_name: 'asc' },
+            { id: 'asc' },
+          ]
+        : sort === 'oldest'
+          ? [{ created_at: 'asc' }, { id: 'asc' }]
+          : [{ created_at: 'desc' }, { id: 'asc' }]
+
+    const where: Prisma.UserWhereInput = {
       role: 'reseller',
-      ...(status !== 'all' && { status }),
+      ...(status && { status }),
       ...(search && {
         OR: [
           { full_name: { contains: search, mode: 'insensitive' } },
@@ -32,11 +62,12 @@ export async function GET(req: NextRequest) {
 
       prisma.user.findMany({
         where,
-        orderBy: { created_at: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
-          id: true, full_name: true, username: true, email: true,
+          id: true, full_name: true, first_name: true, middle_name: true,
+          last_name: true, name_suffix: true, username: true, email: true,
           mobile: true, address: true, status: true, created_at: true,
           reseller_profile: {
             select: {

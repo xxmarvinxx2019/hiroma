@@ -29,6 +29,11 @@ export async function GET(
         payment_method:    true,
         payment_reference: true,
         payment_status:    true,
+        cancelled_at: true,
+        cancelled_by_actor_id: true,
+        cancelled_by_name: true,
+        cancelled_by_role: true,
+        cancellation_reason: true,
         notes:             true,
         created_at:        true,
         buyer: {

@@ -12,6 +12,8 @@ interface PinRequest {
   payment_sender_name: string | null
   payment_datetime:    string | null
   payment_status:      string
+  payment_due_at:      string | null
+  payment_evidence: Array<{ id: string; status: string; review_notes: string | null }>
   status:              string
   notes:               string | null
   created_at:          string
@@ -43,6 +45,7 @@ export default function AdminPinRequestsPage() {
   const [searchInput, setSearchInput] = useState('')
   const [page, setPage]           = useState(1)
   const [acting, setActing]       = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<(PinRequest & { proof_url?: string | null }) | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 400)
@@ -80,6 +83,23 @@ export default function AdminPinRequestsPage() {
     })
     setActing(null)
     fetchRequests()
+  }
+
+  const openPaymentReview = async (request: PinRequest) => {
+    const response = await fetch(`/api/pin-requests/${request.id}/payment`, { cache: 'no-store' })
+    const data = await response.json()
+    const latest = data.request?.payment_evidence?.[0]
+    setReviewing({ ...request, proof_url: latest?.proof_url || null })
+  }
+
+  const reviewPayment = async (action: 'verify' | 'reject') => {
+    if (!reviewing) return
+    const notes = window.prompt(action === 'verify' ? 'Independent bank/GCash verification notes:' : 'Reason for rejecting this proof:')?.trim() || ''
+    if (notes.length < 5) return
+    setActing(reviewing.id)
+    const response = await fetch(`/api/pin-requests/${reviewing.id}/payment`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, notes }) })
+    setActing(null)
+    if (response.ok) { setReviewing(null); fetchRequests() }
   }
 
   return (
@@ -187,7 +207,10 @@ export default function AdminPinRequestsPage() {
 
               {/* Actions */}
               <div className="flex items-center gap-1.5 flex-wrap">
-                {r.status === 'pending' && (
+                {r.status === 'pending' && r.payment_status === 'payment_submitted' && (
+                  <button onClick={() => openPaymentReview(r)} disabled={acting === r.id} className="text-[10px] bg-amber-100 text-amber-800 px-2 py-1 rounded-lg font-medium">Review proof</button>
+                )}
+                {r.status === 'pending' && r.payment_status === 'paid' && (
                   <>
                     <button onClick={() => handleAction(r.id, 'approved')} disabled={acting === r.id}
                       title="Verify the displayed payment evidence before approval"
@@ -212,6 +235,7 @@ export default function AdminPinRequestsPage() {
 
         <Pagination meta={meta} onPageChange={setPage} />
       </div>
+      {reviewing && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><section className="w-full max-w-lg rounded-2xl bg-white p-5"><h2 className="font-semibold text-[#0D1B3E]">Payment verification</h2><p className="mt-1 text-xs text-gray-500">{reviewing.city_dist?.full_name} · ₱{Number(reviewing.total_amount).toLocaleString()}</p>{reviewing.proof_url ? <a href={reviewing.proof_url} target="_blank" rel="noreferrer" className="mt-4 block rounded-xl border border-[#C9A84C] bg-[#fffaf0] px-4 py-3 text-center text-sm font-semibold text-[#9a6f1e]">Open private payment proof ↗</a> : <p className="mt-4 rounded-xl bg-red-50 p-3 text-xs text-red-700">Payment proof is unavailable.</p>}<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Verify against the official bank or GCash record. A screenshot alone is not proof that funds settled.</p><div className="mt-4 flex flex-wrap justify-end gap-2"><button onClick={() => setReviewing(null)} className="rounded-lg border px-3 py-2 text-xs">Close</button><button onClick={() => reviewPayment('reject')} className="rounded-lg bg-red-100 px-3 py-2 text-xs font-semibold text-red-700">Reject proof</button><button onClick={() => reviewPayment('verify')} className="rounded-lg bg-[#010521] px-3 py-2 text-xs font-semibold text-white">Verify payment</button></div></section></div>}
     </div>
   )
 }

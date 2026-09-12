@@ -32,6 +32,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    await prisma.pinRequest.updateMany({
+      where: { status: 'pending', payment_due_at: { lt: new Date() }, payment_status: { in: ['awaiting_payment', 'payment_rejected'] } },
+      data: { status: 'expired', payment_status: 'expired' },
+    })
+
     const { searchParams } = req.nextUrl
     const status   = searchParams.get('status')   || 'all'
     const page     = Math.max(1, parseInt(searchParams.get('page')     || '1'))
@@ -62,6 +67,11 @@ export async function GET(req: NextRequest) {
           payment_method: true, payment_reference: true,
           payment_sender_name: true, payment_datetime: true,
           payment_status: true, status: true, notes: true,
+          payment_due_at: true, payment_method_id: true, payment_destination_snapshot: true,
+          payment_evidence: {
+            orderBy: { created_at: 'desc' }, take: 1,
+            select: { id: true, status: true, sender_name: true, reference_number: true, paid_at: true, created_at: true, review_notes: true },
+          },
           created_at: true, updated_at: true,
           city_dist: { select: { id: true, full_name: true, username: true } },
           package:   { select: { id: true, name: true, price: true } },
@@ -101,8 +111,7 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      package_id, quantity, notes,
-      payment_method, payment_reference, payment_sender_name, payment_datetime,
+      package_id, quantity, notes, payment_method_id,
     } = await req.json()
 
     if (!package_id || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 50) {
@@ -142,22 +151,6 @@ export async function POST(req: NextRequest) {
     if (!pkg || !pkg.is_active) {
       return NextResponse.json({ error: 'Package not found or inactive.' }, { status: 400 })
     }
-    const paymentMethod = typeof payment_method === 'string' ? payment_method.trim() : ''
-    const paymentReference = typeof payment_reference === 'string' ? payment_reference.trim() : ''
-    const paymentSenderName = typeof payment_sender_name === 'string' ? payment_sender_name.trim() : ''
-    const paymentDatetime = payment_datetime ? new Date(payment_datetime) : null
-    if (
-      !['gcash', 'bank_transfer'].includes(paymentMethod)
-      || paymentReference.length < 3 || paymentReference.length > 120
-      || paymentSenderName.length < 2 || paymentSenderName.length > 120
-      || !paymentDatetime || Number.isNaN(paymentDatetime.getTime())
-      || paymentDatetime.getTime() > Date.now() + 5 * 60 * 1000
-    ) {
-      return NextResponse.json({
-        error: 'PIN requests require GCash/bank payment reference, sender name, and valid payment time.',
-      }, { status: 400 })
-    }
-
     const distributor = await prisma.distributorProfile.findUnique({
       where: { user_id: user.id },
       select: { dist_level: true, is_active: true },
@@ -174,6 +167,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'Hiroma Branch PINs are received through Admin internal transfer, not a paid PIN request.',
       }, { status: 403 })
+    }
+
+    const destination = await prisma.paymentMethod.findFirst({
+      where: {
+        id: typeof payment_method_id === 'string' ? payment_method_id : '',
+        status: 'approved',
+        user: { role: 'admin', status: 'active' },
+        type: { in: ['gcash', 'bank_transfer'] },
+      },
+      select: { id: true, type: true, account_name: true, account_number: true, bank_name: true },
+    })
+    if (!destination) {
+      return NextResponse.json({ error: 'Select an active Hiroma payment destination.' }, { status: 400 })
     }
 
     const registrationSnapshot = buildRegistrationPinSnapshot({
@@ -193,11 +199,14 @@ export async function POST(req: NextRequest) {
         package_id,
         quantity,
         total_amount,
-        payment_method:      paymentMethod,
-        payment_reference:   paymentReference,
-        payment_sender_name: paymentSenderName,
-        payment_datetime:    paymentDatetime,
-        payment_status:      'pending',
+        payment_method:      destination.type,
+        payment_method_id:   destination.id,
+        payment_destination_snapshot: destination as unknown as Prisma.InputJsonValue,
+        payment_reference:   null,
+        payment_sender_name: null,
+        payment_datetime:    null,
+        payment_status:      'awaiting_payment',
+        payment_due_at:      new Date(Date.now() + 48 * 60 * 60 * 1000),
         status:              'pending',
         notes:               notes?.trim() || null,
         registration_snapshot: registrationSnapshot as unknown as Prisma.InputJsonValue,
@@ -233,7 +242,8 @@ export async function PATCH(req: NextRequest) {
       where:  { id },
       select: {
         id: true, quantity: true, status: true, registration_snapshot: true,
-        city_dist_id: true,
+        city_dist_id: true, payment_status: true,
+        payment_evidence: { where: { status: 'verified' }, take: 1, select: { id: true } },
         package: { select: { id: true, name: true, price: true } },
       },
     })
@@ -248,7 +258,7 @@ export async function PATCH(req: NextRequest) {
 
     // If approved → generate and assign PINs to city dist
     if (status === 'approved') {
-      if (payment_status !== 'paid') {
+      if (payment_status !== 'paid' || request.payment_status !== 'paid' || request.payment_evidence.length !== 1) {
         return NextResponse.json(
           { error: 'Confirm full payment before issuing funded registration PINs.' },
           { status: 400 },

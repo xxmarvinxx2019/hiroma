@@ -93,6 +93,12 @@ export async function PATCH(
         where: { id },
         data: {
           full_name: full_name.trim(),
+          ...(full_name.trim() !== reseller.full_name && {
+            first_name: null,
+            middle_name: null,
+            last_name: null,
+            name_suffix: null,
+          }),
           username: cleanUsername,
           mobile: cleanMobile,
           address: cleanAddress,

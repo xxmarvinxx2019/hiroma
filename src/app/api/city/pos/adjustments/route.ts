@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import prisma from '@/app/lib/prisma'
 import { notifyPosReviewers } from '@/app/lib/posNotifications'
@@ -233,7 +234,7 @@ export async function PATCH(req: NextRequest) {
         }))).every(Boolean)
         if (fullyReversed) {
           await tx.posTransaction.update({ where: { id: request.transaction.id }, data: { status: request.request_type === 'void' ? 'voided' : 'refunded', reviewed_by_id: actorId, reviewed_at: new Date(), review_notes: notes } })
-          await tx.order.update({ where: { id: request.transaction.order.id }, data: { status: 'cancelled', payment_status: request.request_type === 'void' ? 'voided' : 'refunded' } })
+          await tx.order.update({ where: { id: request.transaction.order.id }, data: { status: 'cancelled', payment_status: request.request_type === 'void' ? 'voided' : 'refunded', ...buildOrderCancellationEvidence(user, notes, user.is_staff ? 'outlet_staff' : 'outlet') } })
         }
       }
 

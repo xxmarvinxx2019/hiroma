@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
 import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 import { canUpdateOrderPaymentStatus, isAllowedOrderPaymentStatus } from '@/app/lib/orderPaymentAuthorization'
@@ -274,7 +275,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status, payment_status } = await req.json()
+    const { order_id, status, payment_status, cancellation_reason } = await req.json()
     const allowed = ['pending', 'processing', 'delivered', 'cancelled']
 
     if (!order_id || (!status && !payment_status))
@@ -312,6 +313,7 @@ export async function PATCH(req: NextRequest) {
           data: {
             status,
             ...(payment_status && { payment_status }),
+            ...(status === 'cancelled' && buildOrderCancellationEvidence(user, cancellation_reason, 'provincial')),
           },
         })
         if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')

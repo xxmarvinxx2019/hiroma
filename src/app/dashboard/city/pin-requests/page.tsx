@@ -12,6 +12,10 @@ interface PinRequest {
   payment_sender_name: string | null
   payment_datetime:    string | null
   payment_status:      string
+  payment_due_at:      string | null
+  payment_method_id:   string | null
+  payment_destination_snapshot: PaymentMethod | null
+  payment_evidence: Array<{ id: string; status: string; review_notes: string | null }>
   status:              string
   notes:               string | null
   created_at:          string
@@ -50,6 +54,7 @@ const STATUS_COLOR: Record<string, string> = {
   pending:  'bg-[#fef9ee] text-[#9a6f1e]',
   approved: 'bg-[#e8f7ef] text-[#1a7a4a]',
   rejected: 'bg-[#fdecea] text-[#a03030]',
+  expired:  'bg-gray-100 text-gray-500',
 }
 
 const PAYMENT_LABEL: Record<string, string> = {
@@ -59,6 +64,7 @@ const PAYMENT_LABEL: Record<string, string> = {
 }
 
 export default function CityPinRequestsPage() {
+  const [clock, setClock] = useState(() => Date.now())
   const [requests, setRequests]   = useState<PinRequest[]>([])
   const [packages, setPackages]   = useState<Package[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
@@ -78,15 +84,27 @@ export default function CityPinRequestsPage() {
   const [form, setForm] = useState({
     package_id:          '',
     quantity:            1,
-    payment_method:      'gcash',
-    payment_reference:   '',
-    payment_sender_name: '',
-    payment_datetime:    '',
+    payment_method_id:   '',
     notes:               '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError]   = useState('')
   const [formSuccess, setFormSuccess] = useState('')
+  const [payingRequest, setPayingRequest] = useState<PinRequest | null>(null)
+  const [paymentForm, setPaymentForm] = useState({ sender_name: '', reference_number: '', paid_at: '', proof_data: '', proof_name: '' })
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const timeRemaining = (dueAt: string) => {
+    const seconds = Math.max(0, Math.floor((new Date(dueAt).getTime() - clock) / 1000))
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const remainder = seconds % 60
+    return `${hours}h ${minutes}m ${remainder}s remaining`
+  }
 
   // Mark as seen when page is visited — clears the notification badge
   useEffect(() => {
@@ -157,9 +175,7 @@ export default function CityPinRequestsPage() {
   const handleSubmit = async () => {
     if (!form.package_id) { setFormError('Please select a package.'); return }
     if (form.quantity < 1) { setFormError('Quantity must be at least 1.'); return }
-    if (!form.payment_reference.trim()) { setFormError('Please enter payment reference.'); return }
-    if (!form.payment_sender_name.trim()) { setFormError('Please enter sender name.'); return }
-    if (!form.payment_datetime) { setFormError('Please enter payment date and time.'); return }
+    if (!form.payment_method_id) { setFormError('Please select where you will send the payment.'); return }
 
     setSubmitting(true); setFormError('')
     const res = await fetch('/api/pin-requests', {
@@ -168,26 +184,49 @@ export default function CityPinRequestsPage() {
       body:    JSON.stringify({
         package_id:          form.package_id,
         quantity:            form.quantity,
-        payment_method:      form.payment_method,
-        payment_reference:   form.payment_reference.trim()   || null,
-        payment_sender_name: form.payment_sender_name.trim() || null,
-        payment_datetime:    form.payment_datetime           || null,
+        payment_method_id:   form.payment_method_id,
         notes:               form.notes.trim()               || null,
       }),
     })
     const data = await res.json()
     setSubmitting(false)
     if (res.ok) {
-      setFormSuccess('PIN request submitted successfully!')
+      setFormSuccess('PIN request reserved. Pay and upload proof within 48 hours.')
       fetchRequests()
       setTimeout(() => {
         setShowForm(false)
         setFormSuccess('')
-        setForm({ package_id: '', quantity: 1, payment_method: 'gcash', payment_reference: '', payment_sender_name: '', payment_datetime: '', notes: '' })
+        setForm({ package_id: '', quantity: 1, payment_method_id: '', notes: '' })
       }, 1500)
     } else {
       setFormError(data.error || 'Something went wrong.')
     }
+  }
+
+  const chooseProof = (file?: File) => {
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setFormError('Use a valid JPEG, PNG, or WebP image up to 5 MB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => setPaymentForm((current) => ({ ...current, proof_data: String(reader.result || ''), proof_name: file.name }))
+    reader.readAsDataURL(file)
+  }
+
+  const submitPayment = async () => {
+    if (!payingRequest) return
+    setSubmitting(true); setFormError('')
+    const response = await fetch(`/api/pin-requests/${payingRequest.id}/payment`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paymentForm),
+    })
+    const data = await response.json()
+    setSubmitting(false)
+    if (!response.ok) { setFormError(data.error || 'Unable to submit payment proof.'); return }
+    setPayingRequest(null)
+    setPaymentForm({ sender_name: '', reference_number: '', paid_at: '', proof_data: '', proof_name: '' })
+    fetchRequests()
   }
 
   const resolveTransfer = async (transfer: PinTransfer, action: 'received' | 'rejected') => {
@@ -344,9 +383,17 @@ export default function CityPinRequestsPage() {
               <span className={`text-xs px-2 py-0.5 rounded-full w-fit capitalize ${STATUS_COLOR[r.status]}`}>
                 {r.status}
               </span>
-              <p className="text-xs text-gray-400">
+              <div><p className="text-xs text-gray-400">
                 {new Date(r.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
               </p>
+              {r.status === 'pending' && ['awaiting_payment', 'payment_rejected'].includes(r.payment_status) && r.payment_due_at && (
+                <div>
+                  <p className="mt-1 text-[10px] font-medium text-amber-700">{timeRemaining(r.payment_due_at)}</p>
+                  <p className="text-[9px] text-gray-400">Due {new Date(r.payment_due_at).toLocaleString('en-PH')}</p>
+                  <button onClick={() => { setFormError(''); setPayingRequest(r) }} className="mt-1 rounded bg-[#010521] px-2 py-1 text-[10px] font-semibold text-white">Pay now / Upload proof</button>
+                </div>
+              )}
+              </div>
             </div>
           ))
         )}
@@ -399,28 +446,20 @@ export default function CityPinRequestsPage() {
                 <p className="text-xs text-gray-400 mb-1.5">Payment Method</p>
                 <div className="space-y-1.5">
                   {paymentMethods.map((pm) => (
-                    <div key={pm.id} onClick={() => setForm({ ...form, payment_method: pm.type })}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 cursor-pointer ${form.payment_method === pm.type ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
+                    <div key={pm.id} onClick={() => setForm({ ...form, payment_method_id: pm.id })}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 cursor-pointer ${form.payment_method_id === pm.id ? 'border-[#C9A84C] bg-[#fef9ee]' : 'border-[#0D1B3E]/10 hover:border-[#0D1B3E]/20'}`}>
                       <span>{pm.type === 'gcash' ? '📱' : '🏦'}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-[#0D1B3E]">{pm.type === 'gcash' ? 'GCash' : 'Bank Transfer'}</p>
                         {pm.bank_name && <p className="text-[9px] text-gray-400">{pm.bank_name}</p>}
                         <p className="text-[9px] text-gray-400">{pm.account_name} · {pm.account_number}</p>
                       </div>
-                      {form.payment_method === pm.type && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
+                      {form.payment_method_id === pm.id && <span className="text-[#C9A84C] text-xs flex-shrink-0">✓</span>}
                     </div>
                   ))}
                 </div>
-                <div className="mt-2 space-y-1.5">
-                  <input value={form.payment_reference} onChange={(e) => setForm({ ...form, payment_reference: e.target.value })}
-                    maxLength={120} placeholder="Payment reference number *"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
-                  <input value={form.payment_sender_name} onChange={(e) => setForm({ ...form, payment_sender_name: e.target.value })}
-                    maxLength={120} placeholder="Sender name *"
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C]" />
-                  <input type="datetime-local" value={form.payment_datetime} onChange={(e) => setForm({ ...form, payment_datetime: e.target.value })}
-                    className="w-full bg-[#F0F2F8] border border-[#0D1B3E]/15 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#C9A84C] text-gray-500" />
-                </div>
+                {paymentMethods.length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">No active Hiroma payment destination is available. Please contact Admin.</p>}
+                <p className="mt-2 text-[10px] text-gray-500">Your 48-hour payment window starts after the request is created.</p>
               </div>
 
               {/* Notes */}
@@ -445,6 +484,24 @@ export default function CityPinRequestsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {payingRequest && !isBranch && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h2 className="text-base font-semibold text-[#0D1B3E]">Submit payment proof</h2>
+            <p className="mt-1 text-xs text-gray-500">Request expires {payingRequest.payment_due_at ? new Date(payingRequest.payment_due_at).toLocaleString('en-PH') : 'after 48 hours'}.</p>
+            {payingRequest.payment_destination_snapshot && <div className="mt-3 rounded-xl border border-[#C9A84C]/30 bg-[#fffaf0] p-3 text-xs"><b>{payingRequest.payment_destination_snapshot.type === 'gcash' ? 'GCash' : payingRequest.payment_destination_snapshot.bank_name || 'Bank transfer'}</b><p>{payingRequest.payment_destination_snapshot.account_name}</p><p className="font-mono font-semibold">{payingRequest.payment_destination_snapshot.account_number}</p><p className="mt-1 font-bold">Amount: ₱{Number(payingRequest.total_amount).toLocaleString()}</p></div>}
+            <div className="mt-4 space-y-2">
+              <input value={paymentForm.sender_name} onChange={(e) => setPaymentForm({ ...paymentForm, sender_name: e.target.value })} placeholder="Sender name" maxLength={160} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input value={paymentForm.reference_number} onChange={(e) => setPaymentForm({ ...paymentForm, reference_number: e.target.value })} placeholder="Transaction reference number" maxLength={160} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input type="datetime-local" value={paymentForm.paid_at} onChange={(e) => setPaymentForm({ ...paymentForm, paid_at: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <label className="block rounded-lg border border-dashed border-[#C9A84C] p-3 text-xs"><span>Payment proof · JPEG, PNG, or WebP · max 5 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => chooseProof(e.target.files?.[0])} className="mt-2 block w-full" />{paymentForm.proof_name && <b className="mt-1 block text-green-700">✓ {paymentForm.proof_name}</b>}</label>
+            </div>
+            {formError && <p className="mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700">{formError}</p>}
+            <div className="mt-4 flex gap-2"><button onClick={() => setPayingRequest(null)} className="flex-1 rounded-lg border py-2 text-sm">Cancel</button><button disabled={submitting || !paymentForm.proof_data} onClick={submitPayment} className="flex-1 rounded-lg bg-[#C9A84C] py-2 text-sm font-semibold disabled:opacity-40">{submitting ? 'Submitting…' : 'Submit proof'}</button></div>
           </div>
         </div>
       )}

@@ -11,6 +11,10 @@ model User {
   member_id                         String                  @unique
   username                          String                  @unique
   full_name                         String
+  first_name                        String?
+  middle_name                       String?
+  last_name                         String?
+  name_suffix                       String?
   email                             String?
   mobile                            String
   profile_photo                     String?
@@ -1069,30 +1073,58 @@ model BinaryTreeNode {
 }
 
 model PinRequest {
-  id                    String    @id @default(uuid())
-  city_dist_id          String
-  package_id            String
-  quantity              Int       @default(1)
-  total_amount          Decimal   @db.Decimal(10, 2)
-  payment_method        String    @default("cash_on_pickup") @db.VarChar
-  payment_reference     String?   @db.VarChar
-  payment_sender_name   String?   @db.VarChar
-  payment_datetime      DateTime? @db.Timestamptz(6)
-  payment_status        String    @default("unpaid") @db.VarChar
-  status                String    @default("pending") @db.VarChar
-  notes                 String?
-  registration_snapshot Json?
-  approved_by_actor_id  String?   @db.Uuid
-  approved_at           DateTime? @db.Timestamptz(6)
-  rejected_by_actor_id  String?   @db.Uuid
-  rejected_at           DateTime? @db.Timestamptz(6)
-  created_at            DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime  @updatedAt @db.Timestamptz(6)
-  city_dist             User      @relation("CityDistPinRequests", fields: [city_dist_id], references: [id])
-  package               Package   @relation(fields: [package_id], references: [id])
-  funded_pins           Pin[]     @relation("PinFundingRequest")
+  id                           String                      @id @default(uuid())
+  city_dist_id                 String
+  package_id                   String
+  quantity                     Int                         @default(1)
+  total_amount                 Decimal                     @db.Decimal(10, 2)
+  payment_method               String                      @default("cash_on_pickup") @db.VarChar
+  payment_reference            String?                     @db.VarChar
+  payment_sender_name          String?                     @db.VarChar
+  payment_datetime             DateTime?                   @db.Timestamptz(6)
+  payment_status               String                      @default("unpaid") @db.VarChar
+  payment_due_at               DateTime?                   @db.Timestamptz(6)
+  payment_method_id            String?
+  payment_destination_snapshot Json?
+  status                       String                      @default("pending") @db.VarChar
+  notes                        String?
+  registration_snapshot        Json?
+  approved_by_actor_id         String?                     @db.Uuid
+  approved_at                  DateTime?                   @db.Timestamptz(6)
+  rejected_by_actor_id         String?                     @db.Uuid
+  rejected_at                  DateTime?                   @db.Timestamptz(6)
+  created_at                   DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime                    @updatedAt @db.Timestamptz(6)
+  city_dist                    User                        @relation("CityDistPinRequests", fields: [city_dist_id], references: [id])
+  package                      Package                     @relation(fields: [package_id], references: [id])
+  funded_pins                  Pin[]                       @relation("PinFundingRequest")
+  payment_evidence             PinRequestPaymentEvidence[]
 
   @@map("pin_requests")
+}
+
+model PinRequestPaymentEvidence {
+  id                      String     @id @default(uuid())
+  pin_request_id          String
+  payment_method_id       String
+  provider_snapshot       String     @db.VarChar(40)
+  account_name_snapshot   String     @db.VarChar(160)
+  account_number_snapshot String     @db.VarChar(160)
+  bank_name_snapshot      String?    @db.VarChar(160)
+  sender_name             String     @db.VarChar(160)
+  reference_number        String     @db.VarChar(160)
+  paid_at                 DateTime   @db.Timestamptz(6)
+  proof_path              String     @db.VarChar(500)
+  status                  String     @default("submitted") @db.VarChar(40)
+  reviewed_by_actor_id    String?    @db.Uuid
+  reviewed_at             DateTime?  @db.Timestamptz(6)
+  review_notes            String?    @db.VarChar(500)
+  created_at              DateTime   @default(now()) @db.Timestamptz(6)
+  pin_request             PinRequest @relation(fields: [pin_request_id], references: [id], onDelete: Restrict)
+
+  @@index([pin_request_id, created_at(sort: Desc)])
+  @@index([status, created_at])
+  @@map("pin_request_payment_evidence")
 }
 
 model NameCapRegistry {
@@ -1323,6 +1355,11 @@ model Order {
   seller_id                     String
   order_type                    OrderType
   status                        OrderStatus                 @default(pending)
+  cancelled_at                  DateTime?                   @db.Timestamptz(6)
+  cancelled_by_actor_id         String?
+  cancelled_by_name             String?                     @db.VarChar(160)
+  cancelled_by_role             String?                     @db.VarChar(40)
+  cancellation_reason           String?                     @db.VarChar(500)
   total_amount                  Decimal                     @db.Decimal(10, 2)
   is_cross_purchase             Boolean                     @default(false)
   payment_method                String?                     @default("cash") @db.VarChar

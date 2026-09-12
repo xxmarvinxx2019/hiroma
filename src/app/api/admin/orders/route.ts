@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
 import {
   processDeliveredProductBinaryOrder,
@@ -62,6 +63,11 @@ export async function GET(req: NextRequest) {
           payment_method:    true,
           payment_reference: true,
           payment_status:    true,
+          cancelled_at: true,
+          cancelled_by_actor_id: true,
+          cancelled_by_name: true,
+          cancelled_by_role: true,
+          cancellation_reason: true,
           buyer:  { select: { full_name: true, username: true, role: true } },
           seller: { select: { full_name: true, username: true, role: true } },
           items: {
@@ -110,7 +116,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, status, payment_status } = await req.json()
+    const { order_id, status, payment_status, cancellation_reason } = await req.json()
     const allowed = ['pending', 'processing', 'delivered', 'cancelled']
 
     if (!order_id || (!status && !payment_status)) {
@@ -170,7 +176,7 @@ export async function PATCH(req: NextRequest) {
       if (status) {
         const claimed = await tx.order.updateMany({
           where: { id: order_id, status: order.status },
-          data: { status, ...(payment_status && { payment_status }) },
+          data: { status, ...(payment_status && { payment_status }), ...(status === 'cancelled' && buildOrderCancellationEvidence(user, cancellation_reason, 'admin')) },
         })
         if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
       } else {

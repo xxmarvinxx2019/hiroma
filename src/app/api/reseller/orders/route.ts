@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
+import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
 import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
 import { InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
@@ -55,6 +56,11 @@ export async function GET(req: NextRequest) {
           order_type:     true,
           status:         true,
           payment_status: true,
+          cancelled_at: true,
+          cancelled_by_actor_id: true,
+          cancelled_by_name: true,
+          cancelled_by_role: true,
+          cancellation_reason: true,
           payment_method: true,
           fulfillment_method: true,
           shipping_status: true,
@@ -271,7 +277,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_id, action } = await req.json()
+    const { order_id, action, cancellation_reason } = await req.json()
     if (!order_id) {
       return NextResponse.json({ error: 'order_id is required.' }, { status: 400 })
     }
@@ -304,7 +310,7 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
         where: { id: order_id, buyer_id: user.id, status: 'pending' },
-        data: { status: 'cancelled' },
+        data: { status: 'cancelled', ...buildOrderCancellationEvidence(user, cancellation_reason, 'reseller') },
       })
       if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
       await releaseOrderStock(tx, order.seller_id, order.items)
