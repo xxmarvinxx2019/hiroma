@@ -14,6 +14,7 @@ import {
   assessPinIssuanceAgainstBinaryReserve,
   BinaryReserveAdmissionError,
 } from '@/app/lib/binaryReserveAdmission'
+import { notifyActiveAdmins } from '@/app/lib/adminRequestNotifications'
 
 // ── Generate unique PIN code ──
 function generatePinCode(packageName: string): string {
@@ -193,8 +194,8 @@ export async function POST(req: NextRequest) {
     })
     const total_amount = registrationSnapshot.pinAllocation * quantity
 
-    const request = await prisma.pinRequest.create({
-      data: {
+    const request = await prisma.$transaction(async (tx) => {
+      const created = await tx.pinRequest.create({ data: {
         city_dist_id:        user.id,
         package_id,
         quantity,
@@ -210,7 +211,17 @@ export async function POST(req: NextRequest) {
         status:              'pending',
         notes:               notes?.trim() || null,
         registration_snapshot: registrationSnapshot as unknown as Prisma.InputJsonValue,
-      },
+      } })
+      await notifyActiveAdmins(tx, {
+        type: 'pin_request_created',
+        title: 'New City PIN request',
+        message: `${user.full_name || user.username} reserved ${quantity} ${pkg.name} registration PIN${quantity === 1 ? '' : 's'} and must submit payment within 48 hours.`,
+        amount: total_amount,
+        entityType: 'pin_request',
+        entityId: created.id,
+        actionUrl: '/dashboard/admin/pin-requests',
+      })
+      return created
     })
 
     return NextResponse.json({ success: true, request })

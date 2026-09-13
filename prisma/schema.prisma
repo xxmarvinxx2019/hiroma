@@ -56,6 +56,7 @@ model User {
   inventory                         Inventory[]
   orders_bought                     Order[]                 @relation("OrderBuyer")
   orders_sold                       Order[]                 @relation("OrderSeller")
+  order_messages                    OrderMessage[]          @relation("OrderMessageSender")
   payment_methods                   PaymentMethod[]
   payouts_approved                  Payout[]                @relation("PayoutApprover")
   payouts_released                  Payout[]                @relation("PayoutReleaser")
@@ -187,6 +188,7 @@ model DistributorProfile {
   parent_dist_id                    String?
   contract_signed_at                DateTime?
   is_active                         Boolean                 @default(true)
+  accepts_cash_on_pickup            Boolean                 @default(true)
   region_code                       String?
   region_name                       String?
   province_code                     String?
@@ -213,6 +215,9 @@ model DistributorProfile {
   user                              User                    @relation(fields: [user_id], references: [id])
   product_visibility                ProductAreaVisibility[]
 
+  @@index([dist_level, is_active, region_code])
+  @@index([dist_level, is_active, province_code])
+  @@index([dist_level, is_active, city_muni_code])
   @@map("distributor_profiles")
 }
 
@@ -1365,12 +1370,17 @@ model Order {
   payment_method                String?                     @default("cash") @db.VarChar
   payment_reference             String?                     @db.VarChar
   payment_status                String?                     @default("unpaid") @db.VarChar
+  payment_method_id             String?                     @db.Uuid
+  payment_due_at                DateTime?                   @db.Timestamptz(6)
+  payment_destination_snapshot  Json?
   payment_sender_name           String?                     @db.VarChar(120)
   payment_evidence_at           DateTime?                   @db.Timestamptz(6)
   payment_recorded_by_actor_id  String?                     @db.Uuid
   payment_verified_by_actor_id  String?                     @db.Uuid
   financial_purpose             String                      @default("commerce") @db.VarChar(24)
   fulfillment_method            String                      @default("partner_pickup") @db.VarChar
+  pickup_scheduled_at           DateTime?                   @db.Timestamptz(6)
+  pickup_schedule_timezone      String?                     @db.VarChar(40)
   shipping_status               String?                     @db.VarChar
   shipping_fee                  Decimal                     @default(0) @db.Decimal(10, 2)
   courier_name                  String?                     @db.VarChar
@@ -1407,9 +1417,48 @@ model Order {
   product_binary_order_event    ProductBinaryOrderEvent?
   product_binary_funding_lot    ProductBinaryFundingLot?
   product_binary_settlement_job ProductBinarySettlementJob?
+  messages                      OrderMessage[]
+  payment_evidence              OrderPaymentEvidence[]
 
   @@index([fulfillment_method, status], map: "orders_fulfillment_method_status_idx")
+  @@index([payment_due_at, payment_status, status], map: "orders_payment_expiry_idx")
   @@map("orders")
+}
+
+model OrderPaymentEvidence {
+  id               String    @id @default(uuid()) @db.Uuid
+  order_id         String
+  submitted_by     String    @db.Uuid
+  sender_name      String    @db.VarChar(160)
+  reference_number String    @db.VarChar(160)
+  amount           Decimal   @db.Decimal(10, 2)
+  paid_at          DateTime  @db.Timestamptz(6)
+  proof_path       String
+  status           String    @default("submitted") @db.VarChar(24)
+  reviewed_by      String?   @db.Uuid
+  reviewed_at      DateTime? @db.Timestamptz(6)
+  rejection_reason String?   @db.VarChar(500)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  order            Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+  @@unique([order_id, reference_number])
+  @@index([order_id, created_at])
+  @@map("order_payment_evidence")
+}
+
+model OrderMessage {
+  id          String   @id @default(uuid()) @db.Uuid
+  order_id    String
+  sender_id   String
+  sender_name String   @db.VarChar(160)
+  sender_role String   @db.VarChar(40)
+  message     String   @db.VarChar(2000)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  order       Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  sender      User     @relation("OrderMessageSender", fields: [sender_id], references: [id], onDelete: Restrict)
+
+  @@index([order_id, created_at])
+  @@map("order_messages")
 }
 
 model OrderItem {
@@ -1848,6 +1897,7 @@ model PaymentMethod {
   account_number String    @db.VarChar
   bank_name      String?   @db.VarChar
   status         String    @default("pending") @db.VarChar
+  is_enabled     Boolean   @default(true)
   created_at     DateTime? @default(now()) @db.Timestamptz(6)
   updated_at     DateTime? @default(now()) @updatedAt @db.Timestamptz(6)
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)

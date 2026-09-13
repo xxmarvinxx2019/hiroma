@@ -8,6 +8,7 @@ import {
   removePinRequestPaymentProof,
   uploadPinRequestPaymentProof,
 } from '@/app/lib/pinRequestPaymentProof'
+import { notifyActiveAdmins } from '@/app/lib/adminRequestNotifications'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -91,6 +92,14 @@ export async function POST(req: NextRequest, { params }: Context) {
         description: 'Submitted City Distributor PIN-request payment evidence.',
         metadata: { owner_city_id: user.id, request_id: id, evidence_id: evidenceId, reference_number: referenceNumber },
         status: 'under_review', ...getClientInfo(req),
+      })
+      await notifyActiveAdmins(tx, {
+        type: 'pin_request_payment_submitted',
+        title: 'PIN payment proof needs review',
+        message: `${user.full_name || user.username} submitted payment proof for a City PIN request. Reference: ${referenceNumber}.`,
+        entityType: 'pin_request',
+        entityId: id,
+        actionUrl: '/dashboard/admin/pin-requests',
       })
     })
     return NextResponse.json({ success: true })

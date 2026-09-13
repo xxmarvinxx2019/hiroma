@@ -10,6 +10,7 @@ import { Role } from '@prisma/client'
 import { canReadPaymentMethodTarget } from '@/app/lib/paymentMethodAccess'
 import { recommendFulfillmentDistributor } from '@/app/lib/orderSecurity'
 import { claimPayoutDestinationOwner, PayoutDestinationOwnershipError } from '@/app/lib/payoutDestinationOwner'
+import { notifyActiveAdmins } from '@/app/lib/adminRequestNotifications'
 
 async function resolveAuthorizedSupplier(user: { id: string; role: string }, req: NextRequest): Promise<string | null> {
   if (user.role === 'regional') return prisma.user.findFirst({ where: { role: 'admin', status: 'active' }, select: { id: true } }).then((item) => item?.id || null)
@@ -29,7 +30,7 @@ async function resolveAuthorizedSupplier(user: { id: string; role: string }, req
   if (user.role === 'reseller') {
     const profile = await prisma.resellerProfile.findUnique({ where: { user_id: user.id }, select: { city_dist_id: true } })
     if (!profile?.city_dist_id) return null
-    const candidates = await prisma.distributorProfile.findMany({ where: { dist_level: 'city', is_active: true, user: { status: 'active' } }, select: { user_id: true, coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true, user: { select: { full_name: true } } } })
+    const candidates = await prisma.distributorProfile.findMany({ where: { dist_level: { in: ['city', 'branch'] }, is_active: true, user: { status: 'active' } }, select: { user_id: true, coverage_area: true, region_name: true, province_name: true, city_muni_name: true, barangay_name: true, user: { select: { full_name: true } } } })
     const params = req.nextUrl.searchParams
     return recommendFulfillmentDistributor(candidates.map((candidate) => ({ id: candidate.user_id, full_name: candidate.user.full_name, coverage_area: candidate.coverage_area, region_name: candidate.region_name, province_name: candidate.province_name, city_muni_name: candidate.city_muni_name, barangay_name: candidate.barangay_name })), profile.city_dist_id, { address: params.get('delivery_address') || '', region: params.get('region') || '', province: params.get('province') || '', city: params.get('city') || '', barangay: params.get('barangay') || '' })?.distributor.id || null
   }
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     const requestedStatus = allowedStatuses.includes(status) ? status : undefined
     let methods: Array<{
       id: string; type: string; account_name: string; account_number: string; bank_name: string | null
-      status: string; created_at: Date | null; updated_at: Date | null
+      status: string; is_enabled: boolean; created_at: Date | null; updated_at: Date | null
       user: { id: string; full_name: string; username: string; role: Role }
     }>
 
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
       const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
       if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
-        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
+        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus, ...(user_id ? { is_enabled: true } : {}) },
         orderBy: { created_at: 'desc' },
         include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
@@ -103,7 +104,7 @@ export async function GET(req: NextRequest) {
       const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
       if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
-        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus },
+        where: { user_id: targetId, status: user_id ? 'approved' : requestedStatus, ...(user_id ? { is_enabled: true } : {}) },
         orderBy: { created_at: 'desc' },
         include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
@@ -112,7 +113,7 @@ export async function GET(req: NextRequest) {
       const authorizedSupplierId = await resolveAuthorizedSupplier(user, req)
       if (!canReadPaymentMethodTarget(user.id, user.role, targetId, authorizedSupplierId)) return NextResponse.json({ error: 'Payment method access denied.' }, { status: 403 })
       methods = await prisma.paymentMethod.findMany({
-        where: { user_id: targetId, ...(user_id ? { status: 'approved' } : requestedStatus ? { status: requestedStatus } : {}) },
+        where: { user_id: targetId, ...(user_id ? { status: 'approved', is_enabled: true } : requestedStatus ? { status: requestedStatus } : {}) },
         orderBy: { created_at: 'desc' },
         include: { user: { select: { id: true, full_name: true, username: true, role: true } } },
       })
@@ -128,12 +129,18 @@ export async function GET(req: NextRequest) {
       account_number: m.account_number,
       bank_name:      m.bank_name || null,
       status:         m.status,
+      is_enabled:     m.is_enabled,
       created_at:     m.created_at,
       updated_at:     m.updated_at,
       user: m.user,
     }))
 
-    return NextResponse.json({ methods: formatted })
+    const outlet = user_id
+      ? await prisma.distributorProfile.findUnique({ where: { user_id }, select: { accepts_cash_on_pickup: true } })
+      : user.role === 'city'
+        ? await prisma.distributorProfile.findUnique({ where: { user_id: user.id }, select: { accepts_cash_on_pickup: true } })
+        : null
+    return NextResponse.json({ methods: formatted, accepts_cash_on_pickup: outlet?.accepts_cash_on_pickup ?? false })
   } catch (error) {
     console.error('[PAYMENT METHODS GET]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
@@ -215,10 +222,30 @@ export async function POST(req: NextRequest) {
       if (!identity?.identity_document_hash) return NextResponse.json({ error: 'Complete identity verification before registering a payout account.' }, { status: 403 })
       await prisma.$transaction(async (tx) => {
         await claimPayoutDestinationOwner(tx, { type, bankName: methodData.bank_name, accountNumber: methodData.account_number, identityHash: identity.identity_document_hash!, userId: user.id })
-        await tx.paymentMethod.create({ data: methodData })
+        const created = await tx.paymentMethod.create({ data: methodData })
+        await notifyActiveAdmins(tx, {
+          type: 'payment_method_submitted',
+          title: 'Payout account needs approval',
+          message: `${user.full_name || user.username} submitted a ${type === 'gcash' ? 'GCash' : 'bank'} payout account for verification.`,
+          entityType: 'payment_method',
+          entityId: created.id,
+          actionUrl: '/dashboard/admin/payment-methods',
+        })
       })
     } else {
-      await prisma.paymentMethod.create({ data: methodData })
+      await prisma.$transaction(async (tx) => {
+        const created = await tx.paymentMethod.create({ data: methodData })
+        if (user.role !== 'admin') {
+          await notifyActiveAdmins(tx, {
+            type: 'payment_method_submitted',
+            title: 'Payment account needs approval',
+            message: `${user.full_name || user.username} submitted a ${type === 'gcash' ? 'GCash' : 'bank'} payment account for verification.`,
+            entityType: 'payment_method',
+            entityId: created.id,
+            actionUrl: '/dashboard/admin/payment-methods',
+          })
+        }
+      })
     }
 
     return NextResponse.json({ success: true, message: 'Payment method submitted for approval.' })
@@ -231,15 +258,31 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── PATCH — admin approves/rejects ──
+// ── PATCH — admin approval or outlet acceptance controls ──
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'admin') {
+    if (!user || !['admin', 'city'].includes(user.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { id, status } = await req.json()
+    const { id, status, action, enabled } = await req.json()
+
+    if (user.role === 'city' && action === 'toggle_cash_on_pickup' && typeof enabled === 'boolean') {
+      await prisma.distributorProfile.update({ where: { user_id: user.id }, data: { accepts_cash_on_pickup: enabled } })
+      return NextResponse.json({ success: true })
+    }
+
+    if (user.role === 'city' && action === 'toggle_method' && id && typeof enabled === 'boolean') {
+      const updated = await prisma.paymentMethod.updateMany({
+        where: { id, user_id: user.id, status: 'approved' },
+        data: { is_enabled: enabled },
+      })
+      if (updated.count !== 1) return NextResponse.json({ error: 'Only your approved payment methods can be enabled.' }, { status: 404 })
+      return NextResponse.json({ success: true })
+    }
+
+    if (user.role !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 
     if (!id || !['approved', 'rejected'].includes(status)) {
       return NextResponse.json({ error: 'id and valid status required.' }, { status: 400 })

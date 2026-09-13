@@ -12,6 +12,12 @@ Asia/Manila). A paid and delivered order still attempts Product Binary
 settlement immediately; this cron is the safety net for obligations that remain
 pending or fail because of a temporary error.
 
+The unpaid-order expiry worker is also temporarily scheduled once daily on
+Hobby. Its 48-hour `payment_due_at` remains authoritative: late proof is
+rejected immediately, while reserved stock is released by the next daily sweep.
+At the same Pro cutover, change `/api/cron/expire-unpaid-orders` to
+`0 * * * *` so automatic stock release occurs within one hour of expiry.
+
 This daily schedule is temporary and is not the approved nationwide-production
 capacity. The worker leases at most ten due obligations per invocation, so a
 daily retry can delay recovery and accumulate a backlog. Before the public

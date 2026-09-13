@@ -11,6 +11,7 @@ import {
 } from '@/app/lib/resellerSecurityPin'
 import { CommissionType } from '@prisma/client'
 import { InsufficientPayoutFundsError, lockPayoutRequestsForUser, reservePayoutFunds } from '@/app/lib/payoutFunds'
+import { notifyActiveAdmins } from '@/app/lib/adminRequestNotifications'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 
 // ── GET wallet balance + commission history + payout history ──
@@ -305,6 +306,15 @@ export async function POST(req: NextRequest) {
         ...getClientInfo(req),
         risk_level: 'medium',
         status: 'completed',
+      })
+      await notifyActiveAdmins(tx, {
+        type: 'payout_requested',
+        title: 'New reseller payout request',
+        message: `${user.full_name || user.username} requested ₱${requestedAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} through ${resolvedMethod}. Batch: ${batchId}.`,
+        amount: requestedAmount,
+        entityType: 'payout',
+        entityId: created.id,
+        actionUrl: '/dashboard/admin/payouts',
       })
       return created
     })

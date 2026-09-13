@@ -24,6 +24,9 @@ interface Order {
   payment_method:      string | null
   payment_reference:   string | null
   payment_status:      string | null
+  fulfillment_method: string
+  pickup_scheduled_at: string | null
+  pickup_schedule_timezone: string | null
   cancelled_at: string | null
   cancelled_by_actor_id: string | null
   cancelled_by_name: string | null
@@ -955,7 +958,7 @@ export default function CityOrdersPage() {
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#0D1B3E] group-hover:text-white"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
                     {/* Confirm payment button */}
-                    {tab === 'reseller_orders' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                    {tab === 'reseller_orders' && order.payment_method === 'cash_on_pickup' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
                         onClick={() => handleConfirmPayment(order.id)}
                         disabled={updatingId === order.id}

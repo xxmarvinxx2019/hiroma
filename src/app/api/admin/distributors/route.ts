@@ -12,6 +12,12 @@ import {
   formatMemberId,
   getClientInfo,
 } from '@/app/lib/auditLog'
+import {
+  findActiveTerritoryHolder,
+  territoryConflictMessage,
+  territoryKey,
+  type ExclusiveDistributorLevel,
+} from '@/app/lib/distributorTerritory'
 
 // ── GET all distributors ──
 export async function GET(req: NextRequest) {
@@ -22,6 +28,23 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = req.nextUrl
+    const territoryLevel = searchParams.get('territory_level') as ExclusiveDistributorLevel | null
+    const territoryCode = searchParams.get('territory_code') || ''
+    if (territoryLevel && territoryCode) {
+      if (!['regional', 'provincial', 'city', 'branch'].includes(territoryLevel)) {
+        return NextResponse.json({ error: 'Invalid territory level.' }, { status: 400 })
+      }
+      const holder = await findActiveTerritoryHolder(prisma, territoryLevel, territoryCode)
+      return NextResponse.json({
+        available: !holder,
+        territory: holder ? {
+          level: holder.dist_level,
+          coverage_area: holder.coverage_area,
+          holder_name: holder.user.full_name,
+          holder_username: holder.user.username,
+        } : null,
+      })
+    }
     const parentLevel = searchParams.get('parent_level') || ''
     const search = searchParams.get('search') || ''
     const level = searchParams.get('level') || 'all'
@@ -356,8 +379,15 @@ export async function POST(req: NextRequest) {
     }
 
     const hashedPassword = await hashPassword(password)
+    const exclusiveLevel = dist_level as ExclusiveDistributorLevel
+    const exclusiveCode = territoryKey(exclusiveLevel, { regionCode: region_code, provinceCode: province_code, cityMuniCode: city_muni_code })
+    if (!exclusiveCode) {
+      return NextResponse.json({ error: 'The selected distributor territory is incomplete.' }, { status: 400 })
+    }
 
     const newDist = await prisma.$transaction(async (tx) => {
+      const territoryHolder = await findActiveTerritoryHolder(tx, exclusiveLevel, exclusiveCode)
+      if (territoryHolder) throw new DistributorTerritoryConflictError(territoryConflictMessage(exclusiveLevel))
       const memberId = await generateMemberId(tx)
       const newUser = await tx.user.create({
         data: {
@@ -431,12 +461,20 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error('[CREATE DISTRIBUTOR ERROR]', error)
+    if (error instanceof DistributorTerritoryConflictError || (error instanceof Error && error.message.includes('TERRITORY_ALREADY_ASSIGNED'))) {
+      return NextResponse.json(
+        { error: error instanceof DistributorTerritoryConflictError ? error.message : territoryConflictMessage('city') },
+        { status: 409 },
+      )
+    }
     return NextResponse.json(
       { error: 'Something went wrong.' },
       { status: 500 },
     )
   }
 }
+
+class DistributorTerritoryConflictError extends Error {}
 // ── PATCH edit distributor / assign parent / toggle status ──
 export async function PATCH(req: NextRequest) {
   try {
