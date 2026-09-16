@@ -10,7 +10,7 @@ interface Stats {
   package:   { name: string; price: number; direct_referral_bonus: number; pairing_bonus_value: number; point_php_value: number } | null
   city_dist: { full_name: string; username: string } | null
   wallet:    { balance: number; total_earned: number; total_withdrawn: number }
-  tree:      { left_count: number; right_count: number; position: string | null; sponsor: { full_name: string; username: string } | null }
+  tree:      { left_count: number; right_count: number; left_lifetime_points: number; right_lifetime_points: number; position: string | null; sponsor: { full_name: string; username: string } | null }
   rank: {
     current: string; total_pu: number
     ranks: { id: string; name: string; sequence: number; required_pu: number; pair_income: number }[]
@@ -222,6 +222,8 @@ export default function ResellerDashboardPage() {
   const walletBal     = stats.wallet?.balance        || 0
   const walletEarned  = stats.wallet?.total_earned   || 0
   const leftCount     = stats.tree?.left_count       || 0
+  const leftLifetimePoints = stats.tree?.left_lifetime_points ?? 0
+  const rightLifetimePoints = stats.tree?.right_lifetime_points ?? 0
   const rightCount    = stats.tree?.right_count      || 0
   const refToday      = stats.referrals?.today       || 0
   const refCap        = stats.referrals?.cap         || 10
@@ -395,8 +397,8 @@ export default function ResellerDashboardPage() {
             <section className={`${styles.premiumPanel} ${styles.premiumTeam}`}>
               <header><h2>Team Overview</h2><Link href="/dashboard/reseller/tree">View Tree →</Link></header>
               <div className={styles.premiumLegs}>
-                <article><i>👤</i><strong>{leftCount}</strong><span>Left Team</span><small>Members</small></article>
-                <article><i>👤</i><strong>{rightCount}</strong><span>Right Team</span><small>Members</small></article>
+                <article><i>◀</i><strong>{leftLifetimePoints.toLocaleString('en-PH')}</strong><span>Left Team</span><small>Lifetime Package Points</small></article>
+                <article><i>▶</i><strong>{rightLifetimePoints.toLocaleString('en-PH')}</strong><span>Right Team</span><small>Lifetime Package Points</small></article>
               </div>
               <dl>
                 <div><dt>Total Affiliates</dt><dd>{leftCount + rightCount}</dd></div>
@@ -684,14 +686,14 @@ export default function ResellerDashboardPage() {
 
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className={`bg-[#f0f7ff] rounded-xl p-4 text-center ${styles.teamTile} ${styles.teamTileLeft}`}>
-              <p className="text-3xl xl:text-4xl font-bold text-[#2563eb]">{leftCount}</p>
+              <p className="break-words text-3xl xl:text-4xl font-bold text-[#2563eb]">{leftLifetimePoints.toLocaleString('en-PH')}</p>
               <p className="text-xs text-gray-400 mt-1">Left Team</p>
-              <p className="text-[10px] text-[#2563eb] mt-0.5">Members</p>
+              <p className="text-[10px] text-[#2563eb] mt-0.5">Lifetime Package Points</p>
             </div>
             <div className={`bg-[#fef9ee] rounded-xl p-4 text-center ${styles.teamTile} ${styles.teamTileRight}`}>
-              <p className="text-3xl xl:text-4xl font-bold text-[#9a6f1e]">{rightCount}</p>
+              <p className="break-words text-3xl xl:text-4xl font-bold text-[#9a6f1e]">{rightLifetimePoints.toLocaleString('en-PH')}</p>
               <p className="text-xs text-gray-400 mt-1">Right Team</p>
-              <p className="text-[10px] text-[#9a6f1e] mt-0.5">Members</p>
+              <p className="text-[10px] text-[#9a6f1e] mt-0.5">Lifetime Package Points</p>
             </div>
           </div>
 

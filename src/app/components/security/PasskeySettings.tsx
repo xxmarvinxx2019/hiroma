@@ -1,5 +1,6 @@
 'use client'
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { useEffect, useState } from 'react'
 import { startRegistration } from '@simplewebauthn/browser'
 
@@ -69,7 +70,7 @@ export default function PasskeySettings() {
     <div className="space-y-4 p-5">
       <div className="grid gap-2 sm:grid-cols-2">
         <input value={deviceName} onChange={event => setDeviceName(event.target.value)} maxLength={60} placeholder="Device name (for example, My iPhone)" className="rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-sm" />
-        <input value={password} onChange={event => setPassword(event.target.value)} type="password" autoComplete="current-password" placeholder="Current password" className="rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-sm" />
+        <PasswordInput value={password} onChange={event => setPassword(event.target.value)} type="password" autoComplete="current-password" placeholder="Current password" className="rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 text-sm" />
       </div>
       <button type="button" disabled={busy} onClick={register} className="rounded-lg bg-[#0D1B3E] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Working...' : 'Register this device'}</button>
       {message && <p className="rounded-lg bg-[#F0F2F8] px-3 py-2 text-xs text-[#0D1B3E]">{message}</p>}

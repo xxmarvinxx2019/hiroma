@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { useLiveConversation, useSupportTyping, useConversationScroll } from "@/app/components/useLiveConversation";
 type Ticket = {
   id: string;
   ticket_number: string;
@@ -27,6 +28,10 @@ export default function AdminTicketPage() {
     [agents, setAgents] = useState<Agent[]>([]),
     [reply, setReply] = useState(""),
     [sending, setSending] = useState(false);
+  const conversationScroll = useConversationScroll(ticket?.messages.at(-1)?.id);
+  const [typing, setTyping] = useState<{ name: string }[]>([]);
+  const notifyTyping = useSupportTyping(`/api/support/tickets/${id}/messages`);
+  const reconnecting = useLiveConversation<{ ticket: Ticket; typing: { name: string }[] }>(`/api/support/tickets/${id}/messages`, (data) => { setTicket(data.ticket); setTyping(data.typing || []); });
   const load = async () => {
     const [ticketRes, listRes] = await Promise.all([
       fetch(`/api/support/tickets/${id}/messages`),
@@ -38,10 +43,9 @@ export default function AdminTicketPage() {
     setAgents(listData.staff || []);
   };
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    void fetch("/api/admin/support-requests", { signal: controller.signal }).then(r => r.json()).then(data => setAgents(data.staff || [])).catch(() => {});
+    return () => controller.abort();
   }, [id]);
   async function patch(data: object) {
     await fetch("/api/admin/support-requests", {
@@ -61,6 +65,7 @@ export default function AdminTicketPage() {
     });
     if (r.ok) {
       setReply("");
+      notifyTyping("");
       await load();
     }
     setSending(false);
@@ -156,7 +161,7 @@ export default function AdminTicketPage() {
       </div>
       <div className="rounded-2xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold text-[#0D1B3E]">Conversation</h2>
-        <div className="mt-4 max-h-[460px] space-y-3 overflow-y-auto overscroll-contain rounded-2xl bg-[#F8F9FC] p-3 sm:p-4">
+        <div {...conversationScroll} className="mt-4 max-h-[460px] space-y-3 overflow-y-auto overscroll-contain rounded-2xl bg-[#F8F9FC] p-3 sm:p-4">
           {ticket.messages.map((m) => (
             <div
               key={m.id}
@@ -176,12 +181,14 @@ export default function AdminTicketPage() {
             </div>
           ))}
         </div>
+        <p aria-live="polite" className="mt-3 min-h-5 text-xs text-gray-500">{reconnecting ? "Reconnecting…" : typing.length ? `${typing.map(person => person.name).join(", ")} is typing…` : ""}</p>
         {ticket.status !== "resolved" && (
           <div className="mt-5 border-t border-[#0D1B3E]/10 pt-4">
             <textarea
               value={reply}
               disabled={sending}
-              onChange={(e) => setReply(e.target.value)}
+              onChange={(e) => { setReply(e.target.value); notifyTyping(e.target.value); }}
+              onBlur={() => notifyTyping("")}
               rows={4}
               placeholder="Reply to this ticket..."
               className="w-full rounded-xl border p-3 text-sm"

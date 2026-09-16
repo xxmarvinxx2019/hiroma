@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
+import { useLiveConversation, useSupportTyping, useConversationScroll } from "@/app/components/useLiveConversation";
 type Ticket = {
   ticket_number: string;
   subject: string;
@@ -45,18 +46,17 @@ export default function TicketPage() {
     [error, setError] = useState(""),
     [reply, setReply] = useState(""),
     [sending, setSending] = useState(false);
+  const conversationScroll = useConversationScroll(ticket?.messages.at(-1)?.id);
+  const [typing, setTyping] = useState<{ name: string }[]>([]);
+  const notifyTyping = useSupportTyping(`/api/support/tickets/${id}/messages`);
+  const reconnecting = useLiveConversation<{ ticket: Ticket; typing: { name: string }[] }>(`/api/support/tickets/${id}/messages`, (data) => { setTicket(data.ticket); setTyping(data.typing || []); });
   const load = async () => {
     const r = await fetch(`/api/support/tickets/${id}/messages`);
     const d = await r.json();
     if (!r.ok) setError(d.error || "Unable to load ticket.");
     else setTicket(d.ticket);
   };
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [id]);
+
   async function send() {
     if (sending || reply.trim().length < 2) return;
     setSending(true);
@@ -69,6 +69,7 @@ export default function TicketPage() {
     const d = await r.json();
     if (r.ok) {
       setReply("");
+      notifyTyping("");
       await load();
     } else setError(d.error || "Unable to send reply.");
     setSending(false);
@@ -158,7 +159,7 @@ export default function TicketPage() {
         <p className="mt-1 text-xs text-gray-400">
           You and Hiroma Support can reply here about this ticket.
         </p>
-        <div className="mt-5 max-h-[460px] space-y-3 overflow-y-auto overscroll-contain rounded-2xl bg-[#F8F9FC] p-3 sm:p-4">
+        <div {...conversationScroll} className="mt-5 max-h-[460px] space-y-3 overflow-y-auto overscroll-contain rounded-2xl bg-[#F8F9FC] p-3 sm:p-4">
           {ticket.messages.length === 0 ? (
             <p className="rounded-xl bg-[#F8F9FC] p-4 text-sm text-gray-400">
               No support reply yet. We will update you here.
@@ -191,6 +192,7 @@ export default function TicketPage() {
             })
           )}
         </div>
+        <p aria-live="polite" className="mt-3 min-h-5 text-xs text-gray-500">{reconnecting ? "Reconnecting…" : typing.length ? `${typing.map(person => person.name).join(", ")} is typing…` : ""}</p>
         {ticket.status !== "resolved" && (
           <div className="mt-5 border-t border-[#0D1B3E]/10 pt-4">
             <label className="text-sm font-semibold text-[#0D1B3E]">
@@ -198,7 +200,8 @@ export default function TicketPage() {
               <textarea
                 value={reply}
                 disabled={sending}
-                onChange={(e) => setReply(e.target.value)}
+                onChange={(e) => { setReply(e.target.value); notifyTyping(e.target.value); }}
+              onBlur={() => notifyTyping("")}
                 rows={4}
                 placeholder="Add more information or answer the support team…"
                 className="mt-2 w-full rounded-xl border p-3 text-sm disabled:opacity-60"

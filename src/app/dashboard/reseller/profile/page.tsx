@@ -1,5 +1,6 @@
 'use client'
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { useState, useEffect } from 'react'
 import SecurityPinModal from '@/app/components/ui/SecurityPinModal'
 
@@ -50,7 +51,7 @@ function InputField({
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-      <input
+      <PasswordInput
         type={type}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}

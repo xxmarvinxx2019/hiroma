@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const inventoryRoute = readFileSync('src/app/api/city/inventory/audits/[id]/route.ts', 'utf8')
+const recount = readFileSync('src/app/lib/posShiftRecount.ts', 'utf8')
 const posBootstrapRoute = readFileSync('src/app/api/city/pos/bootstrap/route.ts', 'utf8')
 const depositRoute = readFileSync('src/app/api/area-manager/deposits/route.ts', 'utf8')
 const branchDepositRoute = readFileSync('src/app/api/city/deposits/route.ts', 'utf8')
@@ -18,14 +19,15 @@ test('inventory reconciliation atomically requires the frozen expected quantity'
 })
 
 test('returning a POS closing creates one cashier recount notification with the manager note', () => {
-  assert.match(inventoryRoute, /const returned = await tx\.posShift\.updateMany/)
-  assert.match(inventoryRoute, /returned\.count === 1/)
-  assert.match(inventoryRoute, /notification\.upsert/)
-  assert.match(inventoryRoute, /pos-shift-recount:\$\{returnedShift\.id\}/)
-  assert.match(inventoryRoute, /type: 'pos_shift_recount_required'/)
-  assert.match(inventoryRoute, /title: 'Shift returned for recount'/)
-  assert.match(inventoryRoute, /Note: \$\{notes\}/)
-  assert.match(inventoryRoute, /action_url: '\/dashboard\/city\/pos\/history'/)
+  assert.match(inventoryRoute, /returnPosShiftForRecount\(tx/)
+  assert.match(recount, /const returned = await tx\.posShift\.updateMany/)
+  assert.match(recount, /returned\.count !== 1/)
+  assert.match(recount, /notification\.upsert/)
+  assert.match(recount, /notificationUuid\(`pos-shift-recount:/)
+  assert.match(recount, /type: 'pos_shift_recount_required'/)
+  assert.match(recount, /title: 'Shift returned for recount'/)
+  assert.match(recount, /Note: \$\{input.notes\}/)
+  assert.match(recount, /action_url: `\/dashboard\/city\/pos\/history\?shift_id=/)
 })
 
 test('POS bootstrap backfills a missing recount notification without duplicating it', () => {

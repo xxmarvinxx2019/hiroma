@@ -113,7 +113,14 @@ export default function PosShiftHistoryPage() {
   }, [selectedShiftId, view]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const refresh = () => { if (!document.hidden && navigator.onLine) void load(); };
+    const interval = window.setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
   }, [load]);
   const loadCash = useCallback(async (shiftId: string) => {
     try {

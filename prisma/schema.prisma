@@ -1956,7 +1956,7 @@ model AuditLog {
 }
 
 model Notification {
-  id          String    @id @default(uuid())
+  id          String    @id @default(uuid()) @db.Uuid
   user_id     String
   type        String    @db.VarChar
   title       String    @db.VarChar
@@ -1994,6 +1994,7 @@ model SupportRequest {
   submitter             User?                  @relation(fields: [user_id], references: [id], onDelete: SetNull)
   assignee              User?                  @relation("SupportRequestAssignee", fields: [assigned_to], references: [id], onDelete: SetNull)
   messages              SupportMessage[]
+  typing                SupportTyping[]
   attachments           SupportAttachment[]
   submitter_fingerprint String?
   email_fingerprint     String?
@@ -2005,6 +2006,17 @@ model SupportRequest {
   @@index([submitter_fingerprint, created_at])
   @@index([email_fingerprint, created_at])
   @@map("support_requests")
+}
+
+model SupportTyping {
+  request_id String
+  actor_id String
+  name String
+  expires_at DateTime @db.Timestamptz(6)
+  request SupportRequest @relation(fields: [request_id], references: [id], onDelete: Cascade)
+
+  @@id([request_id, actor_id])
+  @@map("support_typing")
 }
 
 model SupportCaptchaChallenge {
