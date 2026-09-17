@@ -1,6 +1,23 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { PATCH as reviewInventoryAudit } from '@/app/api/city/inventory/audits/[id]/route'
+
+// Operations Approvers use this POS route without requiring inventory-staff access.
+export async function PATCH(request: NextRequest) {
+  try {
+    const user = await getCurrentUser()
+    if (!user || user.role !== 'city' || (user.is_staff && !user.permissions?.includes('pos_approve'))) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 })
+    const body = await request.clone().json()
+    if (typeof body.audit_id !== 'string' || !['approve', 'reject'].includes(body.action)) return NextResponse.json({ error: 'A shift closing and review decision are required.' }, { status: 400 })
+    const audit = await prisma.inventoryAuditSession.findFirst({ where: { id: body.audit_id, owner_id: user.id, scope: 'shift_closing', pos_shift_id: { not: null } }, select: { id: true } })
+    if (!audit) return NextResponse.json({ error: 'Shift closing not found.' }, { status: 404 })
+    return reviewInventoryAudit(request, { params: Promise.resolve({ id: audit.id }) })
+  } catch (error) {
+    console.error('[POS SHIFT REVIEW]', error)
+    return NextResponse.json({ error: 'Unable to review the shift closing.' }, { status: 500 })
+  }
+}
 
 export async function GET() {
   try {

@@ -1,5 +1,6 @@
 "use client";
 
+import { PasswordEyeIcon } from '@/app/components/ui/PasswordInput'
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -25,8 +26,8 @@ function PasswordInput({ confirm = false, visible, value, onChange, onToggle }: 
           required
           className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2.5 pr-14 outline-none focus:border-[#C9A84C]"
         />
-        <button type="button" onClick={onToggle} className="absolute inset-y-0 right-0 flex w-14 items-center justify-center text-xs text-gray-400 hover:text-[#C9A84C]" aria-label={visible ? "Hide password" : "Show password"}>
-          {visible ? "Hide" : "Show"}
+        <button type="button" onClick={onToggle} className="absolute inset-y-0 right-0 flex w-14 items-center justify-center text-xs text-gray-400 hover:text-[#C9A84C]" aria-pressed={visible} aria-label={visible ? "Hide password" : "Show password"}>
+          <PasswordEyeIcon visible={visible}/>
         </button>
       </span>
     </label>

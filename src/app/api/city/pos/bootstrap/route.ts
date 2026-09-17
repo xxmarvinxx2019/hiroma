@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { notificationUuid } from '@/app/lib/notificationUuid'
 
 function cleanText(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -132,7 +133,6 @@ export async function POST(req: Request) {
       }),
       prisma.posShift.findFirst({
         where: {
-          terminal_id: terminal.id,
           opened_by_id: actorId,
           status: { in: ['locally_closed', 'needs_review'] },
         },
@@ -174,10 +174,10 @@ export async function POST(req: Request) {
       })
       if (!existingRecountNotification) {
         await prisma.notification.upsert({
-          where: { id: `pos-shift-recount:${blockingShift.id}` },
+          where: { id: notificationUuid(`pos-shift-recount:${blockingShift.id}`) },
           update: {},
           create: {
-            id: `pos-shift-recount:${blockingShift.id}`,
+            id: notificationUuid(`pos-shift-recount:${blockingShift.id}`),
             user_id: actorId,
             type: 'pos_shift_recount_required',
             title: 'Shift returned for recount',

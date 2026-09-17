@@ -67,10 +67,10 @@ export default function ShiftClosingApprovalsPage() {
     setSaving(true);
     setError("");
     try {
-      const response = await fetch(`/api/city/inventory/audits/${selected.id}`, {
+      const response = await fetch('/api/city/pos/shift-approvals', {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: decision, notes }),
+        body: JSON.stringify({ audit_id: selected.id, action: decision, notes }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to save the shift decision.");

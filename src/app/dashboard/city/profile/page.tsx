@@ -1,5 +1,6 @@
 'use client'
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { useState, useEffect } from 'react'
 import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
 
@@ -53,7 +54,7 @@ function InputField({
         <label className="block text-xs font-medium text-gray-500">{label}</label>
         {disabled && <span className="text-[10px] text-gray-400 flex items-center gap-0.5">🔒 Admin only</span>}
       </div>
-      <input
+      <PasswordInput
         type={type}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}

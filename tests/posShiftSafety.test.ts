@@ -66,6 +66,8 @@ test('concurrent shift closes are serialized and return a safe retry response', 
 test('returned shifts block a new shift and guide the cashier through recount', () => {
   assert.match(route, /status: \{ in: \["locally_closed", "needs_review"\] \}/)
   assert.match(route, /SHIFT_REVIEW_PENDING/)
+  assert.match(route, /OR: \[\{ opened_by_id: actorId \}, \{ terminal_id: terminal\.id \}\]/)
+  assert.match(route, /prisma\.\$transaction\(async \(tx\) =>/)
   assert.match(bootstrap, /blocking_shift: blockingShift/)
   assert.match(posPage, /Shift returned for recount/)
   assert.match(posPage, /Review & Recount/)

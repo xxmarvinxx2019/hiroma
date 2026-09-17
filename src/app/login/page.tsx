@@ -1,5 +1,6 @@
 'use client'
 
+import { PasswordEyeIcon } from '@/app/components/ui/PasswordInput'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
@@ -370,9 +371,11 @@ export function LoginPortal({ portal = 'legacy' }: LoginPageProps) {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0D1B3E] text-xs cursor-pointer"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-gray-400 hover:text-[#C9A84C] focus-visible:outline-2 focus-visible:outline-[#C9A84C] cursor-pointer"
                 >
-                  {showPassword ? 'Hide' : 'Show'}
+                  <PasswordEyeIcon visible={showPassword}/>
                 </button>
               </div>
             </div>}

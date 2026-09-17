@@ -74,6 +74,13 @@ export async function GET() {
           source_user: { select: { full_name: true, username: true } },
         },
       }),
+
+      // Credited lifetime package volume stays cumulative after pairing or flashout.
+      prisma.binaryPairEvent.groupBy({
+        by: ['source_leg'],
+        where: { recipient_user_id: user.id },
+        _sum: { source_points: true },
+      }),
     ])
 
     const profileBase       = results[0] as any
@@ -190,6 +197,8 @@ export async function GET() {
       tree: {
         left_count:  treeNode?.left_count  || 0,
         right_count: treeNode?.right_count || 0,
+        left_lifetime_points: results[5].find(row => row.source_leg === 'left')?._sum.source_points ?? 0,
+        right_lifetime_points: results[5].find(row => row.source_leg === 'right')?._sum.source_points ?? 0,
         position:    treeNode?.position    || null,
         sponsor:     treeNode?.sponsor     || null,
       },

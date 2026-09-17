@@ -1,5 +1,6 @@
 'use client'
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { useState, useEffect } from 'react'
 import PasskeySettings from '@/app/components/security/PasskeySettings'
 import DistributorSecurityPinSettings from '@/app/components/security/DistributorSecurityPinSettings'
@@ -279,7 +280,7 @@ export default function SettingsPage() {
               <label className="block text-xs text-gray-400 mb-1">
                 Current password <span className="text-[#C9A84C]">*</span>
               </label>
-              <input
+              <PasswordInput
                 type="password"
                 value={passwordForm.current_password}
                 onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
@@ -292,7 +293,7 @@ export default function SettingsPage() {
                 <label className="block text-xs text-gray-400 mb-1">
                   New password <span className="text-[#C9A84C]">*</span>
                 </label>
-                <input
+                <PasswordInput
                   type="password"
                   value={passwordForm.new_password}
                   onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
@@ -304,7 +305,7 @@ export default function SettingsPage() {
                 <label className="block text-xs text-gray-400 mb-1">
                   Confirm new password <span className="text-[#C9A84C]">*</span>
                 </label>
-                <input
+                <PasswordInput
                   type="password"
                   value={passwordForm.confirm_password}
                   onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}

@@ -1,5 +1,6 @@
 'use client'
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { FormEvent, useState } from 'react'
 import type { PasswordReviewReason } from '@/app/lib/passwordReviewPolicy'
 
@@ -67,7 +68,6 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPasswords, setShowPasswords] = useState(false)
   const [submitting, setSubmitting] = useState<'retain' | 'change' | null>(null)
   const [error, setError] = useState('')
 
@@ -115,7 +115,6 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
     }
   }
 
-  const inputType = showPasswords ? 'text' : 'password'
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center overflow-y-auto bg-[#010817]/80 px-3 py-5 backdrop-blur-md sm:px-6 sm:py-8">
       <form onSubmit={changePassword} className="relative w-full max-w-3xl overflow-hidden rounded-[28px] border border-[#d8ad49]/70 bg-[#030d21] text-white shadow-[0_30px_90px_rgba(0,0,0,0.65)]" role="dialog" aria-modal="true" aria-labelledby="password-review-title">
@@ -169,10 +168,9 @@ export default function FirstLoginPasswordModal({ open, reviewReason = 'temporar
               ].map(([label, value, setter, autoComplete, placeholder]) => (
                 <label className="block" key={label as string}>
                   <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.15em] text-[#f5c24b]">{label as string}</span>
-                  <input type={inputType} value={value as string} onChange={(event) => (setter as (value: string) => void)(event.target.value)} autoComplete={autoComplete as string} className="w-full rounded-xl border border-white/15 bg-[#020a1b]/80 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[#f3bd3d] focus:ring-2 focus:ring-[#efb831]/20" placeholder={placeholder as string} />
+                  <PasswordInput type="password" value={value as string} onChange={(event) => (setter as (value: string) => void)(event.target.value)} autoComplete={autoComplete as string} className="w-full rounded-xl border border-white/15 bg-[#020a1b]/80 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[#f3bd3d] focus:ring-2 focus:ring-[#efb831]/20" placeholder={placeholder as string} />
                 </label>
               ))}
-              <button type="button" onClick={() => setShowPasswords((current) => !current)} className="text-sm font-bold text-[#f5c24b] hover:text-[#ffdb74] hover:underline">{showPasswords ? 'Hide passwords' : 'Show passwords'}</button>
             </div>
           )}
 

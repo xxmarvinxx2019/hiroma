@@ -23,6 +23,7 @@ function isValidUsername(username: string): boolean {
   return /^[a-z][a-z0-9]*$/.test(username)
 }
 
+import PasswordInput from '@/app/components/ui/PasswordInput'
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
@@ -1365,7 +1366,7 @@ export default function CityResellersPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-gray-400 mb-1">Password <span className="text-[#C9A84C]">*</span></label>
-                      <input
+                      <PasswordInput
                         type="password"
                         value={form.password}
                         onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -1375,7 +1376,7 @@ export default function CityResellersPage() {
                     </div>
                     <div>
                       <label className="block text-xs text-gray-400 mb-1">Confirm <span className="text-[#C9A84C]">*</span></label>
-                      <input
+                      <PasswordInput
                         type="password"
                         value={form.confirmPassword}
                         onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}

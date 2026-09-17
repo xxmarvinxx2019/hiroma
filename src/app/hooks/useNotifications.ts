@@ -34,11 +34,12 @@ export function useNotifications(userId?: string, previewLimit = 5) {
       const data = await response.json()
       const nextNotifications = (data.notifications || []) as Notification[]
       const latest = nextNotifications[0]
-      if (initializedRef.current && latest && latest.id !== latestIdRef.current && !latest.read_at) {
+      const latestKey = latest ? `${latest.id}:${latest.created_at}` : null
+      if (initializedRef.current && latest && latestKey !== latestIdRef.current && !latest.read_at) {
         setToast(latest)
         window.setTimeout(() => setToast(null), 5000)
       }
-      latestIdRef.current = latest?.id || latestIdRef.current
+      latestIdRef.current = latestKey || latestIdRef.current
       initializedRef.current = true
       setNotifications(nextNotifications)
       setUnreadCount(Number(data.unread || 0))

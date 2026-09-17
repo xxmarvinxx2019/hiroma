@@ -47,59 +47,46 @@ export async function POST(req: Request) {
         { error: "This POS terminal is not assigned to your location." },
         { status: 403 },
       );
-    const blockingShift = await prisma.posShift.findFirst({
-      where: {
-        owner_id: user.id,
-        terminal_id: terminal.id,
-        opened_by_id: actorId,
-        status: { in: ["locally_closed", "needs_review"] },
-      },
-      orderBy: { opened_at: "desc" },
-      select: { id: true, status: true, opened_at: true, closing_explanation: true },
-    });
-    if (blockingShift) {
-      return NextResponse.json(
-        {
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const blockingShift = await tx.posShift.findFirst({
+          where: {
+            owner_id: user.id,
+            OR: [{ opened_by_id: actorId }, { terminal_id: terminal.id }],
+            status: { in: ["locally_closed", "needs_review"] },
+          },
+          orderBy: { opened_at: "desc" },
+          select: { id: true, status: true, opened_at: true, closing_explanation: true },
+        });
+        if (blockingShift) return { blockingShift };
+        const shift = await tx.posShift.create({
+          data: { owner_id: user.id, terminal_id: terminal.id, opened_by_id: actorId, active_terminal_key: terminal.id, opening_cash: new Prisma.Decimal(openingCash) },
+          select: { id: true, status: true, opening_cash: true, opened_at: true },
+        });
+        return { shift };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 20_000 });
+      if ("blockingShift" in result) {
+        const blockingShift = result.blockingShift!;
+        return NextResponse.json({
           error: blockingShift.status === "needs_review"
-            ? "Your previous shift was returned for recount. Review the manager note and resubmit that shift before opening another one."
-            : "Your previous shift is still awaiting independent manager review. You cannot open another shift yet.",
+            ? "A previous shift was returned for recount. The original cashier must review the manager note and resubmit it before another shift can open."
+            : "A previous shift is still awaiting independent manager review. Another shift cannot open yet.",
           code: "SHIFT_REVIEW_PENDING",
           blocking_shift: blockingShift,
-        },
-        { status: 409 },
-      );
-    }
-    try {
-      const shift = await prisma.posShift.create({
-        data: {
-          owner_id: user.id,
-          terminal_id: terminal.id,
-          opened_by_id: actorId,
-          active_terminal_key: terminal.id,
-          opening_cash: new Prisma.Decimal(openingCash),
-        },
-        select: { id: true, status: true, opening_cash: true, opened_at: true },
-      });
-      return NextResponse.json({ shift }, { status: 201 });
+        }, { status: 409 });
+      }
+      return NextResponse.json({ shift: result.shift }, { status: 201 });
     } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      ) {
-        const current = await prisma.posShift.findFirst({
-          where: { terminal_id: terminal.id, status: "open" },
-          select: { id: true, opened_at: true },
-        });
-        return NextResponse.json(
-          {
-            error: "This terminal already has an open shift.",
-            current_shift: current,
-          },
-          { status: 409 },
-        );
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const current = await prisma.posShift.findFirst({ where: { terminal_id: terminal.id, status: "open" }, select: { id: true, opened_at: true } });
+        return NextResponse.json({ error: "This terminal already has an active shift.", current_shift: current }, { status: 409 });
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        return NextResponse.json({ error: "The shift changed during this request. Reload the shift status before opening another shift.", code: "SHIFT_OPEN_CONFLICT" }, { status: 409 });
       }
       throw error;
     }
+
   } catch (error) {
     console.error("[POS OPEN SHIFT]", error);
     return NextResponse.json(
@@ -311,6 +298,9 @@ export async function PATCH(req: Request) {
           where: { pos_shift_id: shift.id },
           update: {
             status: "submitted",
+            approved_at: null,
+            approved_by: null,
+            approval_notes: null,
             notes: explanation || "Branch end-of-shift blind count",
             submitted_at: new Date(),
             items: {
@@ -396,6 +386,9 @@ export async function PATCH(req: Request) {
               terminal_id: shift.terminal_id,
               mismatch,
               recount_confirmed: recountConfirmed,
+              counted_cash: countedCash,
+              expected_cash: expected,
+              inventory_counts: rows.map(row => ({ product_id: row.item.product_id, expected: row.item.quantity, counted: row.counted, damaged: row.damaged, expired: row.expired })),
             },
           },
         });
