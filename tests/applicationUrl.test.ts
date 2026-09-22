@@ -3,9 +3,16 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { resolveApplicationUrl } from '../src/app/lib/applicationUrl'
 
-test('production requires an explicitly configured exact HTTPS application origin', () => {
+test('production prefers an explicitly configured exact HTTPS application origin', () => {
   assert.equal(resolveApplicationUrl({
     configuredUrl: 'https://hiroma.vercel.app',
+    vercelProductionUrl: 'fallback.vercel.app',
+    requestOrigin: 'https://attacker.example',
+    production: true,
+  }), 'https://hiroma.vercel.app')
+
+  assert.equal(resolveApplicationUrl({
+    vercelProductionUrl: 'hiroma.vercel.app',
     requestOrigin: 'https://attacker.example',
     production: true,
   }), 'https://hiroma.vercel.app')
@@ -14,6 +21,21 @@ test('production requires an explicitly configured exact HTTPS application origi
     requestOrigin: 'https://attacker.example',
     production: true,
   }), /required in production/)
+})
+
+test('unsafe Vercel production hostnames are rejected', () => {
+  for (const vercelProductionUrl of [
+    'http://hiroma.vercel.app',
+    'user:password@hiroma.vercel.app',
+    'hiroma.vercel.app/reset-password',
+    'hiroma.vercel.app?next=evil',
+  ]) {
+    assert.throws(() => resolveApplicationUrl({
+      vercelProductionUrl,
+      requestOrigin: 'https://hiroma.vercel.app',
+      production: true,
+    }))
+  }
 })
 
 test('unsafe production application URLs are rejected', () => {

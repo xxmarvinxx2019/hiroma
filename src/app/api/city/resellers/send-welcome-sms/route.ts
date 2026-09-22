@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
     try {
       baseUrl = resolveApplicationUrl({
         configuredUrl: process.env.APP_URL,
+        vercelProductionUrl: process.env.VERCEL_PROJECT_PRODUCTION_URL,
         requestOrigin: req.nextUrl.origin,
         production: process.env.NODE_ENV === 'production',
       })
