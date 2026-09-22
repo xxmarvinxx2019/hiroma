@@ -32,13 +32,19 @@ function parseExactApplicationOrigin(value: string, production: boolean): string
 
 export function resolveApplicationUrl(input: {
   configuredUrl?: string
+  vercelProductionUrl?: string
   requestOrigin: string
   production?: boolean
 }): string {
   const production = input.production ?? false
   const configuredUrl = input.configuredUrl?.trim()
-  if (production && !configuredUrl) {
-    throw new ApplicationUrlConfigurationError('APP_URL is required in production.')
+  const vercelProductionUrl = input.vercelProductionUrl?.trim()
+  if (configuredUrl) return parseExactApplicationOrigin(configuredUrl, production)
+  if (production && vercelProductionUrl) {
+    return parseExactApplicationOrigin(`https://${vercelProductionUrl}`, true)
   }
-  return parseExactApplicationOrigin(configuredUrl || input.requestOrigin, production)
+  if (production) {
+    throw new ApplicationUrlConfigurationError('APP_URL or VERCEL_PROJECT_PRODUCTION_URL is required in production.')
+  }
+  return parseExactApplicationOrigin(input.requestOrigin, false)
 }
