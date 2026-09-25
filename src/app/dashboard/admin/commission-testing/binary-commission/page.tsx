@@ -97,6 +97,28 @@ type Data = {
     exact_cash_needed_for_all_commissions: number;
     reserve_held: number;
     reserve_gap: number;
+    contribution_before_binary: number;
+    binary_payout_ratio: number;
+    binary_payout_status: "healthy" | "warning" | "critical";
+  };
+  cash_protection: {
+    qualified_members_all_time: number;
+    members_with_unpaid_commissions: number;
+    total_commissions_earned_all_time: number;
+    direct_referral_earned_all_time: number;
+    recruitment_binary_earned_all_time: number;
+    product_binary_earned_all_time: number;
+    available_to_request: number;
+    pending_payout_requests: number;
+    pending_payout_members: number;
+    pending_payout_amount: number;
+    approved_payout_requests: number;
+    approved_payout_members: number;
+    approved_for_release: number;
+    minimum_protected_cash: number;
+    released_payouts_all_time: number;
+    released_payout_requests_all_time: number;
+    bank_balance_connected: boolean;
   };
   package_economics: Array<{
     package_name: string;
@@ -407,6 +429,50 @@ export default function BinaryCommissionPage() {
           <span className="font-semibold">Database update pending.</span>{" "}
           {data.warning}
         </div>
+      )}
+
+      {data?.accounting_ready && data.cash_protection && (
+        <section className="mt-6 overflow-hidden rounded-2xl border border-[#0D1B3E]/10 bg-white shadow-sm">
+          <div className="border-b border-[#0D1B3E]/10 bg-[#0D1B3E] px-5 py-4 text-white">
+            <h2 className="text-base font-bold">Company Commission Liability and Cash Protection</h2>
+            <p className="mt-1 text-xs leading-5 text-white/70">All-time qualified earnings are liabilities even when members have not requested payout. Keep at least the protected-cash amount available.</p>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Members who earned", data.cash_protection.qualified_members_all_time.toLocaleString(), "Unique members with Direct Referral, Recruitment Binary, or Product Binary earnings"],
+              ["All commissions earned", peso.format(data.cash_protection.total_commissions_earned_all_time), "Direct + Recruitment Binary + Product Binary since launch"],
+              ["Available to request", peso.format(data.cash_protection.available_to_request), `${data.cash_protection.members_with_unpaid_commissions.toLocaleString()} members still have unpaid commission`],
+              ["Pending payout requests", peso.format(data.cash_protection.pending_payout_amount), `${data.cash_protection.pending_payout_requests} requests from ${data.cash_protection.pending_payout_members} members`],
+              ["Approved for release", peso.format(data.cash_protection.approved_for_release), `${data.cash_protection.approved_payout_requests} approved requests already reserved`],
+              ["Minimum protected cash", peso.format(data.cash_protection.minimum_protected_cash), "Unrequested earnings plus approved payouts; do not treat this as spendable"],
+              ["Released to members", peso.format(data.cash_protection.released_payouts_all_time), `${data.cash_protection.released_payout_requests_all_time} completed payouts`],
+              ["Actual bank connection", data.cash_protection.bank_balance_connected ? "Connected" : "Not connected", "Compare the minimum protected cash with the real bank balance"],
+            ].map(([label, value, note]) => (
+              <article key={label} className="rounded-xl border border-[#0D1B3E]/8 bg-slate-50 p-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
+                <p className="mt-2 text-xl font-black text-[#0D1B3E]">{value}</p>
+                <p className="mt-1 text-xs leading-5 text-gray-500">{note}</p>
+              </article>
+            ))}
+          </div>
+          <div className="grid gap-4 border-t p-5 lg:grid-cols-[1.2fr_1fr]">
+            <article className="rounded-xl border border-[#0D1B3E]/10 p-4">
+              <h3 className="text-sm font-bold text-[#0D1B3E]">Where earned commissions came from</h3>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between"><dt>Direct Referral</dt><dd className="font-bold">{peso.format(data.cash_protection.direct_referral_earned_all_time)}</dd></div>
+                <div className="flex justify-between"><dt>Recruitment Binary cascading</dt><dd className="font-bold">{peso.format(data.cash_protection.recruitment_binary_earned_all_time)}</dd></div>
+                <div className="flex justify-between"><dt>Product Binary</dt><dd className="font-bold">{peso.format(data.cash_protection.product_binary_earned_all_time)}</dd></div>
+              </dl>
+            </article>
+            <article className={`rounded-xl border p-4 ${data.management_plan.binary_payout_status === "critical" ? "border-red-300 bg-red-50 text-red-800" : data.management_plan.binary_payout_status === "warning" ? "border-amber-300 bg-amber-50 text-amber-900" : "border-emerald-300 bg-emerald-50 text-emerald-800"}`}>
+              <p className="text-xs font-bold uppercase tracking-wide">Selected-period Recruitment Binary payout ratio</p>
+              <p className="mt-2 text-3xl font-black">{data.management_plan.binary_payout_ratio.toFixed(1)}%</p>
+              <p className="mt-2 text-xs leading-5">{peso.format(data.management_plan.binary_payable_generated)} qualified binary ÷ {peso.format(data.management_plan.contribution_before_binary)} company contribution available before binary.</p>
+              <p className="mt-2 text-xs font-semibold">Green below 50% · Warning from 50% · Critical from 70%</p>
+            </article>
+          </div>
+          {!data.cash_protection.bank_balance_connected && <div className="border-t border-amber-200 bg-amber-50 px-5 py-3 text-xs leading-5 text-amber-900">The system calculates how much cash must be protected, but it cannot confirm the actual bank balance until a bank balance or reconciliation feed is connected.</div>}
+        </section>
       )}
 
       <div className="mt-6">

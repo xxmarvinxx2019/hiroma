@@ -124,6 +124,26 @@ type OtherLiabilities = {
   direct_referral: number;
   product_binary: number;
 };
+type CompanyWideLiability = {
+  qualified_members: number;
+  members_with_unpaid: number;
+  direct_earned: number;
+  binary_earned: number;
+  product_binary_earned: number;
+  direct_available: number;
+  binary_available: number;
+  product_binary_available: number;
+};
+type PayoutPipeline = {
+  pending_requests: number;
+  pending_members: number;
+  pending_amount: number;
+  approved_requests: number;
+  approved_members: number;
+  approved_amount: number;
+  released_requests: number;
+  released_amount: number;
+};
 
 async function legacyBinaryReport(req: NextRequest) {
   const now = new Date();
@@ -299,6 +319,8 @@ export async function GET(req: NextRequest) {
       reconciliation,
       packageEconomics,
       otherLiabilities,
+      companyWideLiability,
+      payoutPipeline,
     ] = await Promise.all([
       prisma.$queryRaw<EventSummary[]>`
         SELECT COALESCE(SUM(completed_pairs),0)::int completed_pairs,
@@ -498,6 +520,41 @@ export async function GET(req: NextRequest) {
             0
           )::float product_binary
       `,
+      prisma.$queryRaw<CompanyWideLiability[]>`
+        WITH earned AS (
+          SELECT 'direct' source_type,user_id,original_amount,remaining_amount FROM direct_referral_reserve_lots
+          UNION ALL
+          SELECT 'binary',user_id,original_amount,remaining_amount FROM binary_payable_lots
+          UNION ALL
+          SELECT 'product_binary',user_id,original_amount,remaining_amount FROM product_binary_payable_lots
+        ), unpaid_members AS (
+          SELECT user_id FROM earned WHERE remaining_amount > 0
+          UNION
+          SELECT user_id FROM payouts WHERE status='approved'
+        )
+        SELECT
+          COUNT(DISTINCT user_id)::int qualified_members,
+          (SELECT COUNT(DISTINCT user_id)::int FROM unpaid_members) members_with_unpaid,
+          COALESCE(SUM(original_amount) FILTER (WHERE source_type='direct'),0)::float direct_earned,
+          COALESCE(SUM(original_amount) FILTER (WHERE source_type='binary'),0)::float binary_earned,
+          COALESCE(SUM(original_amount) FILTER (WHERE source_type='product_binary'),0)::float product_binary_earned,
+          COALESCE(SUM(remaining_amount) FILTER (WHERE source_type='direct'),0)::float direct_available,
+          COALESCE(SUM(remaining_amount) FILTER (WHERE source_type='binary'),0)::float binary_available,
+          COALESCE(SUM(remaining_amount) FILTER (WHERE source_type='product_binary'),0)::float product_binary_available
+        FROM earned
+      `,
+      prisma.$queryRaw<PayoutPipeline[]>`
+        SELECT
+          COUNT(*) FILTER (WHERE status='pending')::int pending_requests,
+          COUNT(DISTINCT user_id) FILTER (WHERE status='pending')::int pending_members,
+          COALESCE(SUM(amount) FILTER (WHERE status='pending'),0)::float pending_amount,
+          COUNT(*) FILTER (WHERE status='approved')::int approved_requests,
+          COUNT(DISTINCT user_id) FILTER (WHERE status='approved')::int approved_members,
+          COALESCE(SUM(amount) FILTER (WHERE status='approved'),0)::float approved_amount,
+          COUNT(*) FILTER (WHERE status='released')::int released_requests,
+          COALESCE(SUM(amount) FILTER (WHERE status='released'),0)::float released_amount
+        FROM payouts
+      `,
     ]);
 
     const payableLiability = Math.max(0, number(liability[0]?.amount));
@@ -542,6 +599,24 @@ export async function GET(req: NextRequest) {
       managementPlan.binary_payable_generated;
     const unpaidDirectReferral = number(otherLiabilities[0]?.direct_referral);
     const unpaidProductBinary = number(otherLiabilities[0]?.product_binary);
+    const companyLiability = companyWideLiability[0];
+    const pipeline = payoutPipeline[0];
+    const availableToRequest =
+      number(companyLiability?.direct_available) +
+      number(companyLiability?.binary_available) +
+      number(companyLiability?.product_binary_available);
+    const approvedForRelease = number(pipeline?.approved_amount);
+    const minimumProtectedCash = availableToRequest + approvedForRelease;
+    const contributionBeforeBinary = Math.max(
+      0,
+      managementPlan.company_pin_allocation - managementPlan.direct_payable_generated,
+    );
+    const binaryPayoutRatio = contributionBeforeBinary > 0
+      ? (managementPlan.binary_payable_generated / contributionBeforeBinary) * 100
+      : managementPlan.binary_payable_generated > 0 ? 100 : 0;
+    const binaryPayoutStatus = binaryPayoutRatio >= 70
+      ? "critical"
+      : binaryPayoutRatio >= 50 ? "warning" : "healthy";
     return NextResponse.json({
       accounting_ready: true,
       migration_required: null,
@@ -592,6 +667,29 @@ export async function GET(req: NextRequest) {
           payableLiability + unpaidDirectReferral + unpaidProductBinary,
         reserve_held: fundingPosition.totalReserveHeld,
         reserve_gap: fundingPosition.fundingShortfall,
+        contribution_before_binary: contributionBeforeBinary,
+        binary_payout_ratio: binaryPayoutRatio,
+        binary_payout_status: binaryPayoutStatus,
+      },
+      cash_protection: {
+        qualified_members_all_time: number(companyLiability?.qualified_members),
+        members_with_unpaid_commissions: number(companyLiability?.members_with_unpaid),
+        total_commissions_earned_all_time:
+          number(companyLiability?.direct_earned) + number(companyLiability?.binary_earned) + number(companyLiability?.product_binary_earned),
+        direct_referral_earned_all_time: number(companyLiability?.direct_earned),
+        recruitment_binary_earned_all_time: number(companyLiability?.binary_earned),
+        product_binary_earned_all_time: number(companyLiability?.product_binary_earned),
+        available_to_request: availableToRequest,
+        pending_payout_requests: number(pipeline?.pending_requests),
+        pending_payout_members: number(pipeline?.pending_members),
+        pending_payout_amount: number(pipeline?.pending_amount),
+        approved_payout_requests: number(pipeline?.approved_requests),
+        approved_payout_members: number(pipeline?.approved_members),
+        approved_for_release: approvedForRelease,
+        minimum_protected_cash: minimumProtectedCash,
+        released_payouts_all_time: number(pipeline?.released_amount),
+        released_payout_requests_all_time: number(pipeline?.released_requests),
+        bank_balance_connected: false,
       },
       ledger,
       ledger_page: {
