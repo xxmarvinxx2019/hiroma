@@ -314,7 +314,7 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
           ${completedPairs},${payablePairs},${capFlashPairs},${inactivePairs},${closingLeft},${closingRight},
           ${closingLifetimePairs},${closingLifetimePayable},${closingLifetimeFlashout},
           ${profile.package_id},${profile.package_name},${rank?.id || null},${rank?.name || 'Default'},${effectiveRatePoints},${PESO_PER_POINT},
-          ${rateAmount},${payableAmount},${flashoutAmount},${profile.cap_enabled},${profile.cap_enabled ? Number(profile.cap_limit) : null},${normalCommissionId},${flashCommissionId})
+          ${rateAmount},${payableAmount},${flashoutAmount},${true},${planCap},${normalCommissionId},${flashCommissionId})
       `
       await tx.$executeRaw`
         UPDATE product_binary_positions SET left_carryover_pu=${closingLeft},right_carryover_pu=${closingRight},
