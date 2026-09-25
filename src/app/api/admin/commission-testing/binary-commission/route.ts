@@ -104,6 +104,26 @@ type ReconciliationRow = {
   event_count: number; pair_mismatch_count: number; money_mismatch_count: number;
   completed_pairs: number; classified_pairs: number; expected_value: number; classified_value: number;
 };
+type PackageEconomicsRow = {
+  package_name: string;
+  registration_channel: string;
+  registrations: number;
+  customer_sales: number;
+  reseller_product_value: number;
+  company_pin_allocation: number;
+  outlet_acquisition_cost: number;
+  outlet_registration_profit: number;
+  direct_allocated: number;
+  direct_payable: number;
+  direct_retained: number;
+  binary_allocated: number;
+  binary_payable_generated: number;
+  binary_flashout_generated: number;
+};
+type OtherLiabilities = {
+  direct_referral: number;
+  product_binary: number;
+};
 
 async function legacyBinaryReport(req: NextRequest) {
   const now = new Date();
@@ -182,6 +202,22 @@ async function legacyBinaryReport(req: NextRequest) {
       matched_waiting: number(points[0]?.matched_points),
     },
     cap_rows: [],
+    package_economics: [],
+    management_plan: {
+      registrations: 0,
+      customer_sales: 0,
+      reseller_product_value: 0,
+      company_pin_allocation: 0,
+      direct_payable_generated: 0,
+      binary_payable_generated: 0,
+      contribution_after_commissions: 0,
+      exact_cash_needed_for_unpaid_binary: 0,
+      unpaid_direct_referral: 0,
+      unpaid_product_binary: 0,
+      exact_cash_needed_for_all_commissions: 0,
+      reserve_held: 0,
+      reserve_gap: 0,
+    },
     ledger: [],
     ledger_page: { page: 1, page_size: 100, total: 0, total_pages: 1 },
     liability_ledger: [],
@@ -261,6 +297,8 @@ export async function GET(req: NextRequest) {
       breakdowns,
       liabilityLedger,
       reconciliation,
+      packageEconomics,
+      otherLiabilities,
     ] = await Promise.all([
       prisma.$queryRaw<EventSummary[]>`
         SELECT COALESCE(SUM(completed_pairs),0)::int completed_pairs,
@@ -408,6 +446,58 @@ export async function GET(req: NextRequest) {
                COALESCE(SUM(payable_amount+flashout_amount),0)::float classified_value
         FROM binary_pair_events WHERE created_at>=${from} AND created_at<=${to}
       `,
+      prisma.$queryRaw<PackageEconomicsRow[]>`
+        WITH binary_cost AS (
+          SELECT source_event_id,
+                 COALESCE(SUM(payable_amount),0)::float binary_payable_generated,
+                 COALESCE(SUM(flashout_amount),0)::float binary_flashout_generated
+          FROM binary_pair_events
+          WHERE source_kind='registration' AND source_event_id IS NOT NULL
+          GROUP BY source_event_id
+        ), direct_cost AS (
+          SELECT registration_financial_id,
+                 payable_amount::float direct_payable,
+                 retained_amount::float direct_retained
+          FROM direct_referral_settlement_events
+        )
+        SELECT rf.package_name_snapshot package_name,
+               rf.registration_channel,
+               COUNT(*)::int registrations,
+               COALESCE(SUM(rf.customer_payment),0)::float customer_sales,
+               COALESCE(SUM(rf.reseller_value),0)::float reseller_product_value,
+               COALESCE(SUM(rf.pin_allocation),0)::float company_pin_allocation,
+               COALESCE(SUM(rf.product_acquisition_cost),0)::float outlet_acquisition_cost,
+               COALESCE(SUM(rf.registration_profit),0)::float outlet_registration_profit,
+               COALESCE(SUM(rf.direct_referral_allocation),0)::float direct_allocated,
+               COALESCE(SUM(dc.direct_payable),0)::float direct_payable,
+               COALESCE(SUM(dc.direct_retained),0)::float direct_retained,
+               COALESCE(SUM(rf.binary_commission_allocation),0)::float binary_allocated,
+               COALESCE(SUM(bc.binary_payable_generated),0)::float binary_payable_generated,
+               COALESCE(SUM(bc.binary_flashout_generated),0)::float binary_flashout_generated
+        FROM registration_financials rf
+        LEFT JOIN binary_cost bc ON bc.source_event_id=rf.pin_id
+        LEFT JOIN direct_cost dc ON dc.registration_financial_id=rf.id
+        WHERE rf.payment_status='paid'
+          AND COALESCE(rf.paid_at,rf.created_at)>=${from}
+          AND COALESCE(rf.paid_at,rf.created_at)<=${to}
+        GROUP BY rf.package_name_snapshot,rf.registration_channel
+        ORDER BY rf.package_name_snapshot,rf.registration_channel
+      `,
+      prisma.$queryRaw<OtherLiabilities[]>`
+        SELECT
+          GREATEST(
+            COALESCE((SELECT SUM(original_amount) FROM direct_referral_reserve_lots WHERE allocated_at<=${to}),0)
+            - COALESCE((SELECT SUM(c.amount) FROM direct_referral_payout_consumptions c JOIN payouts p ON p.id=c.payout_id WHERE p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at)<=${to}),0)
+            - COALESCE((SELECT SUM(amount) FROM payable_lot_forfeitures WHERE source_type='direct_referral' AND created_at<=${to}),0),
+            0
+          )::float direct_referral,
+          GREATEST(
+            COALESCE((SELECT SUM(original_amount) FROM product_binary_payable_lots WHERE allocated_at<=${to}),0)
+            - COALESCE((SELECT SUM(c.amount) FROM product_binary_payout_consumptions c JOIN payouts p ON p.id=c.payout_id WHERE p.status='released' AND COALESCE(p.released_at,p.payout_date,p.processed_at,p.requested_at)<=${to}),0)
+            - COALESCE((SELECT SUM(amount) FROM payable_lot_forfeitures WHERE source_type='product_binary' AND created_at<=${to}),0),
+            0
+          )::float product_binary
+      `,
     ]);
 
     const payableLiability = Math.max(0, number(liability[0]?.amount));
@@ -424,6 +514,34 @@ export async function GET(req: NextRequest) {
       (total, row) => total + Number(row.quantity || 0),
       0,
     );
+    const managementPlan = packageEconomics.reduce(
+      (total, row) => ({
+        registrations: total.registrations + number(row.registrations),
+        customer_sales: total.customer_sales + number(row.customer_sales),
+        reseller_product_value:
+          total.reseller_product_value + number(row.reseller_product_value),
+        company_pin_allocation:
+          total.company_pin_allocation + number(row.company_pin_allocation),
+        direct_payable_generated:
+          total.direct_payable_generated + number(row.direct_payable),
+        binary_payable_generated:
+          total.binary_payable_generated + number(row.binary_payable_generated),
+      }),
+      {
+        registrations: 0,
+        customer_sales: 0,
+        reseller_product_value: 0,
+        company_pin_allocation: 0,
+        direct_payable_generated: 0,
+        binary_payable_generated: 0,
+      },
+    );
+    const contributionAfterCommissions =
+      managementPlan.company_pin_allocation -
+      managementPlan.direct_payable_generated -
+      managementPlan.binary_payable_generated;
+    const unpaidDirectReferral = number(otherLiabilities[0]?.direct_referral);
+    const unpaidProductBinary = number(otherLiabilities[0]?.product_binary);
     return NextResponse.json({
       accounting_ready: true,
       migration_required: null,
@@ -463,6 +581,18 @@ export async function GET(req: NextRequest) {
         matched_waiting: number(points[0]?.matched_points),
       },
       cap_rows: capRows,
+      package_economics: packageEconomics,
+      management_plan: {
+        ...managementPlan,
+        contribution_after_commissions: contributionAfterCommissions,
+        exact_cash_needed_for_unpaid_binary: payableLiability,
+        unpaid_direct_referral: unpaidDirectReferral,
+        unpaid_product_binary: unpaidProductBinary,
+        exact_cash_needed_for_all_commissions:
+          payableLiability + unpaidDirectReferral + unpaidProductBinary,
+        reserve_held: fundingPosition.totalReserveHeld,
+        reserve_gap: fundingPosition.fundingShortfall,
+      },
       ledger,
       ledger_page: {
         page,

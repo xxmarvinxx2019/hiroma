@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { PRODUCT_BINARY_BASE_POINTS, PRODUCT_BINARY_DEFAULT_THRESHOLDS, PRODUCT_BINARY_RANK_POINTS } from '@/app/lib/productBinaryQuarter'
 import { assertRegistrationPinFunding, PackageFundingConfigurationError } from '@/app/lib/packageUpgradeConfiguration'
+import { getProductBinaryDailyCap } from '@/app/lib/productBinaryPlan'
 
 // ── GET all packages ──
 export async function GET(req: NextRequest) {
@@ -92,12 +93,11 @@ export async function GET(req: NextRequest) {
         }))
       }
     }
-    const capMap = new Map(caps.map(c => [c.id, c.daily_product_pairing_cap]))
-
     const packagesWithCap = packages.map(p => ({
       ...p,
-      daily_product_pairing_cap: capMap.get(p.id) ?? 50,
-      product_binary_cap_enabled: caps.find(c => c.id === p.id)?.product_binary_cap_enabled ?? true,
+      point_php_value: PRODUCT_BINARY_BASE_POINTS,
+      daily_product_pairing_cap: getProductBinaryDailyCap(p.name),
+      product_binary_cap_enabled: true,
       direct_referral_cap_enabled: caps.find(c => c.id === p.id)?.direct_referral_cap_enabled ?? true,
       daily_referral_cap: caps.find(c => c.id === p.id)?.daily_referral_cap ?? 10,
       binary_pair_cap_enabled: caps.find(c => c.id === p.id)?.binary_pair_cap_enabled ?? true,
@@ -124,14 +124,10 @@ export async function POST(req: NextRequest) {
 
     const {
       name, price, direct_referral_bonus, pairing_bonus_value,
-      point_php_value, daily_product_pairing_cap,
-      product_binary_cap_enabled,
+      point_php_value,
       direct_referral_cap_enabled, daily_referral_cap, products,
       binary_pair_cap_enabled, daily_binary_pair_cap,
     } = await req.json()
-    const productBinaryCapEnabled =
-      typeof product_binary_cap_enabled === 'boolean' ? product_binary_cap_enabled : null
-
     if (!name || !price || !direct_referral_bonus || !pairing_bonus_value || !point_php_value) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
     }
@@ -167,8 +163,8 @@ export async function POST(req: NextRequest) {
     // Update package-level caps via raw SQL after transaction
     await prisma.$executeRaw`
       UPDATE packages
-      SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50},
-          product_binary_cap_enabled = COALESCE(${productBinaryCapEnabled}, product_binary_cap_enabled),
+      SET daily_product_pairing_cap = ${getProductBinaryDailyCap(name)},
+          product_binary_cap_enabled = true,
           direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
           daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
           binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},

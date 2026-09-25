@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { getProductBinaryDailyCap } from '@/app/lib/productBinaryPlan'
 
 // ============================================================
 // TYPES
@@ -330,13 +331,13 @@ export default function TierSettingsPage() {
                     <p className="text-xs text-gray-400 mb-2">Daily product pair cap</p>
                     {editing === pkg.id ? (
                       <div className="flex items-center gap-1">
-                        <input type="number" value={form.daily_product_pairing_cap || ''}
-                          onChange={(e) => setForm({ ...form, daily_product_pairing_cap: Number(e.target.value) })}
+                        <input type="number" value={getProductBinaryDailyCap(String(form.name || 'Starter'))}
+                          disabled
                           className="flex-1 bg-white border border-[#C9A84C] rounded px-2 py-1 text-sm font-semibold text-[#0D1B3E] outline-none w-full" />
                         <span className="text-xs text-gray-400">/day</span>
                       </div>
                     ) : (
-                      <p className="text-xl font-semibold text-[#0D1B3E]">{pkg.daily_product_pairing_cap || 50}</p>
+                      <p className="text-xl font-semibold text-[#0D1B3E]">{getProductBinaryDailyCap(pkg.name)}</p>
                     )}
                     <p className="text-xs text-gray-400 mt-1">pairs per day</p>
                   </div>

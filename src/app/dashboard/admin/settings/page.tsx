@@ -72,6 +72,12 @@ export default function SettingsPage() {
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [passwordError, setPasswordError] = useState('')
+  const [pointExpiryYears, setPointExpiryYears] = useState('3')
+  const [pointExpiryPin, setPointExpiryPin] = useState('')
+  const [pointExpirySaving, setPointExpirySaving] = useState(false)
+  const [pointExpiryMessage, setPointExpiryMessage] = useState('')
+  const [pointExpiryError, setPointExpiryError] = useState('')
+  const [pointExpirySummary, setPointExpirySummary] = useState({ active_points: 0, expiring_next_90_days: 0, expired_points: 0, due_pending_points: 0 })
 
 
 
@@ -90,6 +96,17 @@ export default function SettingsPage() {
         }
       })
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/admin/settings/binary-point-expiry', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error || 'Unable to load point expiry policy.')
+        setPointExpiryYears(String(payload.years))
+        setPointExpirySummary(payload.summary || { active_points: 0, expiring_next_90_days: 0, expired_points: 0, due_pending_points: 0 })
+      })
+      .catch((error) => setPointExpiryError(error instanceof Error ? error.message : 'Unable to load point expiry policy.'))
   }, [])
 
   const handleProfileSave = async () => {
@@ -158,6 +175,28 @@ export default function SettingsPage() {
       setTimeout(() => setPasswordSuccess(''), 3000)
     }
     setPasswordSaving(false)
+  }
+
+  const handlePointExpirySave = async () => {
+    setPointExpirySaving(true)
+    setPointExpiryError('')
+    setPointExpiryMessage('')
+    try {
+      const response = await fetch('/api/admin/settings/binary-point-expiry', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ years: Number(pointExpiryYears), security_pin: pointExpiryPin }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Unable to update point expiry policy.')
+      setPointExpiryYears(String(payload.years))
+      setPointExpiryPin('')
+      setPointExpiryMessage(payload.message)
+    } catch (error) {
+      setPointExpiryError(error instanceof Error ? error.message : 'Unable to update point expiry policy.')
+    } finally {
+      setPointExpirySaving(false)
+    }
   }
 
 
@@ -339,6 +378,34 @@ export default function SettingsPage() {
         <DistributorSecurityPinSettings />
 
         <PasskeySettings />
+
+        <SettingsSection
+          title="Package Binary point expiry"
+          desc="Control how long unmatched left and right Package Binary points remain valid"
+        >
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-[#F0F2F8] p-3"><p className="text-xs text-gray-400">Active unmatched points</p><p className="mt-1 font-bold text-[#0D1B3E]">{pointExpirySummary.active_points.toLocaleString()}</p></div>
+              <div className="rounded-lg bg-amber-50 p-3"><p className="text-xs text-amber-700">Expiring within 90 days</p><p className="mt-1 font-bold text-amber-800">{pointExpirySummary.expiring_next_90_days.toLocaleString()}</p></div>
+              <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-gray-400">Lifetime expired points</p><p className="mt-1 font-bold text-[#0D1B3E]">{pointExpirySummary.expired_points.toLocaleString()}</p></div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Expiry term in years</label>
+                <input type="number" min="1" max="20" step="1" value={pointExpiryYears} onChange={(event) => setPointExpiryYears(event.target.value)} className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Admin Security PIN</label>
+                <PasswordInput type="password" inputMode="numeric" maxLength={6} value={pointExpiryPin} onChange={(event) => setPointExpiryPin(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit PIN" className="w-full rounded-lg border border-[#0D1B3E]/15 bg-[#F0F2F8] px-3 py-2 text-sm text-[#0D1B3E] outline-none focus:border-[#C9A84C]" />
+              </div>
+            </div>
+            <p className="text-xs leading-5 text-gray-500">The default is three years. A policy change recalculates the expiry date of all unexpired point lots from each lot’s original generation date. Previously expired points remain expired and auditable.</p>
+            {pointExpirySummary.due_pending_points > 0 && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{pointExpirySummary.due_pending_points.toLocaleString()} points have reached their expiry date and are queued for the daily expiry job. They cannot be used in a new pairing.</p>}
+            {pointExpiryError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{pointExpiryError}</p>}
+            {pointExpiryMessage && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{pointExpiryMessage}</p>}
+            <button type="button" onClick={() => void handlePointExpirySave()} disabled={pointExpirySaving || pointExpiryPin.length !== 6} className="rounded-lg bg-[#0D1B3E] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{pointExpirySaving ? 'Saving policy…' : 'Save point expiry policy'}</button>
+          </div>
+        </SettingsSection>
 
         {/* Danger Zone */}
         <SettingsSection

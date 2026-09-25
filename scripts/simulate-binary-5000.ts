@@ -5,7 +5,11 @@ import {
   settleBinaryCommission,
 } from '../src/app/lib/binaryCommission'
 
-const MEMBERS = 5_000
+const requestedMembers = Number(process.env.BINARY_SIM_MEMBERS || 5_000)
+if (!Number.isSafeInteger(requestedMembers) || requestedMembers < 2 || requestedMembers > 100_000) {
+  throw new Error('BINARY_SIM_MEMBERS must be a whole number from 2 to 100,000.')
+}
+const MEMBERS = requestedMembers
 const STARTER_POINTS = 600
 const STARTER_PAIR_VALUE = 600
 const STARTER_BINARY_RESERVE = 300
@@ -284,7 +288,7 @@ async function runSingleRootScenario() {
   }
 
   return {
-    scenario: '5,000 on one root left; five new Starter registrations on root right',
+    scenario: `${MEMBERS.toLocaleString()} on one root left; five new Starter registrations on root right`,
     openingReserve,
     reserveAdded: 5 * STARTER_BINARY_RESERVE,
     completedPairs,
@@ -327,7 +331,7 @@ async function runDeepCascadeScenario(openingReserve: number) {
       sourceEventId: `deep-right-${openingReserve}`,
     })
     return {
-      scenario: `one Starter event through 5,000 ready uplines; opening reserve ₱${before.toLocaleString()}`,
+      scenario: `one Starter event through ${MEMBERS.toLocaleString()} ready uplines; opening reserve ₱${before.toLocaleString()}`,
       outcome: 'committed',
       completedPairs: result.completedPairs,
       required: result.payableAmount,
@@ -338,7 +342,7 @@ async function runDeepCascadeScenario(openingReserve: number) {
   } catch (error) {
     if (!(error instanceof InsufficientBinaryReserveError)) throw error
     return {
-      scenario: `one Starter event through 5,000 ready uplines; opening reserve ₱${before.toLocaleString()}`,
+      scenario: `one Starter event through ${MEMBERS.toLocaleString()} ready uplines; opening reserve ₱${before.toLocaleString()}`,
       outcome: 'rolled_back',
       completedPairs: 0,
       required: error.requiredAmount,
@@ -383,7 +387,7 @@ async function runDeepUpgradeScenario(input: {
       sourceEventId: `upgrade-${input.label}`,
     })
     return {
-      scenario: `${input.label} through 5,000 ready ${input.uplinePackage} uplines`,
+      scenario: `${input.label} through ${MEMBERS.toLocaleString()} ready ${input.uplinePackage} uplines`,
       outcome: 'committed',
       openingReserve: input.openingReserve,
       reserveAdded: input.reserveAdded,
@@ -396,7 +400,7 @@ async function runDeepUpgradeScenario(input: {
   } catch (error) {
     if (!(error instanceof InsufficientBinaryReserveError)) throw error
     return {
-      scenario: `${input.label} through 5,000 ready ${input.uplinePackage} uplines`,
+      scenario: `${input.label} through ${MEMBERS.toLocaleString()} ready ${input.uplinePackage} uplines`,
       outcome: 'rolled_back',
       openingReserve: input.openingReserve,
       reserveAdded: input.reserveAdded,
@@ -595,12 +599,12 @@ async function main() {
       captureTrace: true,
     }),
     await runBalancedGrowthScenario({
-      label: 'balanced Starter growth to 5,000, same Manila day, measurement buffer',
+      label: `balanced Starter growth to ${MEMBERS.toLocaleString()}, same Manila day, measurement buffer`,
       companyBuffer: 20_000_000,
       resetDailyCapBeforeEachEvent: false,
     }),
     await runBalancedGrowthScenario({
-      label: 'balanced Starter growth to 5,000, cap reset before every event (slow-growth upper exposure)',
+      label: `balanced Starter growth to ${MEMBERS.toLocaleString()}, cap reset before every event (slow-growth upper exposure)`,
       companyBuffer: 20_000_000,
       resetDailyCapBeforeEachEvent: true,
     }),

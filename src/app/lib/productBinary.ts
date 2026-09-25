@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import prisma from '@/app/lib/prisma'
 import { ensureCurrentProductBinaryQuarter, PRODUCT_BINARY_PESO_PER_POINT } from '@/app/lib/productBinaryQuarter'
 import { calculateProductBinaryDailyCap } from '@/app/lib/productBinaryCap'
+import { getProductBinaryDailyCap, PRODUCT_BINARY_PAIR_AMOUNT } from '@/app/lib/productBinaryPlan'
 import {
   creditCommissionExactlyOnce,
   recordCommissionExactlyOnce,
@@ -12,9 +13,6 @@ import { createAuditLog } from '@/app/lib/auditLog'
 
 const PU_PER_LEG_PER_PAIR = 2
 const PESO_PER_POINT = PRODUCT_BINARY_PESO_PER_POINT
-// Business rule: Product Binary is independent from package value and may pay
-// at most ₱20 per completed pair, even if a legacy rank row is configured higher.
-const MAX_PRODUCT_BINARY_PAIR_RATE = 20
 const PRODUCT_BINARY_RETRY_BASE_SECONDS = 30
 const PRODUCT_BINARY_RETRY_MAX_SECONDS = 60 * 60
 
@@ -207,21 +205,21 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       await lockFinancialUser(tx, ancestor.user_id)
       await ensureCurrentProductBinaryQuarter(tx, ancestor.user_id)
       const profiles = await tx.$queryRaw<{
-        status: string; package_id: string; package_name: string; base_points: string; total_pu: number;
-        cap_enabled: boolean; cap_limit: number;
+        status: string; package_id: string; package_name: string; total_pu: number;
       }[]>`
-        SELECT u.status::text,rp.package_id::text,p.name package_name,p.point_php_value::text base_points,
-          COALESCE(rp.total_pu,0)::int total_pu,COALESCE(p.product_binary_cap_enabled,true) cap_enabled,
-          COALESCE(p.daily_product_pairing_cap,50)::int cap_limit
+        SELECT u.status::text,rp.package_id::text,p.name package_name,
+          COALESCE(rp.total_pu,0)::int total_pu
         FROM reseller_profiles rp JOIN users u ON u.id=rp.user_id JOIN packages p ON p.id=rp.package_id
         WHERE rp.user_id=${ancestor.user_id} LIMIT 1
       `
       const profile = profiles[0]
       if (!profile) continue
       const rank = await getRankSnapshot(tx, profile.package_id, Number(profile.total_pu))
-      const ratePoints = Number(rank?.pair_income ?? profile.base_points)
-      const rateAmount = Math.min(ratePoints * PESO_PER_POINT, MAX_PRODUCT_BINARY_PAIR_RATE)
+      // Compensation plan: every Product Binary pair pays a fixed ₱5. Package
+      // and rank values cannot increase the monetary entitlement.
+      const rateAmount = PRODUCT_BINARY_PAIR_AMOUNT
       const effectiveRatePoints = rateAmount / PESO_PER_POINT
+      const planCap = getProductBinaryDailyCap(profile.package_name)
 
       await tx.$executeRaw`
         INSERT INTO product_binary_positions(user_id) VALUES(${ancestor.user_id}) ON CONFLICT(user_id) DO NOTHING
@@ -253,8 +251,8 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       const { payablePairs, capFlashPairs, inactivePairs } = calculateProductBinaryDailyCap(
         completedPairs,
         used,
-        profile.cap_enabled,
-        Number(profile.cap_limit),
+        true,
+        planCap,
         profile.status === 'active',
       )
       const payableAmount = payablePairs*rateAmount

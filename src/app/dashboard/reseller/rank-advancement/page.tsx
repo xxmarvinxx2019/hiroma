@@ -53,7 +53,7 @@ export default function RankAdvancementPage() {
   if (error || !stats || !model) return <div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">{error || 'Unable to load your rank goal.'}</div>
 
   const currentName = model.current?.name || stats.package?.name || 'Base'
-  const currentPoints = Number(model.current?.pair_income || 10)
+  const currentPoints = 10
 
   return (
     <main className="mx-auto max-w-6xl space-y-5 pb-10">
@@ -94,7 +94,7 @@ export default function RankAdvancementPage() {
           <div className="mt-5 space-y-3">
             <RankRow name="Base" pu={0} rate="₱5.00/pair" active={!model.current} reached />
             {model.ranks.map((rank) => (
-              <RankRow key={rank.id} name={rank.name} pu={rank.required_pu} rate={`${money(rank.pair_income)}/pair`} active={model.current?.id === rank.id} reached={model.totalPU >= rank.required_pu} />
+              <RankRow key={rank.id} name={rank.name} pu={rank.required_pu} rate={`${money(5)}/pair`} active={model.current?.id === rank.id} reached={model.totalPU >= rank.required_pu} />
             ))}
           </div>
         </div>
