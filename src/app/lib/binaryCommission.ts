@@ -4,6 +4,12 @@ import {
   recordCommissionExactlyOnce,
 } from "@/app/lib/commissionCredit";
 import { lockFinancialUser } from "@/app/lib/walletLedger";
+import {
+  consumeBinaryPointLots,
+  createBinaryPointLot,
+  expireBinaryPointLotsForUser,
+  getBinaryPointExpiryYears,
+} from "@/app/lib/binaryPointExpiry";
 
 const PESO_PER_POINT = 0.5;
 
@@ -104,6 +110,10 @@ export async function settleBinaryCommission(
   if (ancestors.length === 0)
     return { completedPairs: 0, payableAmount: 0, flashoutAmount: 0 };
 
+  // Serialize settlement lot creation with Admin policy changes so every new
+  // lot receives either the complete old policy or the complete new policy.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('binary-point-expiry-policy'))`;
+
   // Lock every affected member in stable order. Concurrent registrations can
   // no longer spend the same carryover points or final daily-cap slot twice.
   for (const userId of [
@@ -111,6 +121,12 @@ export async function settleBinaryCommission(
   ].sort()) {
     await lockFinancialUser(tx, userId);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"binary:" + userId}))`;
+  }
+
+  const settlementAt = new Date();
+  const expiryYears = await getBinaryPointExpiryYears(tx);
+  for (const userId of [...new Set(ancestors.map((row) => row.user_id))].sort()) {
+    await expireBinaryPointLotsForUser(tx, userId, settlementAt);
   }
 
   const profiles = await tx.resellerProfile.findMany({
@@ -303,6 +319,17 @@ export async function settleBinaryCommission(
       consumedPoints,
     } = plan;
 
+    await createBinaryPointLot(tx, {
+      recipientUserId: ancestor.user_id,
+      sourceUserId: input.sourceUserId,
+      sourceKind: input.sourceKind,
+      sourceEventId: input.sourceEventId,
+      leg: sourceLeg,
+      points: input.sourcePoints,
+      generatedAt: settlementAt,
+      expiryYears,
+    });
+
     const normalCommission =
       payableAmount > 0
         ? await creditCommissionExactlyOnce(tx, {
@@ -341,7 +368,7 @@ export async function settleBinaryCommission(
     // opening carryover. The database validates that opening snapshot and then
     // defers a second check until commit to prove this transaction applied the
     // event's exact closing carryover/cap state.
-    await tx.binaryPairEvent.create({
+    const pairEvent = await tx.binaryPairEvent.create({
       data: {
         recipient_user_id: ancestor.user_id,
         source_user_id: input.sourceUserId,
@@ -372,6 +399,20 @@ export async function settleBinaryCommission(
         normal_commission_id: normalCommission?.id || null,
         flashout_commission_id: flashoutCommission?.id || null,
       },
+    });
+    await consumeBinaryPointLots(tx, {
+      recipientUserId: ancestor.user_id,
+      leg: "left",
+      points: consumedPoints,
+      pairEventId: pairEvent.id,
+      now: settlementAt,
+    });
+    await consumeBinaryPointLots(tx, {
+      recipientUserId: ancestor.user_id,
+      leg: "right",
+      points: consumedPoints,
+      pairEventId: pairEvent.id,
+      now: settlementAt,
     });
     await tx.resellerProfile.update({
       where: { user_id: ancestor.user_id },

@@ -3,9 +3,8 @@ import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import {
   ensureCurrentProductBinaryQuarter,
-  PRODUCT_BINARY_BASE_POINTS,
-  PRODUCT_BINARY_PESO_PER_POINT,
 } from '@/app/lib/productBinaryQuarter'
+import { PRODUCT_BINARY_PAIR_AMOUNT } from '@/app/lib/productBinaryPlan'
 import { calculateProductBinaryBalance } from '@/app/lib/productBinaryBalance'
 import { getRanksForPackage } from '@/app/api/admin/ranks/route'
 import { getProfilePhotoDisplayUrl } from '@/app/lib/profilePhoto'
@@ -337,7 +336,6 @@ export async function GET(req: NextRequest) {
     const currentRankIndex = sortedRanks.findIndex((rank) => rank.name === selfRankData.rank)
     const currentRank = currentRankIndex >= 0 ? sortedRanks[currentRankIndex] : null
     const nextRank = sortedRanks[currentRankIndex + 1] || (currentRank ? null : sortedRanks[0]) || null
-    const currentRatePoints = Number(currentRank?.pair_income || PRODUCT_BINARY_BASE_POINTS)
 
     return NextResponse.json({
       tree,
@@ -371,12 +369,12 @@ export async function GET(req: NextRequest) {
         total_earned: selfCommissions.points,
         rank_progress: {
           current_rank: currentRank?.name || 'Base',
-          current_pair_rate_amount: currentRatePoints * PRODUCT_BINARY_PESO_PER_POINT,
+          current_pair_rate_amount: PRODUCT_BINARY_PAIR_AMOUNT,
           next_rank: nextRank ? {
             name: nextRank.name,
             required_pu: Number(nextRank.required_pu),
             remaining_pu: Math.max(0, Number(nextRank.required_pu) - selfRankData.total_pu),
-            pair_rate_amount: Number(nextRank.pair_income) * PRODUCT_BINARY_PESO_PER_POINT,
+            pair_rate_amount: PRODUCT_BINARY_PAIR_AMOUNT,
           } : null,
         },
       },

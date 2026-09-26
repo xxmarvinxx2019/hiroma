@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { requiredRankPoints } from '@/app/lib/productBinaryQuarter'
+import { PRODUCT_BINARY_PAIR_POINTS } from '@/app/lib/productBinaryPlan'
 
 // ── Helper: get active rank period for a package ──
 export async function getActivePeriod(packageId: string) {
@@ -31,7 +32,7 @@ export async function getRanksForPackage(packageId: string) {
       ORDER BY sequence ASC
     `
     if (!rows || rows.length === 0) return []
-    return rows.map(r => ({ ...r, pair_income: Number(r.pair_income) }))
+    return rows.map(r => ({ ...r, pair_income: PRODUCT_BINARY_PAIR_POINTS }))
   } catch (e) {
     console.error('[RANKS] getRanksForPackage failed:', e)
     return []
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       packages,
-      ranks:   ranks.map(r => ({ ...r, pair_income: Number(r.pair_income) })),
+      ranks:   ranks.map(r => ({ ...r, pair_income: PRODUCT_BINARY_PAIR_POINTS })),
       periods,
     })
   } catch (error) {

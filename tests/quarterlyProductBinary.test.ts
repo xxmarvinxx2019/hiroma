@@ -30,11 +30,11 @@ test('calendar quarters use Asia/Manila boundaries', () => {
 
 test('all packages share the sanctioned Product Binary ladder', () => {
   assert.equal(PRODUCT_BINARY_BASE_POINTS * 0.5, 5)
-  assert.deepEqual(PRODUCT_BINARY_RANK_POINTS.map(points => points * 0.5), [10, 15, 20])
+  assert.deepEqual(PRODUCT_BINARY_RANK_POINTS.map(points => points * 0.5), [5, 5, 5])
   assert.deepEqual(PRODUCT_BINARY_DEFAULT_THRESHOLDS, [30, 50, 100])
-  assert.equal(requiredRankPoints(1), 20)
-  assert.equal(requiredRankPoints(2), 30)
-  assert.equal(requiredRankPoints(3), 40)
+  assert.equal(requiredRankPoints(1), 10)
+  assert.equal(requiredRankPoints(2), 10)
+  assert.equal(requiredRankPoints(3), 10)
   assert.equal(requiredRankPoints(4), null)
 })
 

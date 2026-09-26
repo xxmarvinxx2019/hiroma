@@ -85,6 +85,22 @@ type ReserveMovement = {
 };
 type ReserveLedgerData = {
   summary?: Record<string, number>;
+  company_funding_bridge?: {
+    product_sales: number;
+    product_cost: number;
+    product_gross_margin: number;
+    pin_sales: number;
+    realized_company_contribution: number;
+    required_protected_cash: number;
+    contribution_after_required_reserve: number;
+    period_product_sales: number;
+    period_product_cost: number;
+    period_product_gross_margin: number;
+    period_pin_sales: number;
+    period_company_contribution: number;
+    bank_balance_connected: boolean;
+    recognition_note: string;
+  };
   reserve_admission?: {
     mode: "monitor" | "enforce";
     status: "healthy" | "warning" | "blocked";
@@ -215,6 +231,42 @@ export default function ReserveLedgerPage() {
         <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
           {data.error}
         </div>
+      )}
+      {!loading && data?.company_funding_bridge && (
+        <section className="mt-5 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+          <div className="border-b bg-blue-50 p-5">
+            <h2 className="font-bold">HIROMA Company Funding Bridge</h2>
+            <p className="mt-1 max-w-4xl text-sm text-slate-600">
+              Connects money already earned from paid Admin product deliveries and paid PINs to the cash that must remain protected for member commissions.
+            </p>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["Admin product sales", data.company_funding_bridge.product_sales, "Paid and delivered; all time through the selected end date"],
+              ["Product cost", data.company_funding_bridge.product_cost, "Immutable order or inventory cost snapshot"],
+              ["Product gross margin", data.company_funding_bridge.product_gross_margin, "Sales less product cost; recognized once at delivery"],
+              ["Paid PIN proceeds", data.company_funding_bridge.pin_sales, "Approved paid PIN requests plus reconciled legacy registrations"],
+              ["Realized company contribution", data.company_funding_bridge.realized_company_contribution, "Product gross margin plus paid PIN proceeds"],
+              ["Required protected cash", data.company_funding_bridge.required_protected_cash, "Actual earned commission liability not yet released"],
+              ["Contribution after reserve", data.company_funding_bridge.contribution_after_required_reserve, "Company contribution less current protected-cash requirement"],
+              ["Recorded bank balance", 0, data.company_funding_bridge.bank_balance_connected ? "Connected" : "Not connected; reconcile against the dedicated bank account"],
+            ].map(([label, value, note]) => (
+              <article key={String(label)} className="rounded-xl border bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                <p className={`mt-2 text-xl font-black ${label === "Contribution after reserve" && Number(value) < 0 ? "text-rose-700" : "text-[#0D1B3E]"}`}>
+                  {label === "Recorded bank balance" && !data.company_funding_bridge.bank_balance_connected ? "Not connected" : peso.format(Number(value))}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{note}</p>
+              </article>
+            ))}
+          </div>
+          <div className="border-t bg-amber-50 px-5 py-4 text-sm text-amber-900">
+            <strong>No double counting:</strong> {data.company_funding_bridge.recognition_note}
+            <span className="mt-1 block text-xs">
+              Selected period contribution: {peso.format(data.company_funding_bridge.period_company_contribution)} = {peso.format(data.company_funding_bridge.period_product_gross_margin)} product margin + {peso.format(data.company_funding_bridge.period_pin_sales)} paid PIN proceeds.
+            </span>
+          </div>
+        </section>
       )}
       {!loading && data?.reserve_admission && (
         <section className={

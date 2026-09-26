@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
 import { PRODUCT_BINARY_BASE_POINTS } from '@/app/lib/productBinaryQuarter'
+import { getProductBinaryDailyCap } from '@/app/lib/productBinaryPlan'
 import {
   assertRegistrationPinFunding,
   assertUpgradePinFunding,
@@ -26,8 +27,6 @@ export async function PUT(
       price,
       direct_referral_bonus,
       pairing_bonus_value,
-      daily_product_pairing_cap,
-      product_binary_cap_enabled,
       direct_referral_cap_enabled,
       daily_referral_cap,
       binary_pair_cap_enabled,
@@ -35,9 +34,6 @@ export async function PUT(
       products,
       upgrade_paths,
     } = await req.json()
-    const productBinaryCapEnabled =
-      typeof product_binary_cap_enabled === 'boolean' ? product_binary_cap_enabled : null
-
     assertRegistrationPinFunding(price, direct_referral_bonus, pairing_bonus_value)
     const normalizedUpgradePaths = normalizeUpgradePaths(upgrade_paths, id)
     const pkg = await prisma.$transaction(async (tx) => {
@@ -163,8 +159,8 @@ export async function PUT(
     // Update package-level caps via raw SQL (not in Prisma schema)
     await prisma.$executeRaw`
       UPDATE packages
-      SET daily_product_pairing_cap = ${daily_product_pairing_cap || 50},
-          product_binary_cap_enabled = COALESCE(${productBinaryCapEnabled}, product_binary_cap_enabled),
+      SET daily_product_pairing_cap = ${getProductBinaryDailyCap(name)},
+          product_binary_cap_enabled = true,
           direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
           daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
           binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
