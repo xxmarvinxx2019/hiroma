@@ -127,20 +127,18 @@ test('retained commission evidence never credits a spendable wallet', async () =
   assert.equal(rawQueries, 1)
 })
 
-test('an unfunded binary commission never reaches the wallet', async () => {
-  const walletCredits = 0
+test('a partially funded binary commission records the shortfall and reaches the protected ledger', async () => {
   let rawQueryCount = 0
   const tx = {
     $queryRaw: async () => {
       rawQueryCount += 1
-      return rawQueryCount === 1
-        ? [{ id: 'partially-funded-binary' }]
-        : [{ funded_amount: '150.00', unfunded_amount: '50.00' }]
+      if (rawQueryCount === 1) return [{ id: 'partially-funded-binary' }]
+      if (rawQueryCount === 2) return [{ funded_amount: '150.00', unfunded_amount: '50.00' }]
+      return [{ id: 'ledger-shortfall', balance_delta: '200.00', total_earned_delta: '200.00' }]
     },
   } as unknown as Prisma.TransactionClient
 
-  await assert.rejects(
-    creditCommissionExactlyOnce(tx, {
+  const result = await creditCommissionExactlyOnce(tx, {
       eventKey: 'upgrade:pin-a:binary:user-a:payable',
       sourceEventKind: 'upgrade',
       sourceEventId: 'pin-a',
@@ -148,10 +146,9 @@ test('an unfunded binary commission never reaches the wallet', async () => {
       userId: 'user-a',
       type: 'binary_pairing',
       amount: 200,
-    }),
-    /not fully funded/i,
-  )
-  assert.equal(walletCredits, 0)
+    })
+  assert.equal(result.credited, true)
+  assert.equal(rawQueryCount, 3)
 })
 
 test('a fully funded binary commission reaches the protected ledger exactly once', async () => {
@@ -196,35 +193,32 @@ test('commission event keys are database-unique while legacy rows remain compati
   assert.match(migration, /ADD COLUMN "event_key" VARCHAR\(255\)/)
 })
 
-test('the database serializes reserve consumption and aborts on any shortfall', () => {
+test('the database serializes reserve consumption and records any shortfall', () => {
   const migration = readFileSync(
-    'prisma/migrations/20260901170000_enforce_funded_binary_commissions/migration.sql',
+    'prisma/migrations/20260927090000_track_actual_binary_liability_shortfall/migration.sql',
     'utf8',
   )
   const helper = readFileSync('src/app/lib/commissionCredit.ts', 'utf8')
 
   assert.match(migration, /pg_advisory_xact_lock\(hashtext\('binary-reserve-funding'\)\)/)
-  assert.match(migration, /Historical unfunded binary commissions require reconciliation/)
-  assert.match(migration, /IF available < NEW\."amount" THEN[\s\S]*RAISE EXCEPTION/)
+  assert.match(migration, /IF remaining > 0 THEN[\s\S]*remaining, true/)
   assert.match(migration, /ORDER BY "allocated_at" ASC, "id" ASC[\s\S]*FOR UPDATE\s+LIMIT 1/)
   assert.doesNotMatch(migration, /SKIP LOCKED/)
-  assert.match(helper, /assertBinaryCommissionIsFullyFunded[\s\S]*assertCommissionWalletCredit/)
+  assert.match(helper, /assertBinaryCommissionFundingIsAccounted[\s\S]*assertCommissionWalletCredit/)
   assert.doesNotMatch(helper, /tx\.wallet\.(?:update|upsert)/)
 })
 
-test('binary cascades preflight all member-payable liability and retain flashout outside reserve', () => {
+test('binary cascades record all member-payable liability and retain flashout outside reserve', () => {
   const source = readFileSync('src/app/lib/binaryCommission.ts', 'utf8')
   const migration = readFileSync(
     'prisma/migrations/20260902120000_harden_binary_settlement_and_payouts/migration.sql',
     'utf8',
   )
   const aggregate = source.indexOf('const totalPayable = plans.reduce')
-  const reserveLock = source.indexOf("pg_advisory_xact_lock(hashtext('binary-reserve-funding'))", aggregate)
-  const reserveCheck = source.indexOf('toCentavos(availableAmount) < toCentavos(totalPayable)', reserveLock)
-  const firstCredit = source.indexOf('await creditCommissionExactlyOnce', reserveCheck)
+  const firstCredit = source.indexOf('await creditCommissionExactlyOnce', aggregate)
 
-  assert.ok(aggregate >= 0 && aggregate < reserveLock)
-  assert.ok(reserveLock < reserveCheck && reserveCheck < firstCredit)
+  assert.ok(aggregate >= 0 && aggregate < firstCredit)
+  assert.doesNotMatch(source, /throw new InsufficientBinaryReserveError/)
   assert.match(source, /await recordCommissionExactlyOnce\(tx,[\s\S]*isOverflow: true/)
   assert.match(
     migration,

@@ -4,7 +4,6 @@ import prisma from "@/app/lib/prisma";
 import { Prisma } from "@prisma/client";
 import {
   DuplicateBinarySettlementError,
-  InsufficientBinaryReserveError,
   settleBinaryCommission,
 } from "@/app/lib/binaryCommission";
 import { claimUnusedPin, PinAlreadyClaimedError } from "@/app/lib/pinRedemption";
@@ -320,10 +319,7 @@ export async function PATCH(req: NextRequest) {
         { status: 409 },
       );
     }
-    if (
-      error instanceof InsufficientBinaryReserveError ||
-      error instanceof DuplicateBinarySettlementError
-    ) {
+    if (error instanceof DuplicateBinarySettlementError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error("[UPGRADE ERROR]", error);

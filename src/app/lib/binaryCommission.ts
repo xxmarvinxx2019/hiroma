@@ -39,24 +39,15 @@ type CapRow = {
   is_today: boolean;
 };
 
-type ReserveRow = {
-  available_amount: string | number | null;
-};
-
-function toCentavos(value: unknown) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount))
-    throw new Error("Binary reserve funding state is invalid.");
-  return Math.round(amount * 100);
-}
-
+// Kept as a compatibility type for historical simulation scripts. Live
+// settlement now records a funding gap instead of rejecting a valid cascade.
 export class InsufficientBinaryReserveError extends Error {
   constructor(
     public readonly requiredAmount: number,
     public readonly availableAmount: number,
   ) {
     super(
-      `Protected binary reserve is insufficient. Required ₱${requiredAmount.toFixed(2)}, available ₱${availableAmount.toFixed(2)}.`,
+      `Historical simulation reserve is insufficient. Required ₱${requiredAmount.toFixed(2)}, available ₱${availableAmount.toFixed(2)}.`,
     );
     this.name = "InsufficientBinaryReserveError";
   }
@@ -267,23 +258,11 @@ export async function settleBinaryCommission(
   if (totalFlashout > 0 && !hiroma)
     throw new Error("Hiroma binary flashout receiver was not found.");
 
-  // Use the exact same global lock as the database reserve-consumption trigger.
-  // It stays held through all commission inserts, so another cascade cannot
-  // consume the funds between this aggregate check and the actual credits.
-  if (totalPayable > 0) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('binary-reserve-funding'))`;
-    const [reserve] = await tx.$queryRaw<ReserveRow[]>`
-      SELECT COALESCE(SUM("remaining_amount"), 0)::text AS "available_amount"
-      FROM "binary_reserve_lots"
-      WHERE "remaining_amount" > 0
-    `;
-    const availableAmount = Number(reserve?.available_amount || 0);
-    if (toCentavos(availableAmount) < toCentavos(totalPayable))
-      throw new InsufficientBinaryReserveError(
-        totalPayable,
-        availableAmount,
-      );
-  }
+  // The complete qualified cascade becomes company liability even when the
+  // older registration-allocation pool is smaller. The database consumes any
+  // available FIFO funding and records the remainder as an explicit shortfall
+  // so Admin can protect the actual earned amount without changing eligibility,
+  // pair values, carryover, or daily caps.
 
   await tx.binarySettlementEvent.create({
     data: {

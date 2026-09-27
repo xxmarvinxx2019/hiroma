@@ -13,20 +13,20 @@ const initial = getDateRangePreset("this_month");
 const cardDefs = [
   [
     "total_allocated",
-    "Total Reserve Allocated",
-    "All reserve sources",
+    "Source Funding Recorded",
+    "Registration and product funding sources; this is not the liability target",
     "from-blue-700 to-blue-500",
   ],
   [
     "available_reserve",
-    "Available Reserve",
-    "Uncommitted funding balance",
+    "Uncommitted Source Funding",
+    "Recorded source funding not yet assigned to earned commissions",
     "from-emerald-700 to-emerald-500",
   ],
   [
     "total_liability",
-    "Committed Liability",
-    "Earned, not yet released",
+    "Actual Earned — Unpaid",
+    "Qualified commissions still owed, including cascades",
     "from-purple-800 to-purple-500",
   ],
   [
@@ -55,8 +55,8 @@ const cardDefs = [
   ],
   [
     "funding_shortfall",
-    "Funding Shortfall",
-    "Liability without funding",
+    "Funding Gap to Protect",
+    "Earned commission amount beyond recorded source funding",
     "from-rose-800 to-rose-500",
   ],
 ] as const;
@@ -248,12 +248,12 @@ export default function ReserveLedgerPage() {
               ["Paid PIN proceeds", data.company_funding_bridge.pin_sales, "Approved paid PIN requests plus reconciled legacy registrations"],
               ["Realized company contribution", data.company_funding_bridge.realized_company_contribution, "Product gross margin plus paid PIN proceeds"],
               ["Required protected cash", data.company_funding_bridge.required_protected_cash, "Actual earned commission liability not yet released"],
-              ["Contribution after reserve", data.company_funding_bridge.contribution_after_required_reserve, "Company contribution less current protected-cash requirement"],
+              ["Contribution coverage after reserve", data.company_funding_bridge.contribution_after_required_reserve, "Realized contribution less current liability; this is not net income and excludes tax, payroll, rent, utilities, and other expenses"],
               ["Recorded bank balance", 0, data.company_funding_bridge.bank_balance_connected ? "Connected" : "Not connected; reconcile against the dedicated bank account"],
             ].map(([label, value, note]) => (
               <article key={String(label)} className="rounded-xl border bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-                <p className={`mt-2 text-xl font-black ${label === "Contribution after reserve" && Number(value) < 0 ? "text-rose-700" : "text-[#0D1B3E]"}`}>
+                <p className={`mt-2 text-xl font-black ${label === "Contribution coverage after reserve" && Number(value) < 0 ? "text-rose-700" : "text-[#0D1B3E]"}`}>
                   {label === "Recorded bank balance" && !data.company_funding_bridge.bank_balance_connected ? "Not connected" : peso.format(Number(value))}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">{note}</p>
@@ -429,9 +429,9 @@ export default function ReserveLedgerPage() {
               <tr>
                 {[
                   "Reserve type",
-                  "Allocated",
-                  "Available",
-                  "Committed liability",
+                  "Source funding",
+                  "Unused source funding",
+                  "Actual earned — unpaid",
                   "Released",
                   "Direct retained",
                   "Flashout",

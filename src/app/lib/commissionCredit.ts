@@ -110,7 +110,7 @@ async function assertCommissionWalletCredit(
   }
 }
 
-async function assertBinaryCommissionIsFullyFunded(
+async function assertBinaryCommissionFundingIsAccounted(
   tx: CommissionTx,
   commissionId: string,
   commissionAmount: number,
@@ -126,8 +126,8 @@ async function assertBinaryCommissionIsFullyFunded(
   const fundedCentavos = toCentavos(funding?.funded_amount ?? 0)
   const unfundedCentavos = toCentavos(funding?.unfunded_amount ?? 0)
 
-  if (fundedCentavos !== requiredCentavos || unfundedCentavos !== 0)
-    throw new Error('Binary commission is not fully funded by reserve.')
+  if (fundedCentavos + unfundedCentavos !== requiredCentavos)
+    throw new Error('Binary commission funding position is not fully accounted.')
 }
 
 export async function creditCommissionExactlyOnce(tx: CommissionTx, input: CreditInput) {
@@ -137,7 +137,7 @@ export async function creditCommissionExactlyOnce(tx: CommissionTx, input: Credi
   // reserve in this transaction. Verify its result before making funds
   // withdrawable so a missing/outdated trigger cannot silently over-credit.
   if (input.type === 'binary_pairing')
-    await assertBinaryCommissionIsFullyFunded(tx, commission.id, input.amount)
+    await assertBinaryCommissionFundingIsAccounted(tx, commission.id, input.amount)
 
   // The final database commission trigger inserts exactly one source-validated
   // wallet ledger entry. A missing entry means the migration/trigger boundary
