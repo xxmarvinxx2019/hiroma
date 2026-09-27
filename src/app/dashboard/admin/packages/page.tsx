@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
+import { getProductBinaryDailyCap } from '@/app/lib/productBinaryPlan'
 
 // ============================================================
 // TYPES
@@ -546,34 +547,26 @@ export default function PackagesPage() {
                   },
                   {
                     label: 'Product Binary Daily Cap',
-                    hint: form.product_binary_cap_enabled
-                      ? 'Excess product-binary pairs go to Hiroma after this daily limit'
-                      : 'Disabled — product-binary pairs are unlimited',
+                    hint: 'Fixed plan: Starter 20, Silver 40, Gold 100 payable pairs per day',
                     required: false,
                     input: (
                       <div className="flex shrink-0 items-center gap-2.5">
                         <button
                           type="button"
-                          onClick={() => setForm({ ...form, product_binary_cap_enabled: !form.product_binary_cap_enabled })}
-                          className={`inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-bold tracking-wide transition-colors ${
-                            form.product_binary_cap_enabled
-                              ? 'border-[#16814d] bg-[#e8f7ef] text-[#126b41]'
-                              : 'border-gray-300 bg-gray-100 text-gray-500'
-                          }`}
-                          aria-pressed={form.product_binary_cap_enabled}
+                          disabled
+                          className="inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-[#16814d] bg-[#e8f7ef] text-[11px] font-bold tracking-wide text-[#126b41]"
+                          aria-pressed="true"
                         >
                           <span className={`h-2 w-2 rounded-full ${
-                            form.product_binary_cap_enabled ? 'bg-[#16814d]' : 'bg-gray-400'
+                            'bg-[#16814d]'
                           }`} />
-                          {form.product_binary_cap_enabled ? 'ON' : 'OFF'}
+                          ON
                         </button>
                         <input
                           type="number"
                           min="1"
-                          disabled={!form.product_binary_cap_enabled}
-                          value={form.daily_product_pairing_cap}
-                          onChange={(e) => setForm({ ...form, daily_product_pairing_cap: e.target.value })}
-                          placeholder="e.g. 50"
+                          disabled
+                          value={getProductBinaryDailyCap(form.name || 'Starter')}
                           aria-label="Product binary daily limit"
                           className="h-9 w-[72px] shrink-0 rounded-lg border border-[#0D1B3E]/15 bg-white px-3 text-sm outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
                         />

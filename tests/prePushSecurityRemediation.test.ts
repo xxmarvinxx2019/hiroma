@@ -75,6 +75,13 @@ test('Binary Commission exposes production audit reconciliation and traceability
   assert.match(page, /Discrepancy detected/)
   assert.match(page, /Binary Commission audit details/)
   assert.match(page, /Forfeited on deactivation/)
+  assert.match(route, /exact_cash_needed_for_all_commissions/)
+  assert.match(route, /bc\.source_event_id=rf\.pin_id/)
+  assert.match(route, /direct_referral_reserve_lots/)
+  assert.match(route, /product_binary_payable_lots/)
+  assert.match(page, /Commission Funding and Registration Economics/)
+  assert.match(page, /Cash required for all qualified commissions/)
+  assert.match(page, /Company product supply margin, tax, payroll, rent/)
   assert.match(page, /\^\[=\+\\-@\]/)
 })
 

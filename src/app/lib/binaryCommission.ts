@@ -4,6 +4,12 @@ import {
   recordCommissionExactlyOnce,
 } from "@/app/lib/commissionCredit";
 import { lockFinancialUser } from "@/app/lib/walletLedger";
+import {
+  consumeBinaryPointLots,
+  createBinaryPointLot,
+  expireBinaryPointLotsForUser,
+  getBinaryPointExpiryYears,
+} from "@/app/lib/binaryPointExpiry";
 
 const PESO_PER_POINT = 0.5;
 
@@ -33,24 +39,15 @@ type CapRow = {
   is_today: boolean;
 };
 
-type ReserveRow = {
-  available_amount: string | number | null;
-};
-
-function toCentavos(value: unknown) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount))
-    throw new Error("Binary reserve funding state is invalid.");
-  return Math.round(amount * 100);
-}
-
+// Kept as a compatibility type for historical simulation scripts. Live
+// settlement now records a funding gap instead of rejecting a valid cascade.
 export class InsufficientBinaryReserveError extends Error {
   constructor(
     public readonly requiredAmount: number,
     public readonly availableAmount: number,
   ) {
     super(
-      `Protected binary reserve is insufficient. Required ₱${requiredAmount.toFixed(2)}, available ₱${availableAmount.toFixed(2)}.`,
+      `Historical simulation reserve is insufficient. Required ₱${requiredAmount.toFixed(2)}, available ₱${availableAmount.toFixed(2)}.`,
     );
     this.name = "InsufficientBinaryReserveError";
   }
@@ -104,6 +101,10 @@ export async function settleBinaryCommission(
   if (ancestors.length === 0)
     return { completedPairs: 0, payableAmount: 0, flashoutAmount: 0 };
 
+  // Serialize settlement lot creation with Admin policy changes so every new
+  // lot receives either the complete old policy or the complete new policy.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('binary-point-expiry-policy'))`;
+
   // Lock every affected member in stable order. Concurrent registrations can
   // no longer spend the same carryover points or final daily-cap slot twice.
   for (const userId of [
@@ -111,6 +112,12 @@ export async function settleBinaryCommission(
   ].sort()) {
     await lockFinancialUser(tx, userId);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"binary:" + userId}))`;
+  }
+
+  const settlementAt = new Date();
+  const expiryYears = await getBinaryPointExpiryYears(tx);
+  for (const userId of [...new Set(ancestors.map((row) => row.user_id))].sort()) {
+    await expireBinaryPointLotsForUser(tx, userId, settlementAt);
   }
 
   const profiles = await tx.resellerProfile.findMany({
@@ -251,23 +258,11 @@ export async function settleBinaryCommission(
   if (totalFlashout > 0 && !hiroma)
     throw new Error("Hiroma binary flashout receiver was not found.");
 
-  // Use the exact same global lock as the database reserve-consumption trigger.
-  // It stays held through all commission inserts, so another cascade cannot
-  // consume the funds between this aggregate check and the actual credits.
-  if (totalPayable > 0) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('binary-reserve-funding'))`;
-    const [reserve] = await tx.$queryRaw<ReserveRow[]>`
-      SELECT COALESCE(SUM("remaining_amount"), 0)::text AS "available_amount"
-      FROM "binary_reserve_lots"
-      WHERE "remaining_amount" > 0
-    `;
-    const availableAmount = Number(reserve?.available_amount || 0);
-    if (toCentavos(availableAmount) < toCentavos(totalPayable))
-      throw new InsufficientBinaryReserveError(
-        totalPayable,
-        availableAmount,
-      );
-  }
+  // The complete qualified cascade becomes company liability even when the
+  // older registration-allocation pool is smaller. The database consumes any
+  // available FIFO funding and records the remainder as an explicit shortfall
+  // so Admin can protect the actual earned amount without changing eligibility,
+  // pair values, carryover, or daily caps.
 
   await tx.binarySettlementEvent.create({
     data: {
@@ -302,6 +297,17 @@ export async function settleBinaryCommission(
       flashoutAmount,
       consumedPoints,
     } = plan;
+
+    await createBinaryPointLot(tx, {
+      recipientUserId: ancestor.user_id,
+      sourceUserId: input.sourceUserId,
+      sourceKind: input.sourceKind,
+      sourceEventId: input.sourceEventId,
+      leg: sourceLeg,
+      points: input.sourcePoints,
+      generatedAt: settlementAt,
+      expiryYears,
+    });
 
     const normalCommission =
       payableAmount > 0
@@ -341,7 +347,7 @@ export async function settleBinaryCommission(
     // opening carryover. The database validates that opening snapshot and then
     // defers a second check until commit to prove this transaction applied the
     // event's exact closing carryover/cap state.
-    await tx.binaryPairEvent.create({
+    const pairEvent = await tx.binaryPairEvent.create({
       data: {
         recipient_user_id: ancestor.user_id,
         source_user_id: input.sourceUserId,
@@ -372,6 +378,20 @@ export async function settleBinaryCommission(
         normal_commission_id: normalCommission?.id || null,
         flashout_commission_id: flashoutCommission?.id || null,
       },
+    });
+    await consumeBinaryPointLots(tx, {
+      recipientUserId: ancestor.user_id,
+      leg: "left",
+      points: consumedPoints,
+      pairEventId: pairEvent.id,
+      now: settlementAt,
+    });
+    await consumeBinaryPointLots(tx, {
+      recipientUserId: ancestor.user_id,
+      leg: "right",
+      points: consumedPoints,
+      pairEventId: pairEvent.id,
+      now: settlementAt,
     });
     await tx.resellerProfile.update({
       where: { user_id: ancestor.user_id },

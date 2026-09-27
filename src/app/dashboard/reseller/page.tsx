@@ -27,6 +27,7 @@ interface Stats {
     quote: { date: string; text: string; author: string; source?: string; category: string }
   }
   points:    { total: number; reset_at: string | null; php_value: number }
+  point_expiry: { years: number; active_points: number; expiring_next_90_days: number; next_expiry_at: string | null }
   referrals: { today: number; remaining: number; cap: number; cap_enabled: boolean }
   commission_summary: {
     direct_referral: { amount: number; count: number }
@@ -239,7 +240,7 @@ export default function ResellerDashboardPage() {
   const totalPU        = stats.rank?.total_pu || 0
   const currentRankObj = ranks.find(r => r.name === stats.rank?.current) || null
   const nextRank       = currentRankObj ? ranks[ranks.indexOf(currentRankObj) + 1] || null : ranks[0] || null
-  const effectivePts   = currentRankObj ? Number(currentRankObj.pair_income) : 10
+  const effectivePts   = 10
   const progressPct    = !nextRank ? 100
     : currentRankObj
     ? Math.min(100, Math.round(((totalPU - currentRankObj.required_pu) / (nextRank.required_pu - currentRankObj.required_pu)) * 100))
@@ -710,6 +711,13 @@ export default function ResellerDashboardPage() {
               <span className="text-gray-400">Sponsor</span>
               <span className="font-semibold text-[#0D1B3E] truncate max-w-[120px]">{stats.tree?.sponsor?.full_name || '—'}</span>
             </div>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-800">
+            <p>Unmatched Package Binary points expire {stats.point_expiry.years} years after their generation date.</p>
+            {stats.point_expiry.next_expiry_at && (
+              <p className="mt-1 font-semibold">Next expiry: {new Date(stats.point_expiry.next_expiry_at).toLocaleDateString('en-PH')} · {stats.point_expiry.expiring_next_90_days.toLocaleString()} points due within 90 days</p>
+            )}
           </div>
 
           <div className="mt-4 rounded-xl border border-[#dbe7ff] bg-[#f6f9ff] p-3">

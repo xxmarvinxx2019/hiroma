@@ -13,50 +13,50 @@ const initial = getDateRangePreset("this_month");
 const cardDefs = [
   [
     "total_allocated",
-    "Total Reserve Allocated",
-    "All reserve sources",
+    "Money Set Aside from Sales",
+    "Money recorded from registration and product sales as a source for commissions. This is not the total amount owed.",
     "from-blue-700 to-blue-500",
   ],
   [
     "available_reserve",
-    "Available Reserve",
-    "Uncommitted funding balance",
+    "Reserve Money Still Available",
+    "Money already set aside that has not yet been assigned to an earned commission.",
     "from-emerald-700 to-emerald-500",
   ],
   [
     "total_liability",
-    "Committed Liability",
-    "Earned, not yet released",
+    "Commissions Earned but Not Yet Paid",
+    "The exact amount members have already earned, including cascading commissions, that HIROMA still owes.",
     "from-purple-800 to-purple-500",
   ],
   [
     "total_paid",
-    "Released / Paid",
-    "Released within selected period",
+    "Commissions Already Paid",
+    "Commission money successfully released to members during the selected dates.",
     "from-orange-700 to-orange-500",
   ],
   [
     "total_direct_retained",
-    "Direct Retained",
-    "Upgrade, cap, ineligible, and company-root decisions",
+    "Direct Referral Money Kept by HIROMA",
+    "Direct Referral amounts not payable because of a cap, ineligibility, upgrade rule, or company-root account.",
     "from-teal-800 to-teal-500",
   ],
   [
     "total_flashout",
-    "Flashout Retained",
-    "Returned to Hiroma",
+    "Capped or Ineligible Commission Kept",
+    "Commission removed by the approved cap or inactive-member rule and retained by HIROMA.",
     "from-red-800 to-red-500",
   ],
   [
     "total_deactivation_forfeited",
-    "Deactivation Forfeited",
-    "Liquidated member payables",
+    "Commission Forfeited after Deactivation",
+    "Previously payable commission removed under the approved reseller-deactivation rule.",
     "from-slate-800 to-slate-600",
   ],
   [
     "funding_shortfall",
-    "Funding Shortfall",
-    "Liability without funding",
+    "Additional Reserve Money Needed",
+    "Extra cash HIROMA must protect because earned commissions are higher than the money already set aside.",
     "from-rose-800 to-rose-500",
   ],
 ] as const;
@@ -85,6 +85,22 @@ type ReserveMovement = {
 };
 type ReserveLedgerData = {
   summary?: Record<string, number>;
+  company_funding_bridge?: {
+    product_sales: number;
+    product_cost: number;
+    product_gross_margin: number;
+    pin_sales: number;
+    realized_company_contribution: number;
+    required_protected_cash: number;
+    contribution_after_required_reserve: number;
+    period_product_sales: number;
+    period_product_cost: number;
+    period_product_gross_margin: number;
+    period_pin_sales: number;
+    period_company_contribution: number;
+    bank_balance_connected: boolean;
+    recognition_note: string;
+  };
   reserve_admission?: {
     mode: "monitor" | "enforce";
     status: "healthy" | "warning" | "blocked";
@@ -215,6 +231,42 @@ export default function ReserveLedgerPage() {
         <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
           {data.error}
         </div>
+      )}
+      {!loading && data?.company_funding_bridge && (
+        <section className="mt-5 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+          <div className="border-b bg-blue-50 p-5">
+            <h2 className="font-bold">Where HIROMA’s Commission Reserve Money Comes From</h2>
+            <p className="mt-1 max-w-4xl text-sm text-slate-600">
+              Shows the company income sources available for commissions and compares them with the amount HIROMA must keep ready for members.
+            </p>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["Product sales collected by HIROMA", data.company_funding_bridge.product_sales, "Paid and delivered product orders sold directly by HIROMA up to the selected end date."],
+              ["Cost of the products sold", data.company_funding_bridge.product_cost, "What HIROMA paid for the products included in those delivered sales."],
+              ["Profit before other expenses from products", data.company_funding_bridge.product_gross_margin, "Product sales minus product cost. Counted once when the paid order is delivered."],
+              ["Money collected from PIN sales", data.company_funding_bridge.pin_sales, "Paid and approved PIN purchases, including reconciled older registrations."],
+              ["Total company money available before commissions", data.company_funding_bridge.realized_company_contribution, "Product gross margin plus paid PIN proceeds. This is before taxes and operating expenses."],
+              ["Total money HIROMA must keep ready", data.company_funding_bridge.required_protected_cash, "The exact commissions members have earned but HIROMA has not released yet."],
+              ["Amount left after covering earned commissions", data.company_funding_bridge.contribution_after_required_reserve, "Company contribution minus unpaid earned commissions. This is not net income because tax, payroll, rent, utilities, and other expenses are not deducted."],
+              ["Actual balance in the reserve bank account", 0, data.company_funding_bridge.bank_balance_connected ? "Connected to the recorded bank balance." : "Not connected yet. Finance must compare this with the dedicated reserve bank account."],
+            ].map(([label, value, note]) => (
+              <article key={String(label)} className="rounded-xl border bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                <p className={`mt-2 text-xl font-black ${label === "Amount left after covering earned commissions" && Number(value) < 0 ? "text-rose-700" : "text-[#0D1B3E]"}`}>
+                  {label === "Actual balance in the reserve bank account" && !data.company_funding_bridge.bank_balance_connected ? "Not connected" : peso.format(Number(value))}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{note}</p>
+              </article>
+            ))}
+          </div>
+          <div className="border-t bg-amber-50 px-5 py-4 text-sm text-amber-900">
+            <strong>How to read this:</strong> Product profit is counted only once when HIROMA completes a paid product delivery. A later reseller registration records the commission obligation but does not count the same product profit again.
+            <span className="mt-1 block text-xs">
+              Selected period contribution: {peso.format(data.company_funding_bridge.period_company_contribution)} = {peso.format(data.company_funding_bridge.period_product_gross_margin)} product margin + {peso.format(data.company_funding_bridge.period_pin_sales)} paid PIN proceeds.
+            </span>
+          </div>
+        </section>
       )}
       {!loading && data?.reserve_admission && (
         <section className={
@@ -365,10 +417,9 @@ export default function ReserveLedgerPage() {
       </section>
       <section className="mt-5 overflow-hidden rounded-2xl border bg-white shadow-sm">
         <div className="border-b p-5">
-          <h2 className="font-bold">Reserve Position by Commission Type</h2>
+          <h2 className="font-bold">Money Available and Money Owed by Commission Type</h2>
           <p className="text-xs text-slate-500">
-            Categories remain separate; consolidated totals do not remove their
-            identity.
+            Use this table to see where reserve money came from, what members have earned, what was paid, and whether more cash must be protected.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -377,14 +428,14 @@ export default function ReserveLedgerPage() {
               <tr>
                 {[
                   "Reserve type",
-                  "Allocated",
-                  "Available",
-                  "Committed liability",
-                  "Released",
-                  "Direct retained",
-                  "Flashout",
-                  "Deactivation forfeited",
-                  "Shortfall",
+                  "Money set aside",
+                  "Reserve still available",
+                  "Earned but unpaid",
+                  "Already paid",
+                  "Direct Referral kept",
+                  "Capped/ineligible kept",
+                  "Forfeited after deactivation",
+                  "Additional reserve needed",
                 ].map((x) => (
                   <th key={x} className="px-5 py-3">
                     {x}
@@ -425,10 +476,9 @@ export default function ReserveLedgerPage() {
       <section className="mt-5 overflow-hidden rounded-2xl border bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
           <div>
-            <h2 className="font-bold">Reserve Movement Ledger</h2>
+            <h2 className="font-bold">Detailed History of Reserve Money</h2>
             <p className="text-xs text-slate-500">
-              Source-level allocation, commitment, release, and flashout
-              records.
+              Every amount added, assigned to an earned commission, paid to a member, retained, or forfeited—shown with its source and date.
             </p>
           </div>
           <select

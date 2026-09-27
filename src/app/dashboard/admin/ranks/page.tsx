@@ -101,8 +101,8 @@ export default function AdminRanksPage() {
       {/* Info banner */}
       <div className="bg-[#010521]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3 mb-5 text-xs text-gray-500 leading-relaxed">
         <p className="font-medium text-[#0D1B3E] mb-1">How it works</p>
-        Every package starts at <strong>₱5 per Product Binary pair</strong>. Rank names and required PU are customizable,
-        while payout levels are fixed at ₱10, ₱15, and ₱20 per pair. Qualification PU resets automatically every calendar quarter.
+        Every package and rank pays a fixed <strong>₱5 per Product Binary pair</strong>. Rank names and required PU remain customizable.
+        Qualification PU resets automatically every calendar quarter.
         Rule: <strong>2 PU left + 2 PU right = 1 pair</strong>. Each point = <strong>₱0.50</strong>.
       </div>
 
@@ -240,7 +240,7 @@ export default function AdminRanksPage() {
                         <input type="number" min="0" value={editRank.required_pu}
                           onChange={e => setEditRank({ ...editRank, required_pu: Number(e.target.value) })}
                           className="border border-[#0D1B3E]/15 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
-                        <input type="number" value={editRank.sequence === 1 ? 20 : editRank.sequence === 2 ? 30 : 40}
+                        <input type="number" value={10}
                           readOnly aria-label="Fixed Product Binary points per pair"
                           className="border border-[#0D1B3E]/10 rounded bg-gray-50 px-2 py-1 text-xs text-gray-500" />
                         <div className="flex gap-1.5">
@@ -291,7 +291,7 @@ export default function AdminRanksPage() {
                       onChange={e => setNewRank({ ...newRank, required_pu: Number(e.target.value) })}
                       placeholder="PU needed"
                       className="border border-[#C9A84C]/40 rounded px-2 py-1 text-xs outline-none focus:border-[#C9A84C]" />
-                    <input type="number" value={newRank.sequence === 1 ? 20 : newRank.sequence === 2 ? 30 : 40}
+                    <input type="number" value={10}
                       readOnly aria-label="Fixed Product Binary points per pair"
                       className="border border-[#C9A84C]/20 rounded bg-white/70 px-2 py-1 text-xs text-gray-500" />
                     <div className="flex gap-1.5">

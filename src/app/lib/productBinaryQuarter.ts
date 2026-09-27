@@ -1,8 +1,13 @@
 import { Prisma } from '@prisma/client'
+import { PRODUCT_BINARY_PAIR_POINTS } from '@/app/lib/productBinaryPlan'
 
-export const PRODUCT_BINARY_BASE_POINTS = 10
+export const PRODUCT_BINARY_BASE_POINTS = PRODUCT_BINARY_PAIR_POINTS
 export const PRODUCT_BINARY_PESO_PER_POINT = 0.5
-export const PRODUCT_BINARY_RANK_POINTS = [20, 30, 40] as const
+export const PRODUCT_BINARY_RANK_POINTS = [
+  PRODUCT_BINARY_PAIR_POINTS,
+  PRODUCT_BINARY_PAIR_POINTS,
+  PRODUCT_BINARY_PAIR_POINTS,
+] as const
 export const PRODUCT_BINARY_DEFAULT_THRESHOLDS = [30, 50, 100] as const
 
 type Tx = Prisma.TransactionClient

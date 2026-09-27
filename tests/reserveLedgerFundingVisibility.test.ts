@@ -28,5 +28,5 @@ test("Direct Referral availability is based on immutable decisions, not only pai
   assert.match(route, /SUM\(source_allocation\) FROM direct_referral_settlement_events/);
   assert.match(route, /num\(d\.allocated\)-num\(d\.decided\)/);
   assert.match(route, /SUM\(retained_amount\) FROM direct_referral_settlement_events/);
-  assert.match(page, /Direct Retained/);
+  assert.match(page, /Direct Referral Money Kept by HIROMA/);
 });

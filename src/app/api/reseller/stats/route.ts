@@ -129,6 +129,20 @@ export async function GET() {
       LIMIT 1
     `.catch(() => [])
     const productBinaryRow = productBinaryRows[0]
+    const [pointExpiry] = await prisma.$queryRaw<{
+      expiry_years: number
+      active_points: number
+      expiring_next_90_days: number
+      next_expiry_at: Date | null
+    }[]>`
+      SELECT
+        COALESCE((SELECT value::int FROM system_settings WHERE key='binary_point_expiry_years'),3)::int expiry_years,
+        COALESCE(SUM(remaining_points) FILTER (WHERE expires_at>CURRENT_TIMESTAMP),0)::int active_points,
+        COALESCE(SUM(remaining_points) FILTER (WHERE expires_at>CURRENT_TIMESTAMP AND expires_at<=CURRENT_TIMESTAMP+INTERVAL '90 days'),0)::int expiring_next_90_days,
+        MIN(expires_at) FILTER (WHERE remaining_points>0 AND expires_at>CURRENT_TIMESTAMP) next_expiry_at
+      FROM binary_point_lots
+      WHERE recipient_user_id=${user.id} AND remaining_points>0
+    `
     const inspirationSettings = await prisma.systemSetting.findMany({
       where: { key: { in: [`daily_inspiration:${user.id}:enabled`, `daily_inspiration:${user.id}:hidden_on`] } },
       select: { key: true, value: true },
@@ -206,6 +220,12 @@ export async function GET() {
         total:       profile?.total_points || 0,
         reset_at:    profile?.points_reset_at || null,
         php_value:   Number(profile?.package?.point_php_value || 0),
+      },
+      point_expiry: {
+        years: Number(pointExpiry?.expiry_years || 3),
+        active_points: Number(pointExpiry?.active_points || 0),
+        expiring_next_90_days: Number(pointExpiry?.expiring_next_90_days || 0),
+        next_expiry_at: pointExpiry?.next_expiry_at || null,
       },
       referrals: {
         today:      dailyReferralsToday,

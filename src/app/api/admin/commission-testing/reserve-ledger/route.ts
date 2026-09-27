@@ -16,7 +16,7 @@ export async function GET(req:NextRequest){
  const now=new Date(),from=parseDate(req.nextUrl.searchParams.get('from'))||new Date(now.getFullYear(),now.getMonth(),1),to=parseDate(req.nextUrl.searchParams.get('to'),true)||now
  const type=req.nextUrl.searchParams.get('type')||'all'
  try{
-  const [direct,binary,product,movements,integrity,settlementJobs,reserveAdmission]=await Promise.all([
+  const [direct,binary,product,movements,integrity,settlementJobs,reserveAdmission,companyFunding]=await Promise.all([
    prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT
      COALESCE((SELECT SUM(direct_referral_allocation) FROM registration_financials WHERE created_at<=${to}),0)::float allocated,
@@ -140,6 +140,55 @@ export async function GET(req:NextRequest){
     requestedBinaryAllocation:0,
     policy:readBinaryReserveAdmissionPolicy(),
    })),
+   prisma.$queryRaw<Record<string, unknown>[]>`
+    WITH admin_product_sales AS (
+      SELECT
+        COALESCE(SUM(oi.subtotal),0) gross_sales,
+        COALESCE(SUM(COALESCE(oi.unit_acquisition_cost, movement.unit_cost, product.cost_price) * oi.quantity),0) cost_of_goods,
+        COALESCE(SUM(oi.subtotal - COALESCE(oi.unit_acquisition_cost, movement.unit_cost, product.cost_price) * oi.quantity),0) gross_margin,
+        COALESCE(SUM(oi.subtotal) FILTER (WHERE COALESCE(o.delivered_at,o.created_at) >= ${from}),0) period_gross_sales,
+        COALESCE(SUM(COALESCE(oi.unit_acquisition_cost, movement.unit_cost, product.cost_price) * oi.quantity) FILTER (WHERE COALESCE(o.delivered_at,o.created_at) >= ${from}),0) period_cost_of_goods,
+        COALESCE(SUM(oi.subtotal - COALESCE(oi.unit_acquisition_cost, movement.unit_cost, product.cost_price) * oi.quantity) FILTER (WHERE COALESCE(o.delivered_at,o.created_at) >= ${from}),0) period_gross_margin
+      FROM orders o
+      JOIN users seller ON seller.id=o.seller_id
+      JOIN order_items oi ON oi.order_id=o.id
+      JOIN products product ON product.id=oi.product_id
+      LEFT JOIN LATERAL (
+        SELECT im.unit_cost FROM inventory_movements im
+        WHERE im.order_id::text=o.id::text AND im.product_id::text=oi.product_id::text
+        ORDER BY im.created_at DESC LIMIT 1
+      ) movement ON true
+      WHERE seller.role='admin' AND o.status='delivered' AND o.payment_status='paid'
+        AND COALESCE(o.delivered_at,o.created_at) <= ${to}
+    ), pin_sales AS (
+      SELECT
+        COALESCE(SUM(total_amount),0) paid_pin_sales,
+        COALESCE(SUM(total_amount) FILTER (WHERE COALESCE(approved_at,updated_at) >= ${from}),0) period_paid_pin_sales
+      FROM pin_requests
+      WHERE payment_status='paid' AND status='approved'
+        AND COALESCE(approved_at,updated_at) <= ${to}
+    ), legacy_pin_sales AS (
+      SELECT
+        COALESCE(SUM(rf.pin_allocation),0) paid_pin_sales,
+        COALESCE(SUM(rf.pin_allocation) FILTER (WHERE COALESCE(rf.paid_at,rf.created_at) >= ${from}),0) period_paid_pin_sales
+      FROM registration_financials rf
+      JOIN pins pin ON pin.id=rf.pin_id
+      WHERE rf.payment_status='paid' AND pin.funding_pin_request_id IS NULL
+        AND COALESCE(rf.paid_at,rf.created_at) <= ${to}
+    )
+    SELECT
+      product.gross_sales::float product_sales,
+      product.cost_of_goods::float product_cost,
+      product.gross_margin::float product_gross_margin,
+      (pins.paid_pin_sales + legacy.paid_pin_sales)::float pin_sales,
+      (product.gross_margin + pins.paid_pin_sales + legacy.paid_pin_sales)::float realized_company_contribution,
+      product.period_gross_sales::float period_product_sales,
+      product.period_cost_of_goods::float period_product_cost,
+      product.period_gross_margin::float period_product_gross_margin,
+      (pins.period_paid_pin_sales + legacy.period_paid_pin_sales)::float period_pin_sales,
+      (product.period_gross_margin + pins.period_paid_pin_sales + legacy.period_paid_pin_sales)::float period_company_contribution
+    FROM admin_product_sales product CROSS JOIN pin_sales pins CROSS JOIN legacy_pin_sales legacy
+   `,
   ])
   const d=direct[0]||{},b=binary[0]||{},p=product[0]||{}
   const rows=[
@@ -148,6 +197,9 @@ export async function GET(req:NextRequest){
    {key:'product_binary',label:'Product Binary',allocated:num(p.allocated),available:num(p.available),liability:num(p.liability),paid:num(p.paid),retained:0,flashout:num(p.flashout),forfeited:num(p.forfeited),shortfall:num(p.shortfall)},
   ]
   const sum=(k:keyof typeof rows[number])=>rows.reduce((a,r)=>a+(typeof r[k]==='number'?r[k] as number:0),0)
+  const funding=companyFunding[0]||{}
+  const requiredProtectedCash=sum('liability')
+  const realizedCompanyContribution=num(funding.realized_company_contribution)
   return NextResponse.json({
    range:{from,to},
    summary:{total_allocated:sum('allocated'),available_reserve:sum('available'),total_liability:sum('liability'),total_paid:sum('paid'),total_direct_retained:sum('retained'),total_flashout:sum('flashout'),total_deactivation_forfeited:sum('forfeited'),funding_shortfall:sum('shortfall')},
@@ -155,6 +207,22 @@ export async function GET(req:NextRequest){
    reserve_admission:reserveAdmission,
    product_binary_jobs:settlementJobs,
    reserves:rows,
+   company_funding_bridge:{
+    product_sales:num(funding.product_sales),
+    product_cost:num(funding.product_cost),
+    product_gross_margin:num(funding.product_gross_margin),
+    pin_sales:num(funding.pin_sales),
+    realized_company_contribution:realizedCompanyContribution,
+    required_protected_cash:requiredProtectedCash,
+    contribution_after_required_reserve:realizedCompanyContribution-requiredProtectedCash,
+    period_product_sales:num(funding.period_product_sales),
+    period_product_cost:num(funding.period_product_cost),
+    period_product_gross_margin:num(funding.period_product_gross_margin),
+    period_pin_sales:num(funding.period_pin_sales),
+    period_company_contribution:num(funding.period_company_contribution),
+    bank_balance_connected:false,
+    recognition_note:'Product margin is recognized once when a paid Admin sale is delivered. Registration does not earn that margin again; it only creates or updates commission obligations.',
+   },
    movements,
   })
  }catch(error){console.error('[RESERVE LEDGER]',error);return NextResponse.json({error:'Unable to load consolidated reserve ledger.'},{status:500})}

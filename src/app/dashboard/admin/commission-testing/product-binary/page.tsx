@@ -37,7 +37,7 @@ const cards = [
     "Cap or inactive excess retained by Hiroma",
     "red",
   ],
-  ["average_rate", "Average Pair Rate", "Rank-based rate; maximum ₱20", "sky"],
+  ["average_rate", "Average Pair Rate", "Fixed at ₱5 for every plan", "sky"],
 ] as const;
 const bg: Record<string, string> = {
   emerald: "from-emerald-700 to-emerald-500",

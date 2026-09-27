@@ -20,7 +20,6 @@ import {
 } from "@/app/lib/directReferral";
 import {
   DuplicateBinarySettlementError,
-  InsufficientBinaryReserveError,
   settleBinaryCommission,
 } from "@/app/lib/binaryCommission";
 import {
@@ -1104,10 +1103,7 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
-    if (
-      error instanceof InsufficientBinaryReserveError ||
-      error instanceof DuplicateBinarySettlementError
-    ) {
+    if (error instanceof DuplicateBinarySettlementError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error(

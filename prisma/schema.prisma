@@ -884,6 +884,56 @@ model BinarySettlementEvent {
   @@map("binary_settlement_events")
 }
 
+// Dated FIFO lots are the authority for Package Binary carryover age. The
+// aggregate left_points/right_points fields remain the fast current balance.
+model BinaryPointLot {
+  id                String   @id @default(uuid()) @db.Uuid
+  recipient_user_id String
+  source_user_id    String
+  source_kind       String   @db.VarChar(40)
+  source_event_id   String   @db.VarChar(255)
+  leg               String   @db.VarChar(5)
+  original_points   Int
+  remaining_points  Int
+  generated_at      DateTime @db.Timestamptz(6)
+  expires_at        DateTime @db.Timestamptz(6)
+  expiry_years      Int
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([source_kind, source_event_id, recipient_user_id, leg])
+  @@index([recipient_user_id, leg, generated_at])
+  @@index([expires_at, remaining_points])
+  @@map("binary_point_lots")
+}
+
+model BinaryPointConsumption {
+  id                   String   @id @default(uuid()) @db.Uuid
+  point_lot_id         String   @db.Uuid
+  binary_pair_event_id String   @db.Uuid
+  points               Int
+  consumed_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([point_lot_id, binary_pair_event_id])
+  @@index([binary_pair_event_id])
+  @@map("binary_point_consumptions")
+}
+
+model BinaryPointExpiration {
+  id                String   @id @default(uuid()) @db.Uuid
+  point_lot_id      String   @unique @db.Uuid
+  recipient_user_id String
+  leg               String   @db.VarChar(5)
+  points            Int
+  generated_at      DateTime @db.Timestamptz(6)
+  scheduled_at      DateTime @db.Timestamptz(6)
+  expired_at        DateTime @default(now()) @db.Timestamptz(6)
+  expiry_years      Int
+
+  @@index([recipient_user_id, expired_at])
+  @@index([expired_at])
+  @@map("binary_point_expirations")
+}
+
 // Member-earned binary commission remains a payable liability until the
 // allocated payout is actually released. This is intentionally separate from
 // BinaryReserveLot, which is the company's funding pool.
@@ -2010,10 +2060,10 @@ model SupportRequest {
 
 model SupportTyping {
   request_id String
-  actor_id String
-  name String
-  expires_at DateTime @db.Timestamptz(6)
-  request SupportRequest @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  actor_id   String
+  name       String
+  expires_at DateTime       @db.Timestamptz(6)
+  request    SupportRequest @relation(fields: [request_id], references: [id], onDelete: Cascade)
 
   @@id([request_id, actor_id])
   @@map("support_typing")
