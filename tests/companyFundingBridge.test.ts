@@ -20,8 +20,15 @@ test('paid PIN requests and unlinked legacy registrations are reconciled without
 })
 
 test('admin explains realized contribution, protected cash, and bank reconciliation gap', () => {
-  assert.match(page, /HIROMA Company Funding Bridge/)
-  assert.match(page, /Required protected cash/)
-  assert.match(page, /No double counting/)
-  assert.match(page, /Not connected; reconcile against the dedicated bank account/)
+  assert.match(page, /Where HIROMA’s Commission Reserve Money Comes From/)
+  assert.match(page, /Total money HIROMA must keep ready/)
+  assert.match(page, /How to read this/)
+  assert.match(page, /Finance must compare this with the dedicated reserve bank account/)
+})
+
+test('admin uses plain-language labels with an explanation for every reserve total', () => {
+  assert.match(page, /Money Set Aside from Sales/)
+  assert.match(page, /Commissions Earned but Not Yet Paid/)
+  assert.match(page, /Additional Reserve Money Needed/)
+  assert.match(page, /The exact amount members have already earned, including cascading commissions/)
 })
