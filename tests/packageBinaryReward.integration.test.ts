@@ -16,9 +16,21 @@ test('database seals cash/product split, history, caps, policy changes and dupli
     await db.query('BEGIN')
     await db.query("SET LOCAL statement_timeout='15s'")
     const schema = `reward_test_${randomUUID().replaceAll('-', '')}`
-    await db.query(`CREATE SCHEMA "${schema}"; SET LOCAL search_path TO "${schema}", public`)
+    await db.query(`CREATE SCHEMA "${schema}"; SET LOCAL search_path TO "${schema}"`)
+    // A clean CI database has no application types/functions in public. Keep
+    // all prerequisites local to the disposable fixture, including on dev DBs.
+    const prismaSchema = readFileSync('prisma/schema.prisma', 'utf8')
+    for (const name of ['CommissionType', 'Role']) {
+      const definition = prismaSchema.match(new RegExp(`enum ${name} \\{([\\s\\S]*?)\\}`))
+      assert.ok(definition, `Missing ${name} enum in Prisma schema`)
+      const values = definition[1].split('\n').map(line => line.trim()).filter(line => /^[A-Za-z][A-Za-z0-9_]*$/.test(line))
+      assert.ok(values.length > 0)
+      await db.query(`CREATE TYPE "${name}" AS ENUM (${values.map(value => `'${value}'`).join(',')})`)
+    }
     await db.query(`
-      CREATE TABLE users(id TEXT PRIMARY KEY,status TEXT,username TEXT,role TEXT);
+      CREATE FUNCTION reject_financial_history_change() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'Financial history is append-only.'; END $$;
+      CREATE TABLE users(id TEXT PRIMARY KEY,status TEXT,username TEXT,role "Role");
       CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT,cost_price NUMERIC,is_active BOOLEAN);
       CREATE TABLE packages(id TEXT PRIMARY KEY,name TEXT,pairing_bonus_value NUMERIC,binary_pair_cap_enabled BOOLEAN,daily_binary_pair_cap INTEGER);
       CREATE TABLE reseller_profiles(user_id TEXT PRIMARY KEY,package_id TEXT,left_points INTEGER,right_points INTEGER,daily_pairing_count INTEGER,daily_pairing_date DATE);
