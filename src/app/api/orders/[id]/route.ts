@@ -1,3 +1,5 @@
+import { orderReplacementLines } from '@/app/lib/orderReplacements'
+import { canAccessRewardStock } from '@/app/lib/rewardStockReplacement'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
@@ -78,7 +80,8 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     }
 
-    return NextResponse.json({ order })
+    const replacement_lines = await orderReplacementLines(prisma, [order.id])
+    return NextResponse.json({ order: { ...order, replacement_lines, can_receive_replacements: user.id === order.buyer.id && canAccessRewardStock(user, true) } }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('[ORDER DETAIL ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })

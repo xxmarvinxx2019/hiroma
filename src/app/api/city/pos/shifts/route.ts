@@ -116,6 +116,7 @@ export async function PATCH(req: Request) {
     });
     const isBranch = profile?.dist_level === "branch";
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM pos_shifts WHERE id::text=${shiftId} AND owner_id=${user.id} AND opened_by_id=${actorId} FOR UPDATE`;
       const shift = await tx.posShift.findFirst({
         where: {
           id: shiftId,

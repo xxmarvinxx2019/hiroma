@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/commissionCredit'
 import { lockFinancialUser } from '@/app/lib/walletLedger'
 import { createAuditLog } from '@/app/lib/auditLog'
+import { expireProductPu, addProductPuLot, consumeProductPuFifo } from '@/app/lib/productBinaryExpiry'
 
 const PU_PER_LEG_PER_PAIR = 2
 const PESO_PER_POINT = PRODUCT_BINARY_PESO_PER_POINT
@@ -97,9 +98,10 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         total_pu_snapshot: number | null
         gross_margin_snapshot: string | null
         snapshot_version: string | null
+        qualified_at: Date
       }[]>`
         SELECT id::text,status,qualification_status,buyer_user_id::text,
-          eligible_units_snapshot,total_pu_snapshot,gross_margin_snapshot::text,snapshot_version
+          eligible_units_snapshot,total_pu_snapshot,gross_margin_snapshot::text,snapshot_version,qualified_at
         FROM product_binary_settlement_jobs
         WHERE order_id=${orderId}
         FOR UPDATE
@@ -129,6 +131,7 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
           || job.gross_margin_snapshot === null) {
         throw new Error('Product Binary settlement job lacks exact paid-delivered snapshots.')
       }
+      if (!job.qualified_at) throw new Error('Product Binary settlement lacks its original earning date.')
 
       const existing = await tx.$queryRaw<{ id: string }[]>`
         SELECT id::text FROM product_binary_order_events WHERE order_id = ${orderId} LIMIT 1
@@ -196,7 +199,8 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       WHERE username='hiroma' AND role='admin'::"Role" AND status='active'::"UserStatus"
       LIMIT 1
     `
-    const day = manilaDayRange(new Date())
+    const settlementAt = new Date()
+    const day = manilaDayRange(settlementAt)
     let credited = 0
     let flashout = 0
 
@@ -224,6 +228,7 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       await tx.$executeRaw`
         INSERT INTO product_binary_positions(user_id) VALUES(${ancestor.user_id}) ON CONFLICT(user_id) DO NOTHING
       `
+      await expireProductPu(tx, ancestor.user_id, settlementAt)
       const positions = await tx.$queryRaw<{
         left_carryover_pu: number; right_carryover_pu: number;
         lifetime_pairs: number; lifetime_payable: number; lifetime_flashout: number;
@@ -237,9 +242,15 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       const openingLifetimePairs = Number(positions[0]?.lifetime_pairs || 0)
       const openingLifetimePayable = Number(positions[0]?.lifetime_payable || 0)
       const openingLifetimeFlashout = Number(positions[0]?.lifetime_flashout || 0)
-      const availableLeft = openingLeft + (ancestor.source_leg === 'left' ? Number(order.total_pu) : 0)
-      const availableRight = openingRight + (ancestor.source_leg === 'right' ? Number(order.total_pu) : 0)
+      await addProductPuLot(tx, ancestor.user_id, orderEventId, ancestor.source_leg,
+        Number(order.total_pu), job.qualified_at, settlementAt)
+      const [available] = await tx.$queryRaw<{ left_carryover_pu: number; right_carryover_pu: number }[]>`
+        SELECT left_carryover_pu,right_carryover_pu FROM product_binary_positions WHERE user_id=${ancestor.user_id}
+      `
+      const availableLeft = Number(available.left_carryover_pu)
+      const availableRight = Number(available.right_carryover_pu)
       const completedPairs = Math.floor(Math.min(availableLeft, availableRight) / PU_PER_LEG_PER_PAIR)
+      await consumeProductPuFifo(tx, ancestor.user_id, completedPairs * PU_PER_LEG_PER_PAIR, settlementAt)
       const closingLeft = availableLeft - completedPairs * PU_PER_LEG_PER_PAIR
       const closingRight = availableRight - completedPairs * PU_PER_LEG_PER_PAIR
 

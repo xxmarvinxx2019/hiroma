@@ -1,5 +1,8 @@
 "use client";
 
+import { recoverableFinancialFetch } from '@/app/lib/recoverableFinancialRequest'
+import FinancialOperationRecovery from '@/app/components/registration/FinancialOperationRecovery'
+
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
@@ -657,7 +660,8 @@ function CityRegisterResellerPageInner() {
     setFormLoading(true);
     setFormError("");
 
-    const res = await fetch("/api/city/resellers", {
+    try {
+    const res = await recoverableFinancialFetch("/api/city/resellers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -703,7 +707,7 @@ function CityRegisterResellerPageInner() {
       setSuccessData({
         id: data.reseller.id,
         full_name: data.reseller.full_name,
-        username: form.username.toLowerCase(),
+        username: data.reseller.username,
         address: fullAddress,
         birthday: form.birthday,
         package: data.package || null,
@@ -711,7 +715,10 @@ function CityRegisterResellerPageInner() {
       setSmsStatus(null);
       setSmsPromptOpen(true);
     }
-    setFormLoading(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to confirm registration. Check transaction recovery.');
+    } finally { setFormLoading(false); }
+
   };
 
   const sendWelcomeSms = async () => {
@@ -739,6 +746,7 @@ function CityRegisterResellerPageInner() {
 
   return (
     <div className="max-w-2xl mx-auto">
+      <FinancialOperationRecovery />
       {posIntakeReceipt && (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
           <strong>POS handoff {posIntakeReceipt}</strong> — payment and package

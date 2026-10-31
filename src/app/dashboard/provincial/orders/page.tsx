@@ -1,5 +1,11 @@
 'use client'
 
+import { useOrderReplacementSelection } from '@/app/components/orders/OrderReplacementPicker'
+import OrderReplacementSummary from '@/app/components/orders/OrderReplacementSummary'
+
+import { useSupplierProducts } from '@/app/components/orders/useSupplierProducts'
+import { readSettingsResponse } from '@/app/lib/settingsResponse'
+
 import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
@@ -43,6 +49,8 @@ interface Product {
   name: string
   type: string
   price: number
+  available_quantity: number | null
+  is_available: boolean
 }
 
 interface PaymentMethodInfo {
@@ -92,7 +100,7 @@ function CreateOrderModal({
   onClose: () => void
   onSuccess: () => void
 }) {
-  const [products, setProducts]     = useState<Product[]>([])
+  const { products, loading: stockLoading, error: stockError, refresh: refreshStock } = useSupplierProducts('provincial', supplier.id)
   const [cart, setCart]             = useState<CartItem[]>([])
   const [orderType, setOrderType]   = useState<'online' | 'offline'>('online')
   const [notes, setNotes]                 = useState('')
@@ -106,9 +114,6 @@ function CreateOrderModal({
   const [search, setSearch]         = useState('')
 
   useEffect(() => {
-    fetch('/api/provincial/products')
-      .then((r) => r.json())
-      .then((data) => setProducts(data.products || []))
 
     // Fetch supplier approved payment methods
     fetch('/api/payment-methods?user_id=' + supplier.id + '&status=approved')
@@ -121,8 +126,19 @@ function CreateOrderModal({
     p.name.toLowerCase().includes(search.toLowerCase())
   )
 
+  const replacement = useOrderReplacementSelection(supplier.id)
+
+  const availableFor = (id: string) => {
+    const product = products.find(product => product.id === id)
+    return product?.is_available ? product.available_quantity ?? Number.MAX_SAFE_INTEGER : 0
+  }
+  const currentCart = cart.map(item => ({ ...item, product: products.find(product => product.id === item.product.id) || item.product }))
+  const invalidCart = cart.some(item => !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > availableFor(item.product.id))
+
   const addToCart = (product: Product) => {
+    if (stockLoading || stockError || !product.is_available) return
     setCart((prev) => {
+      if ((prev.find(item => item.product.id === product.id)?.quantity || 0) >= availableFor(product.id)) return prev
       const existing = prev.find((c) => c.product.id === product.id)
       if (existing) return prev.map((c) => c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c)
       return [...prev, { product, quantity: 1 }]
@@ -130,13 +146,17 @@ function CreateOrderModal({
   }
 
   const updateQty = (productId: string, qty: number) => {
-    if (qty <= 0) setCart((prev) => prev.filter((c) => c.product.id !== productId))
-    else setCart((prev) => prev.map((c) => c.product.id === productId ? { ...c, quantity: qty } : c))
+    if (!Number.isInteger(qty)) return
+    const bounded = Math.max(0, Math.min(qty, availableFor(productId)))
+    if (bounded === 0) setCart(prev => prev.filter(item => item.product.id !== productId))
+    else setCart(prev => prev.map(item => item.product.id === productId ? { ...item, quantity: bounded } : item))
   }
 
-  const total = cart.reduce((s, c) => s + c.product.price * c.quantity, 0)
+  const total = currentCart.reduce((s, c) => s + c.product.price * c.quantity, 0)
 
   const handleSubmit = async () => {
+    if (submitting) return
+    if (stockLoading || stockError || invalidCart) { setError('Review current supplier availability before placing this order.'); refreshStock(); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
     if (paymentMethod !== 'cash' && !paymentReference.trim()) {
       setError('Please enter the payment reference number.'); return
@@ -146,25 +166,29 @@ function CreateOrderModal({
     }
     setSubmitting(true)
     setError('')
-    const res = await fetch('/api/provincial/orders', {
+    try {
+      const res = await fetch('/api/provincial/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        supplier_id: supplier.id,
+        replacements: replacement.selection,
         order_type:          orderType,
         notes,
         payment_method:      paymentMethod,
         payment_reference:   paymentReference.trim() || null,
-        items: cart.map((c) => ({
+        items: currentCart.map((c) => ({
           product_id: c.product.id,
           quantity:   c.quantity,
           unit_price: c.product.price,
         })),
       }),
     })
-    const data = await res.json()
-    setSubmitting(false)
-    if (res.ok) { onSuccess() }
-    else { setError(data.error || 'Something went wrong.') }
+      await readSettingsResponse(res, 'Unable to place this order.')
+      onSuccess()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to place this order.'); refreshStock()
+    } finally { setSubmitting(false) }
   }
 
   return (
@@ -180,6 +204,13 @@ function CreateOrderModal({
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-[#0D1B3E] text-lg leading-none">✕</button>
+        </div>
+
+        {replacement.picker}
+
+        <div className="flex items-center justify-between gap-3 border-b bg-slate-50 px-5 py-2 text-xs">
+          <span role="status" className={stockError || invalidCart ? 'text-red-600' : 'text-gray-500'}>{stockError || (stockLoading ? 'Checking supplier stock…' : invalidCart ? 'Supplier stock changed. Adjust quantities before placing the order.' : 'Available quantities exclude stock reserved for other orders.')}</span>
+          <button type="button" disabled={stockLoading || submitting} onClick={refreshStock} className="whitespace-nowrap rounded border bg-white px-2 py-1 disabled:opacity-40">Refresh stock</button>
         </div>
 
         <div className="flex flex-1 min-h-0">
@@ -210,13 +241,15 @@ function CreateOrderModal({
                           product.type === 'physical' ? 'bg-[#eef0f8] text-[#0D1B3E]' : 'bg-[#f0f7ff] text-[#2563eb]'
                         }`}>{product.type}</span>
                         <span className="text-xs text-gray-400">₱{Number(product.price).toLocaleString()}</span>
+                        <span className={`text-xs ${product.is_available ? 'text-green-600' : 'text-red-600'}`}>{product.available_quantity === null ? (product.is_available ? 'Available' : 'Not available') : `· ${product.available_quantity} available`}</span>
                       </div>
                     </div>
                     <button
                       onClick={() => addToCart(product)}
-                      className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors"
+                      disabled={stockLoading || !!stockError || (cart.find(item => item.product.id === product.id)?.quantity || 0) >= availableFor(product.id)}
+                      className="text-xs bg-[#010521] text-white px-3 py-1.5 rounded-lg hover:bg-[#162850] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      + Add
+                      {!product.is_available ? 'Not available' : '+ Add'}
                     </button>
                   </div>
                 ))
@@ -233,7 +266,7 @@ function CreateOrderModal({
               {cart.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center pt-4">No items yet</p>
               ) : (
-                cart.map((c) => (
+                currentCart.map((c) => (
                   <div key={c.product.id} className="text-xs">
                     <p className="font-medium text-[#0D1B3E] truncate">{c.product.name}</p>
                     <div className="flex items-center gap-1 mt-1">
@@ -242,6 +275,7 @@ function CreateOrderModal({
                       <input
                         type="number"
                         min={1}
+                        max={availableFor(c.product.id) !== Number.MAX_SAFE_INTEGER ? availableFor(c.product.id) : undefined}
                         value={c.quantity}
                         onChange={(e) => {
                           const val = parseInt(e.target.value)
@@ -250,6 +284,7 @@ function CreateOrderModal({
                         className="w-10 text-center text-xs text-[#0D1B3E] bg-[#F0F2F8] rounded border border-[#0D1B3E]/15 outline-none focus:border-[#C9A84C] py-0.5"
                       />
                       <button onClick={() => updateQty(c.product.id, c.quantity + 1)}
+                        disabled={stockLoading || c.quantity >= availableFor(c.product.id)}
                         className="w-5 h-5 bg-[#F0F2F8] rounded text-[#0D1B3E] font-bold text-xs flex items-center justify-center flex-shrink-0">+</button>
                       <span className="ml-auto text-gray-400">₱{(c.product.price * c.quantity).toLocaleString()}</span>
                     </div>
@@ -325,7 +360,7 @@ function CreateOrderModal({
 
               <button
                 onClick={handleSubmit}
-                disabled={submitting || cart.length === 0}
+                disabled={submitting || stockLoading || !!stockError || invalidCart || cart.length === 0}
                 className="w-full bg-[#C9A84C] text-white text-xs py-2 rounded-lg hover:bg-[#b8963e] transition-colors disabled:opacity-50 font-medium"
               >
                 {submitting ? 'Placing...' : 'Place Order'}
@@ -616,6 +651,7 @@ export default function ProvincialOrdersPage() {
               {expandedId === order.id && (
                   <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>
+                    <OrderReplacementSummary orderId={order.id} orderStatus={order.status} />
                     {order.items.length === 0 ? (
                       <p className="text-xs text-gray-400">{order.notes || 'No items'}</p>
                     ) : (

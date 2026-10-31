@@ -4,6 +4,8 @@ import { getRanksForPackage } from '@/app/api/admin/ranks/route'
 import prisma from '@/app/lib/prisma'
 import { ensureCurrentProductBinaryQuarter, getManilaQuarter } from '@/app/lib/productBinaryQuarter'
 import { calculateProductBinaryBalance } from '@/app/lib/productBinaryBalance'
+import { expireProductPu } from '@/app/lib/productBinaryExpiry'
+import { getProductPuExpiryMonths } from '@/app/lib/productPuExpiryPolicy'
 import { getDailyInspiration, getManilaDate } from '@/app/lib/dailyInspiration'
 
 export async function GET() {
@@ -12,7 +14,10 @@ export async function GET() {
     if (!user || user.role !== 'reseller') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    await prisma.$transaction(tx => ensureCurrentProductBinaryQuarter(tx, user.id))
+    await prisma.$transaction(async tx => {
+      await ensureCurrentProductBinaryQuarter(tx, user.id)
+      await expireProductPu(tx, user.id)
+    })
 
     const results = await Promise.all([
 
@@ -240,6 +245,7 @@ export async function GET() {
         quarter:       getManilaQuarter(),
       },
       product_binary: {
+        expiry_months: await getProductPuExpiryMonths(prisma),
         ...productBinaryBalance,
         left_total_pu:    Number(productLegTotals?.left_total_pu || 0),
         right_total_pu:   Number(productLegTotals?.right_total_pu || 0),

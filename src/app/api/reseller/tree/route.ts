@@ -6,6 +6,8 @@ import {
 } from '@/app/lib/productBinaryQuarter'
 import { PRODUCT_BINARY_PAIR_AMOUNT } from '@/app/lib/productBinaryPlan'
 import { calculateProductBinaryBalance } from '@/app/lib/productBinaryBalance'
+import { expireProductPu } from '@/app/lib/productBinaryExpiry'
+import { getProductPuExpiryMonths } from '@/app/lib/productPuExpiryPolicy'
 import { getRanksForPackage } from '@/app/api/admin/ranks/route'
 import { getProfilePhotoDisplayUrl } from '@/app/lib/profilePhoto'
 
@@ -105,7 +107,10 @@ export async function GET(req: NextRequest) {
     if (!user || user.role !== 'reseller') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    await prisma.$transaction(tx => ensureCurrentProductBinaryQuarter(tx, user.id))
+    await prisma.$transaction(async tx => {
+      await ensureCurrentProductBinaryQuarter(tx, user.id)
+      await expireProductPu(tx, user.id)
+    })
 
     const { searchParams } = req.nextUrl
     const maxDepth   = 2
@@ -361,6 +366,7 @@ export async function GET(req: NextRequest) {
         total_pu:                selfRankData.total_pu,
       },
       my_product_binary: {
+        expiry_months: await getProductPuExpiryMonths(prisma),
         ...productBalance,
         pu_per_leg: 2,
         left_total_pu: Number(productLegTotals?.left_total_pu || 0),

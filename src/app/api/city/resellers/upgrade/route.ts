@@ -1,3 +1,4 @@
+import { operationIdentity, replayFinancialOperation, lockFinancialOperation, recordFinancialOperation, OperationRecoveryConflict } from "@/app/lib/financialOperationRecovery";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import prisma from "@/app/lib/prisma";
@@ -35,7 +36,11 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const { reseller_id, new_pin_id, target_package_id } = await req.json();
+    const body = await req.json();
+    const { reseller_id, new_pin_id, target_package_id } = body;
+    const operation = operationIdentity('upgrade', new_pin_id, user.id, user.actor_id || user.id, body);
+    const recovered = await replayFinancialOperation(prisma, operation);
+    if (recovered) return NextResponse.json(recovered, { headers: { 'Cache-Control': 'private, no-store' } });
 
     if (!reseller_id || !new_pin_id || !target_package_id) {
       return NextResponse.json(
@@ -204,7 +209,10 @@ export async function PATCH(req: NextRequest) {
       select: { parent_id: true, position: true },
     });
 
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      await lockFinancialOperation(tx, operation);
+      const prior = await replayFinancialOperation(tx, operation);
+      if (prior) return prior;
       const claimedProfile = await tx.resellerProfile.updateMany({
         where: {
           user_id: reseller_id,
@@ -300,13 +308,15 @@ export async function PATCH(req: NextRequest) {
           sourceEventId: pin.id,
         });
       }
+      return recordFinancialOperation(tx, operation, {
+        success: true,
+        reseller: { id: reseller_id },
+        message: `Reseller upgraded from ${resellerProfile.package?.name} to ${pin.package?.name}. +${diffPts} points added to upline.`,
+      });
     });
-
-    return NextResponse.json({
-      success: true,
-      message: `Reseller upgraded from ${resellerProfile.package?.name} to ${pin.package?.name}. +${diffPts} points added to upline.`,
-    });
+    return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof OperationRecoveryConflict) return NextResponse.json({ error: error.message }, { status: 409 });
     if (error instanceof PinAlreadyClaimedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

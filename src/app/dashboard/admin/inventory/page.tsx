@@ -1,5 +1,7 @@
 'use client'
 
+import RewardStockReplacementPanel from '@/app/components/inventory/RewardStockReplacementPanel'
+
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -828,6 +830,8 @@ export default function AdminInventoryPage() {
           </button>
         ))}
       </div>
+
+      <RewardStockReplacementPanel onChanged={fetchData} />
 
       {selectedStockCard && <StockSummaryModal selected={selectedStockCard} summary={companyStockSummary} onClose={() => setSelectedStockCard(null)} />}
 

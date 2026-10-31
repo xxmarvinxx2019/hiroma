@@ -1,48 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { loadSupplierOrderCatalog, OrderingSupplierChangedError } from '@/app/lib/orderingSupplier'
 
-async function resolveSupplier(cityUserId: string) {
-  const cityProfile = await prisma.distributorProfile.findUnique({
-    where: { user_id: cityUserId },
-    select: {
-      region_code: true, province_code: true, parent_dist_id: true,
-      parent: {
-        include: {
-          user: { select: { id: true } },
-          parent: { include: { user: { select: { id: true } } } },
-        },
-      },
-    },
-  })
-
-  if (cityProfile?.parent?.dist_level === 'provincial' && cityProfile.parent.is_active)
-    return cityProfile.parent.user.id
-
-  if (cityProfile?.parent?.dist_level === 'regional' && cityProfile.parent.is_active)
-    return cityProfile.parent.user.id
-
-  if (cityProfile?.province_code) {
-    const provincial = await prisma.distributorProfile.findFirst({
-      where: { dist_level: 'provincial', province_code: cityProfile.province_code, is_active: true },
-      select: { user_id: true },
-    })
-    if (provincial) return provincial.user_id
-  }
-
-  if (cityProfile?.region_code) {
-    const regional = await prisma.distributorProfile.findFirst({
-      where: { dist_level: 'regional', region_code: cityProfile.region_code, is_active: true },
-      select: { user_id: true },
-    })
-    if (regional) return regional.user_id
-  }
-
-  const admin = await prisma.user.findFirst({
-    where: { role: 'admin' }, select: { id: true },
-  })
-  return admin?.id || null
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -71,6 +31,7 @@ export async function GET(req: NextRequest) {
         where: { owner_id: user.id, quantity: { gt: 0 } },
         select: {
           quantity: true,
+          reserved_quantity: true,
           product: {
             select: {
               id: true, name: true, type: true,
@@ -91,43 +52,15 @@ export async function GET(req: NextRequest) {
             : Number(i.product.price),
           srp:                Number(i.product.price),
           reseller_price:     Number(i.product.reseller_price || i.product.price),
-          available_quantity: i.quantity,
+          available_quantity: Math.max(0, i.quantity - i.reserved_quantity),
         }))
 
       return NextResponse.json({ products })
     }
 
-    // ── For ordering from supplier: return supplier's inventory ──
     if (forOrdering) {
-      const supplierId = await resolveSupplier(user.id)
-      if (!supplierId) return NextResponse.json({ products: [] })
-
-      const inventory = await prisma.inventory.findMany({
-        where: { owner_id: supplierId, quantity: { gt: 0 } },
-        select: {
-          quantity: true,
-          product: {
-            select: {
-              id: true, name: true, type: true,
-              cost_price: true, city_price: true, branch_price: true, is_active: true,
-            },
-          },
-        },
-      })
-
-      const products = inventory
-        .filter((i) => i.product.is_active)
-        .map((i) => ({
-          id:                 i.product.id,
-          name:               i.product.name,
-          type:               i.product.type,
-          price:              isBranch
-            ? Number(i.product.branch_price) || Number(i.product.cost_price)
-            : Number(i.product.city_price),
-          available_quantity: i.quantity,
-        }))
-
-      return NextResponse.json({ products })
+      const catalog = await prisma.$transaction(tx => loadSupplierOrderCatalog(tx, user.id, 'city', searchParams.get('supplier_id')), { isolationLevel: 'RepeatableRead' })
+      return NextResponse.json(catalog, { headers: { 'Cache-Control': 'private, no-store' } })
     }
 
     // ── Default: return all active products visible to city dist (no stock check) ──
@@ -152,12 +85,13 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    const mapped = products.map((p: any) => ({
+    const mapped = products.map((p) => ({
       ...p,
       price: isBranch ? Number(p.branch_price) || Number(p.cost_price) : Number(p.city_price),
     }))
     return NextResponse.json({ products: mapped })
   } catch (error) {
+    if (error instanceof OrderingSupplierChangedError) return NextResponse.json({ error: error.message }, { status: 409 })
     console.error('[CITY PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

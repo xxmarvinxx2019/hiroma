@@ -1,5 +1,7 @@
 'use client'
 
+import RewardStockReplacementPanel from '@/app/components/inventory/RewardStockReplacementPanel'
+
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
 
@@ -168,6 +170,8 @@ export default function ProvincialInventoryPage() {
           ))}
         </div>
       )}
+
+      <RewardStockReplacementPanel onChanged={fetchInventory} />
 
       {/* Tabs */}
       <div className="flex gap-1 bg-white rounded-xl border border-[#0D1B3E]/8 p-1 w-fit">

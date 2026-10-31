@@ -5,6 +5,12 @@ import {
 } from "@/app/lib/commissionCredit";
 import { lockFinancialUser } from "@/app/lib/walletLedger";
 import {
+  PACKAGE_REWARD_LOCK,
+  getPackageRewardPolicy,
+  getPackageRewardCount,
+  splitPackageRewardPairs,
+} from "@/app/lib/packageBinaryReward";
+import {
   consumeBinaryPointLots,
   createBinaryPointLot,
   expireBinaryPointLotsForUser,
@@ -85,6 +91,9 @@ export async function settleBinaryCommission(
   });
   if (priorSettlement) throw new DuplicateBinarySettlementError();
 
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PACKAGE_REWARD_LOCK}))`;
+  const rewardPolicy = await getPackageRewardPolicy(tx);
+
   const ancestors = await tx.$queryRaw<Ancestor[]>`
     WITH RECURSIVE ancestor_chain AS (
       SELECT id, user_id, parent_id, position, 1 AS depth
@@ -164,6 +173,9 @@ export async function settleBinaryCommission(
     capLimit: number;
     capFlashoutPairs: number;
     payablePairs: number;
+    cashPairs: number;
+    productPairs: number;
+    openingRewardCount: number;
     inactiveFlashoutPairs: number;
     flashoutPairs: number;
     payableAmount: number;
@@ -172,9 +184,8 @@ export async function settleBinaryCommission(
   }> = [];
   let currentLeg = input.position;
 
-  // Plan the complete cascade from the locked carryover/cap snapshots. Nothing
-  // financial or spendable is written until the whole member liability is
-  // known and checked against the protected pool.
+  // Plan cash, product and flashout entitlements from locked carryover/cap
+  // snapshots. Both cash and product rewards count toward the daily cap.
   for (const ancestor of ancestors) {
     const profile = profileMap.get(ancestor.user_id);
     if (!profile) {
@@ -210,9 +221,15 @@ export async function settleBinaryCommission(
     const capFlashoutPairs = completedPairs - withinCap;
     const isActive = profile.user.status === "active";
     const payablePairs = isActive ? withinCap : 0;
+    const openingRewardCount = await getPackageRewardCount(tx, ancestor.user_id);
+    const { cashPairs, productPairs } = splitPackageRewardPairs(
+      openingRewardCount,
+      payablePairs,
+      rewardPolicy,
+    );
     const inactiveFlashoutPairs = isActive ? 0 : withinCap;
     const flashoutPairs = capFlashoutPairs + inactiveFlashoutPairs;
-    const payableAmount = payablePairs * pointsPerPair * PESO_PER_POINT;
+    const payableAmount = cashPairs * pointsPerPair * PESO_PER_POINT;
     const flashoutAmount = flashoutPairs * pointsPerPair * PESO_PER_POINT;
     const consumedPoints = completedPairs * pointsPerPair;
     leftPoints -= consumedPoints;
@@ -233,6 +250,9 @@ export async function settleBinaryCommission(
       capLimit,
       capFlashoutPairs,
       payablePairs,
+      cashPairs,
+      productPairs,
+      openingRewardCount,
       inactiveFlashoutPairs,
       flashoutPairs,
       payableAmount,
@@ -291,6 +311,9 @@ export async function settleBinaryCommission(
       capLimit,
       capFlashoutPairs,
       payablePairs,
+      cashPairs,
+      productPairs,
+      openingRewardCount,
       inactiveFlashoutPairs,
       flashoutPairs,
       payableAmount,
@@ -319,7 +342,7 @@ export async function settleBinaryCommission(
             userId: ancestor.user_id,
             type: "binary_pairing",
             amount: payableAmount,
-            points: payablePairs * pointsPerPair,
+            points: cashPairs * pointsPerPair,
             sourceUserId: input.sourceUserId,
           })
         : null;
@@ -367,6 +390,10 @@ export async function settleBinaryCommission(
         closing_right_points: rightPoints,
         completed_pairs: completedPairs,
         payable_pairs: payablePairs,
+        product_reward_pairs: productPairs,
+        reward_interval: rewardPolicy.enabled ? rewardPolicy.interval : null,
+        reward_product_id: rewardPolicy.enabled ? rewardPolicy.product_id : null,
+        opening_reward_eligible_count: openingRewardCount,
         cap_flashout_pairs: capFlashoutPairs,
         inactive_flashout_pairs: inactiveFlashoutPairs,
         consumed_left_points: consumedPoints,

@@ -19,10 +19,11 @@ async function requireOwner() {
 }
 
 export async function GET() {
-  const user = await requireOwner()
-  if (!user) return NextResponse.json({ error: 'Admin owner access is required.' }, { status: 403 })
-  const years = await prisma.$transaction((tx) => getBinaryPointExpiryYears(tx))
-  const [summary] = await prisma.$queryRaw<{
+  try {
+    const user = await requireOwner()
+    if (!user) return NextResponse.json({ error: 'Admin owner access is required.' }, { status: 403 })
+    const years = await prisma.$transaction((tx) => getBinaryPointExpiryYears(tx))
+    const [summary] = await prisma.$queryRaw<{
     active_lots: number
     active_points: number
     expiring_next_90_days: number
@@ -36,7 +37,11 @@ export async function GET() {
       COALESCE((SELECT SUM(points) FROM binary_point_expirations),0)::int expired_points,
       COALESCE((SELECT SUM(remaining_points) FROM binary_point_lots WHERE remaining_points>0 AND expires_at<=CURRENT_TIMESTAMP),0)::int due_pending_points
   `
-  return NextResponse.json({ years, default_years: DEFAULT_BINARY_POINT_EXPIRY_YEARS, summary })
+    return NextResponse.json({ years, default_years: DEFAULT_BINARY_POINT_EXPIRY_YEARS, summary })
+  } catch (error) {
+    console.error('[BINARY POINT EXPIRY SETTING GET]', error)
+    return NextResponse.json({ error: 'Unable to load Package Binary point expiry. Check database setup and try again.' }, { status: 500 })
+  }
 }
 
 export async function PATCH(req: NextRequest) {

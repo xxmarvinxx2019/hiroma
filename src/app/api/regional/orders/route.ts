@@ -1,19 +1,13 @@
+import { parseOrderReplacements, reserveOrderReplacements, orderReplacementError } from '@/app/lib/orderReplacements'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
+import { resolveOrderingSupplier, assertOrderingSupplier, OrderingSupplierChangedError } from '@/app/lib/orderingSupplier'
 import { finalizeReservedStock, InsufficientStockError, releaseOrderStock, reserveOrderStock, validateStockItems } from '@/app/lib/inventoryReservation'
 import { canUpdateOrderPaymentStatus, isAllowedOrderPaymentStatus } from '@/app/lib/orderPaymentAuthorization'
 import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
 // ── Regional always buys from Admin ──
-async function resolveSupplier() {
-  const admin = await prisma.user.findFirst({
-    where: { role: 'admin' },
-    select: { id: true, full_name: true, username: true },
-  })
-  if (!admin) return null
-  return { id: admin.id, full_name: admin.full_name, username: admin.username, level: 'Admin' }
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -79,7 +73,7 @@ export async function GET(req: NextRequest) {
           : { seller_id: user.id, buyer: { role: { in: ['provincial', 'city'] } } },
         _count: { status: true },
       }),
-      isBuyer ? resolveSupplier() : Promise.resolve(null),
+      isBuyer ? resolveOrderingSupplier(prisma, user.id, 'regional') : Promise.resolve(null),
     ])
 
     const summary = { total: 0, pending: 0, processing: 0, delivered: 0, cancelled: 0 }
@@ -97,6 +91,8 @@ export async function GET(req: NextRequest) {
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
     console.error('[REGIONAL ORDERS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
@@ -111,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     const {
       order_type, notes, items,
-      payment_method, payment_reference,
+      payment_method, payment_reference, supplier_id, replacements,
     } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0)
@@ -121,13 +117,16 @@ export async function POST(req: NextRequest) {
     if (!['online', 'offline'].includes(order_type))
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
 
-    const supplier = await resolveSupplier()
+    const supplier = await resolveOrderingSupplier(prisma, user.id, 'regional')
     if (!supplier)
       return NextResponse.json({ error: 'No admin found.' }, { status: 400 })
 
+    assertOrderingSupplier(supplier_id, supplier)
+    const replacementSelection = parseOrderReplacements(replacements)
+
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const products   = await prisma.product.findMany({
-      where: { id: { in: productIds }, is_active: true },
+      where: { id: { in: productIds }, is_active: true, area_visibility: { none: { distributor: { user_id: user.id }, is_visible: false } } },
       select: { id: true, name: true, price: true, regional_price: true },
     })
 
@@ -149,13 +148,15 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       const inventoryItem = await prisma.inventory.findFirst({
         where: { owner_id: supplier.id, product_id: item.product_id },
-        select: { quantity: true },
+        select: { quantity: true, reserved_quantity: true },
       })
-      const available = inventoryItem?.quantity || 0
+      const available = Math.max(0, (inventoryItem?.quantity || 0) - (inventoryItem?.reserved_quantity || 0))
       if (available < item.quantity) {
         const product = productMap.get(item.product_id)
         stockErrors.push(
-          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
+          supplier.level === 'Admin'
+            ? `The requested quantity of "${product?.name || item.product_id}" is currently unavailable. Please reduce the quantity or contact Hiroma.`
+            : `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
         )
       }
     }
@@ -166,6 +167,8 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      const currentSupplier = await resolveOrderingSupplier(tx, user.id, 'regional')
+      if (currentSupplier?.id !== supplier.id) throw new OrderingSupplierChangedError()
       await reserveOrderStock(tx, supplier.id, items)
       const created = await tx.order.create({ data: {
         buyer_id:            user.id,
@@ -182,6 +185,7 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, status: true, total_amount: true, created_at: true },
       })
+      await reserveOrderReplacements(tx, created.id, user.actor_id || user.id, replacementSelection)
       const adminRecipients = await tx.user.findMany({
         where: { role: 'admin' },
         select: { id: true },
@@ -204,6 +208,9 @@ export async function POST(req: NextRequest) {
       order, supplier,
     })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
+    if (error instanceof OrderingSupplierChangedError) return NextResponse.json({ error: error.message }, { status: 409 })
     if (error instanceof InsufficientStockError)
       return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved it.' }, { status: 409 })
     console.error('[REGIONAL ORDERS POST ERROR]', error)
@@ -250,6 +257,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'You can only cancel your own orders.' }, { status: 403 })
 
     const updated = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('hiroma.order_actor', ${user.actor_id || user.id}, true)`
       if (status) {
         const claimed = await tx.order.updateMany({
           where: { id: order_id, status: order.status },
@@ -284,6 +292,8 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ success: true, order: updated })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
     console.error('[REGIONAL ORDERS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react'
 import PasskeySettings from '@/app/components/security/PasskeySettings'
 import DistributorSecurityPinSettings from '@/app/components/security/DistributorSecurityPinSettings'
 import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
+import PackageBinaryRewardSettings from '@/app/components/admin/PackageBinaryRewardSettings'
+import { readSettingsResponse } from '@/app/lib/settingsResponse'
 
 // ============================================================
 // TYPES
@@ -77,6 +79,7 @@ export default function SettingsPage() {
   const [pointExpirySaving, setPointExpirySaving] = useState(false)
   const [pointExpiryMessage, setPointExpiryMessage] = useState('')
   const [pointExpiryError, setPointExpiryError] = useState('')
+  const [pointExpiryReady, setPointExpiryReady] = useState(false)
   const [pointExpirySummary, setPointExpirySummary] = useState({ active_points: 0, expiring_next_90_days: 0, expired_points: 0, due_pending_points: 0 })
 
 
@@ -101,10 +104,10 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch('/api/admin/settings/binary-point-expiry', { cache: 'no-store' })
       .then(async (response) => {
-        const payload = await response.json()
-        if (!response.ok) throw new Error(payload.error || 'Unable to load point expiry policy.')
+        const payload = await readSettingsResponse<{ years: number; summary: typeof pointExpirySummary }>(response, 'Unable to load point expiry policy.')
         setPointExpiryYears(String(payload.years))
         setPointExpirySummary(payload.summary || { active_points: 0, expiring_next_90_days: 0, expired_points: 0, due_pending_points: 0 })
+        setPointExpiryReady(true)
       })
       .catch((error) => setPointExpiryError(error instanceof Error ? error.message : 'Unable to load point expiry policy.'))
   }, [])
@@ -187,8 +190,7 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ years: Number(pointExpiryYears), security_pin: pointExpiryPin }),
       })
-      const payload = await response.json()
-      if (!response.ok) throw new Error(payload.error || 'Unable to update point expiry policy.')
+      const payload = await readSettingsResponse<{ years: number; message: string }>(response, 'Unable to update point expiry policy.')
       setPointExpiryYears(String(payload.years))
       setPointExpiryPin('')
       setPointExpiryMessage(payload.message)
@@ -379,6 +381,8 @@ export default function SettingsPage() {
 
         <PasskeySettings />
 
+        <PackageBinaryRewardSettings />
+
         <SettingsSection
           title="Package Binary point expiry"
           desc="Control how long unmatched left and right Package Binary points remain valid"
@@ -403,7 +407,7 @@ export default function SettingsPage() {
             {pointExpirySummary.due_pending_points > 0 && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{pointExpirySummary.due_pending_points.toLocaleString()} points have reached their expiry date and are queued for the daily expiry job. They cannot be used in a new pairing.</p>}
             {pointExpiryError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{pointExpiryError}</p>}
             {pointExpiryMessage && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{pointExpiryMessage}</p>}
-            <button type="button" onClick={() => void handlePointExpirySave()} disabled={pointExpirySaving || pointExpiryPin.length !== 6} className="rounded-lg bg-[#0D1B3E] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{pointExpirySaving ? 'Saving policy…' : 'Save point expiry policy'}</button>
+            <button type="button" onClick={() => void handlePointExpirySave()} disabled={!pointExpiryReady || pointExpirySaving || pointExpiryPin.length !== 6} className="rounded-lg bg-[#0D1B3E] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{pointExpirySaving ? 'Saving policy…' : 'Save point expiry policy'}</button>
           </div>
         </SettingsSection>
 

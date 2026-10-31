@@ -1,5 +1,8 @@
 'use client'
 
+import { recoverableFinancialFetch } from '@/app/lib/recoverableFinancialRequest'
+import FinancialOperationRecovery from '@/app/components/registration/FinancialOperationRecovery'
+
 
 // ── Generate username from full name ──
 // Format: firstname + middle initial + last initial + optional number
@@ -316,14 +319,16 @@ function UpgradeModal({
   const handleUpgrade = async () => {
     if (!pinData) return
     setSubmitting(true); setError('')
-    const res = await fetch('/api/city/resellers/upgrade', {
+    try {
+    const res = await recoverableFinancialFetch('/api/city/resellers/upgrade', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reseller_id: reseller.id, new_pin_id: pinData.id, target_package_id: targetPackageId }),
     })
     const data = await res.json()
-    setSubmitting(false)
     if (res.ok) { setSuccess(data.message || 'Upgrade successful!'); setTimeout(() => { onSuccess(); onClose() }, 2000) }
     else { setError(data.error || 'Something went wrong.') }
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to confirm upgrade. Check transaction recovery.') }
+    finally { setSubmitting(false) }
   }
 
   return (
@@ -721,7 +726,8 @@ export default function CityResellersPage() {
     setFormLoading(true)
     setFormError('')
 
-    const res = await fetch('/api/city/resellers', {
+    try {
+    const res = await recoverableFinancialFetch('/api/city/resellers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -743,14 +749,16 @@ export default function CityResellersPage() {
       setFormError(data.error || 'Registration failed.')
     } else {
       setSuccessData({
-        full_name: form.full_name,
-        username:  form.username.toLowerCase(),
+        full_name: data.reseller.full_name,
+        username:  data.reseller.username,
         package:   data.package || null,
       })
       fetchResellers()
       resetForm()
     }
-    setFormLoading(false)
+    } catch (error) { setFormError(error instanceof Error ? error.message : 'Unable to confirm registration. Check transaction recovery.') }
+    finally { setFormLoading(false) }
+
   }
 
   // ============================================================
@@ -759,6 +767,7 @@ export default function CityResellersPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
+      <FinancialOperationRecovery />
 
       {/* Header */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

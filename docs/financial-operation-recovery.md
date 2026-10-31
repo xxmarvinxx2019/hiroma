@@ -1,0 +1,25 @@
+# Registration and upgrade recovery
+
+Registration and upgrade use the original PIN ID plus operation kind as their durable operation identity. Existing source uniqueness, PIN redemption, pair entitlements and reward-unit constraints remain authoritative. The new recovery layer returns the recorded result rather than creating another registration, upgrade, binary settlement or bottle credit.
+
+## Commit boundary
+
+`financial_operation_receipts` is written in the same database transaction as the business mutation and rewards. The receipt binds owner, actor, source PIN and an HMAC-SHA-256 fingerprint of the complete canonical submitted JSON. It contains only the safe success response and a stable `FO-<UUID>` reference, never the raw request, password, PIN code or identity document. The keyed fingerprint prevents a receipt-table reader from using it as a fast offline password-guessing hash. `FINANCIAL_OPERATION_HASH_SECRET` (at least 32 characters) is used when configured, otherwise the existing JWT secret is used. Keep a dedicated fingerprint key stable across JWT rotations. Rotating the fingerprint key makes old changed-payload comparisons fail closed; authorized GET recovery of the original result remains available. Reordered object keys produce the same fingerprint; changed request details cannot reuse a completed operation. The original PR/RC/RS/RR references and financial evidence remain separate and unchanged.
+
+An operation-specific transaction lock serializes simultaneous retries. A completed operation is checked before mutable validations (such as PIN-unused, username availability and current package) and again under the transaction lock. The recorded response is replayed without executing the business mutation. Registration audit evidence now commits in the same transaction, and replay does not add another registration audit event.
+
+If a connection closes before commit, the operation and receipt roll back. If commit succeeds but the response is lost, a new request reads the existing receipt. If the connection fails during commit, the client treats the outcome as unknown and checks the receipt; it does not infer failure or issue a fresh PIN operation. A missing receipt is explicitly **not confirmed**, because an original transaction may still be running. Retries must keep the original PIN and unchanged request. Pre-enhancement transactions have no recovery receipt; their existing PIN/source uniqueness still prevents duplicate settlement, but staff must verify their existing financial records manually.
+
+## Browser behavior
+
+Both registration entry points and upgrade submission use a bounded request (30 seconds) followed by a read-only recovery check (10 seconds) when the result is uncertain or rejected. The recovery POST compares the original payload fingerprint; it does not perform any registration/upgrade mutation. Reusing a source with changed details returns a conflict. GET is a scoped read of the original result for recovery after refresh/reopening.
+
+Before sending a write, browser local storage records only operation kind and original PIN UUID. Passwords, PIN codes, applicant details and the raw request are not persisted. Storage failure prevents a new submission. The browser keeps up to 50 reminders, including successful results until acknowledged; permanent financial receipts remain in the database. The recovery panel checks those reminders on load, on reconnect, on storage changes and through Check again. Successful results show the original reference and registration username. Storage is an aid to recovery, not the security boundary.
+
+Owner/session identity and fresh registration permissions are required for every endpoint. A staff member can recover their own operations only; the outlet owner can recover operations for that outlet. Another outlet or staff member receives no receipt data. Responses are private/no-store. Receipt history rejects update, delete and truncate. Runtime database roles need SELECT/INSERT on receipts and must not own the table or be able to disable its triggers.
+
+## Deployment and validation
+
+Apply `20261031130000_financial_operation_recovery` before deploying these endpoints. It validates the response beneficiary against the original registration/upgrade financial source, validates the actor and prevents receipt rewrites. It creates no credits, orders, registrations or stock movements.
+
+Integration tests close a real database connection with uncommitted effects/receipt, force rollback before commit, discard a successful response and replay from independent connections, race retries, reject changed payloads/unauthorized recovery, verify upgrade evidence and reject history deletion. Browser tests verify recovery does not issue another business mutation, reminders survive unknown outcomes and no credentials/applicant documents enter local storage. These do not claim to simulate a production database outage or certify production-role permissions. Existing reward/claim/replacement concurrency tests remain part of the full suite.

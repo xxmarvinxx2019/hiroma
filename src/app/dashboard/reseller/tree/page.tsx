@@ -504,7 +504,7 @@ export default function ResellerTreePage() {
                     <div className="space-y-3">
                       <div className="rounded-xl border border-[#dbe7ff] bg-[#f6f9ff] p-4">
                         <p className="text-xs font-bold text-[#0D1B3E]">Your Product Binary Position</p>
-                        <p className="mt-1 text-[11px] leading-5 text-gray-500">Team carryover is separate from Personal PU used for quarterly rank qualification.</p>
+                        <p className="mt-1 text-[11px] leading-5 text-gray-500">Each unused Product PU has its own expiry date. Your oldest valid PU is used first. New purchases do not extend existing PU expiry. Personal PU for quarterly rank qualification is separate.</p>
                         <div className="mt-3 grid grid-cols-2 gap-2">
                           <div className="rounded-lg bg-white p-3"><span className="text-[10px] text-blue-600">LEFT CARRYOVER</span><strong className="mt-1 block text-xl text-[#0D1B3E]">{productBinary.leftPu} PU</strong></div>
                           <div className="rounded-lg bg-white p-3"><span className="text-[10px] text-amber-700">RIGHT CARRYOVER</span><strong className="mt-1 block text-xl text-[#0D1B3E]">{productBinary.rightPu} PU</strong></div>

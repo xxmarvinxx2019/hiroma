@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import PosInstallControl from "@/app/components/pos/PosInstallControl";
 import PosCloseShiftModal from "@/app/components/pos/PosCloseShiftModal";
+import PosRewardClaimModal from "@/app/components/pos/PosRewardClaimModal";
 import { loadPosDeviceSettings } from "@/app/lib/posDeviceSettings";
 import {
   deleteQueuedSale,
@@ -498,6 +499,7 @@ export default function PointOfSalePage() {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [memberScanProof, setMemberScanProof] = useState("");
   const [showMemberScanner, setShowMemberScanner] = useState(false);
+  const [showRewardClaims, setShowRewardClaims] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [showProductScanner, setShowProductScanner] = useState(false);
@@ -1080,6 +1082,9 @@ export default function PointOfSalePage() {
                 </span>
               )}
               <PosInstallControl />
+              <button type="button" disabled={!online || !data?.open_shift || queuedSales.length > 0 || submittingSale}
+                onClick={() => setShowRewardClaims(true)} className="rounded-lg border border-amber-300/50 bg-amber-300/15 px-4 py-2 text-sm font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Requires an online open shift with no pending offline sales">🎁 Claim Product Rewards</button>
             </div>
           </div>
         </header>
@@ -1750,6 +1755,10 @@ export default function PointOfSalePage() {
           </div>
         )}
       </div>
+      {showRewardClaims && data?.open_shift && <PosRewardClaimModal terminalId={data.terminal.id} shiftId={data.open_shift.id}
+        onClose={() => setShowRewardClaims(false)} onReleased={(productId, stockAfter) => {
+          setData(current => current ? { ...current, catalog: current.catalog.map(product => product.product_id === productId ? { ...product, stock: stockAfter } : product) } : current);
+        }} />}
       {showMemberScanner ? (
         <PosMemberQrScanner
           onClose={() => setShowMemberScanner(false)}
