@@ -1,0 +1,338 @@
+{
+  "invariantCases": 100000,
+  "assumptions": {
+    "puPerBottle": 1,
+    "puPerLegPerPair": 2,
+    "pairPesos": 5,
+    "fundingPerBottle": "20 PHP only when exact paid-delivered Admin margin is at least 20 PHP",
+    "uncapped": "Theoretical cumulative pair exposure before daily caps or PU expiry; not a payable forecast",
+    "sameDay": "All leaves buy two bottles in one Manila day, zero opening PU, active ancestors"
+  },
+  "scenarios": [
+    {
+      "plan": "starter",
+      "cap": 20,
+      "balanced": [
+        {
+          "depth": 2,
+          "buyers": 4,
+          "bottles": 8,
+          "pairs": 4,
+          "uncappedLiability": 20,
+          "uncappedPerBottle": 2.5,
+          "sameDayPayable": 20,
+          "sameDayFlashout": 0,
+          "assumedReserve": 160
+        },
+        {
+          "depth": 8,
+          "buyers": 256,
+          "bottles": 512,
+          "pairs": 1024,
+          "uncappedLiability": 5120,
+          "uncappedPerBottle": 10,
+          "sameDayPayable": 3900,
+          "sameDayFlashout": 1220,
+          "assumedReserve": 10240
+        },
+        {
+          "depth": 12,
+          "buyers": 4096,
+          "bottles": 8192,
+          "pairs": 24576,
+          "uncappedLiability": 122880,
+          "uncappedPerBottle": 15,
+          "sameDayPayable": 63900,
+          "sameDayFlashout": 58980,
+          "assumedReserve": 163840
+        },
+        {
+          "depth": 16,
+          "buyers": 65536,
+          "bottles": 131072,
+          "pairs": 524288,
+          "uncappedLiability": 2621440,
+          "uncappedPerBottle": 20,
+          "sameDayPayable": 1023900,
+          "sameDayFlashout": 1597540,
+          "assumedReserve": 2621440
+        },
+        {
+          "depth": 17,
+          "buyers": 131072,
+          "bottles": 262144,
+          "pairs": 1114112,
+          "uncappedLiability": 5570560,
+          "uncappedPerBottle": 21.25,
+          "sameDayPayable": 2047900,
+          "sameDayFlashout": 3522660,
+          "assumedReserve": 5242880
+        },
+        {
+          "depth": 18,
+          "buyers": 262144,
+          "bottles": 524288,
+          "pairs": 2359296,
+          "uncappedLiability": 11796480,
+          "uncappedPerBottle": 22.5,
+          "sameDayPayable": 4095900,
+          "sameDayFlashout": 7700580,
+          "assumedReserve": 10485760
+        }
+      ],
+      "annual": [
+        {
+          "members": 5000,
+          "shape": "balanced",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 12,
+          "bottles": 121670,
+          "pairs": 300841,
+          "payable": 1345685,
+          "flashout": 158520,
+          "payablePerBottle": 11.060121640503,
+          "assumedReserve": 2433400,
+          "minimumReserve20": 0,
+          "minimumReserve5": -737335,
+          "closingUnmatchedPu": 57620
+        },
+        {
+          "members": 1000,
+          "shape": "comb",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 500,
+          "bottles": 24340,
+          "pairs": 6089,
+          "payable": 30445,
+          "flashout": 0,
+          "payablePerBottle": 1.250821692686935,
+          "assumedReserve": 486800,
+          "minimumReserve20": 0,
+          "minimumReserve5": 0,
+          "closingUnmatchedPu": 6072380
+        }
+      ]
+    },
+    {
+      "plan": "silver",
+      "cap": 40,
+      "balanced": [
+        {
+          "depth": 2,
+          "buyers": 4,
+          "bottles": 8,
+          "pairs": 4,
+          "uncappedLiability": 20,
+          "uncappedPerBottle": 2.5,
+          "sameDayPayable": 20,
+          "sameDayFlashout": 0,
+          "assumedReserve": 160
+        },
+        {
+          "depth": 8,
+          "buyers": 256,
+          "bottles": 512,
+          "pairs": 1024,
+          "uncappedLiability": 5120,
+          "uncappedPerBottle": 10,
+          "sameDayPayable": 4440,
+          "sameDayFlashout": 680,
+          "assumedReserve": 10240
+        },
+        {
+          "depth": 12,
+          "buyers": 4096,
+          "bottles": 8192,
+          "pairs": 24576,
+          "uncappedLiability": 122880,
+          "uncappedPerBottle": 15,
+          "sameDayPayable": 74040,
+          "sameDayFlashout": 48840,
+          "assumedReserve": 163840
+        },
+        {
+          "depth": 16,
+          "buyers": 65536,
+          "bottles": 131072,
+          "pairs": 524288,
+          "uncappedLiability": 2621440,
+          "uncappedPerBottle": 20,
+          "sameDayPayable": 1187640,
+          "sameDayFlashout": 1433800,
+          "assumedReserve": 2621440
+        },
+        {
+          "depth": 17,
+          "buyers": 131072,
+          "bottles": 262144,
+          "pairs": 1114112,
+          "uncappedLiability": 5570560,
+          "uncappedPerBottle": 21.25,
+          "sameDayPayable": 2375480,
+          "sameDayFlashout": 3195080,
+          "assumedReserve": 5242880
+        },
+        {
+          "depth": 18,
+          "buyers": 262144,
+          "bottles": 524288,
+          "pairs": 2359296,
+          "uncappedLiability": 11796480,
+          "uncappedPerBottle": 22.5,
+          "sameDayPayable": 4751160,
+          "sameDayFlashout": 7045320,
+          "assumedReserve": 10485760
+        }
+      ],
+      "annual": [
+        {
+          "members": 5000,
+          "shape": "balanced",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 12,
+          "bottles": 121670,
+          "pairs": 300841,
+          "payable": 1452690,
+          "flashout": 51515,
+          "payablePerBottle": 11.939590696145311,
+          "assumedReserve": 2433400,
+          "minimumReserve20": 0,
+          "minimumReserve5": -844340,
+          "closingUnmatchedPu": 57620
+        },
+        {
+          "members": 1000,
+          "shape": "comb",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 500,
+          "bottles": 24340,
+          "pairs": 6089,
+          "payable": 30445,
+          "flashout": 0,
+          "payablePerBottle": 1.250821692686935,
+          "assumedReserve": 486800,
+          "minimumReserve20": 0,
+          "minimumReserve5": 0,
+          "closingUnmatchedPu": 6072380
+        }
+      ]
+    },
+    {
+      "plan": "gold",
+      "cap": 100,
+      "balanced": [
+        {
+          "depth": 2,
+          "buyers": 4,
+          "bottles": 8,
+          "pairs": 4,
+          "uncappedLiability": 20,
+          "uncappedPerBottle": 2.5,
+          "sameDayPayable": 20,
+          "sameDayFlashout": 0,
+          "assumedReserve": 160
+        },
+        {
+          "depth": 8,
+          "buyers": 256,
+          "bottles": 512,
+          "pairs": 1024,
+          "uncappedLiability": 5120,
+          "uncappedPerBottle": 10,
+          "sameDayPayable": 4980,
+          "sameDayFlashout": 140,
+          "assumedReserve": 10240
+        },
+        {
+          "depth": 12,
+          "buyers": 4096,
+          "bottles": 8192,
+          "pairs": 24576,
+          "uncappedLiability": 122880,
+          "uncappedPerBottle": 15,
+          "sameDayPayable": 87180,
+          "sameDayFlashout": 35700,
+          "assumedReserve": 163840
+        },
+        {
+          "depth": 16,
+          "buyers": 65536,
+          "bottles": 131072,
+          "pairs": 524288,
+          "uncappedLiability": 2621440,
+          "uncappedPerBottle": 20,
+          "sameDayPayable": 1402380,
+          "sameDayFlashout": 1219060,
+          "assumedReserve": 2621440
+        },
+        {
+          "depth": 17,
+          "buyers": 131072,
+          "bottles": 262144,
+          "pairs": 1114112,
+          "uncappedLiability": 5570560,
+          "uncappedPerBottle": 21.25,
+          "sameDayPayable": 2805260,
+          "sameDayFlashout": 2765300,
+          "assumedReserve": 5242880
+        },
+        {
+          "depth": 18,
+          "buyers": 262144,
+          "bottles": 524288,
+          "pairs": 2359296,
+          "uncappedLiability": 11796480,
+          "uncappedPerBottle": 22.5,
+          "sameDayPayable": 5611020,
+          "sameDayFlashout": 6185460,
+          "assumedReserve": 10485760
+        }
+      ],
+      "annual": [
+        {
+          "members": 5000,
+          "shape": "balanced",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 12,
+          "bottles": 121670,
+          "pairs": 300841,
+          "payable": 1504205,
+          "flashout": 0,
+          "payablePerBottle": 12.362990055066984,
+          "assumedReserve": 2433400,
+          "minimumReserve20": 0,
+          "minimumReserve5": -895855,
+          "closingUnmatchedPu": 57620
+        },
+        {
+          "members": 1000,
+          "shape": "comb",
+          "days": 365,
+          "purchaseFrequencyDays": 30,
+          "maximumDepth": 500,
+          "bottles": 24340,
+          "pairs": 6089,
+          "payable": 30445,
+          "flashout": 0,
+          "payablePerBottle": 1.250821692686935,
+          "assumedReserve": 486800,
+          "minimumReserve20": 0,
+          "minimumReserve5": 0,
+          "closingUnmatchedPu": 6072380
+        }
+      ]
+    }
+  ]
+}
+{"funding":[{"snapshot_source":"legacy_movement_quarantined","reconciliation_status":"legacy_movement_quarantined","lots":1,"original":1000,"remaining":0},{"snapshot_source":"legacy_order_reconciliation_required","reconciliation_status":"legacy_snapshot_reconciliation","lots":1,"original":0,"remaining":0}]}
+{"jobs":[{"status":"reconciliation_required","qualification_status":"legacy_snapshot_reconciliation","jobs":1},{"status":"completed","qualification_status":"qualified_paid_delivery","jobs":1}]}
+{"events":[{"events":0,"payable":0,"flashout":0}]}
+{"completedJobIntegrity":[{"completed_positive_pu_without_event":0}]}
+{"expiry":[{"key":"product_pu_expiry_months","value":"12"}]}
+{"installedGuards":[{"proname":"consume_product_binary_funding"},{"proname":"qualify_product_binary_order"}]}
+{"appliedMigrations":[{"migration_name":"20260727220000_add_package_product_binary_cap_toggle"},{"migration_name":"20260809023000_product_binary_accounting"},{"migration_name":"20260809033000_product_binary_funding_pool"},{"migration_name":"20260809040000_product_binary_fixed_max_allocation"},{"migration_name":"20260813150000_make_product_binary_funding_idempotent"},{"migration_name":"20260824193000_quarterly_product_binary_qualification"},{"migration_name":"20260901173000_enforce_funded_product_binary_commissions"},{"migration_name":"20260902152000_bind_product_binary_to_paid_orders"},{"migration_name":"20260930100000_product_pu_fifo_expiry"}]}

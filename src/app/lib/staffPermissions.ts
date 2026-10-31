@@ -70,6 +70,7 @@ function requiredModulePermission(module: AdminStaffModule, method: string, acti
 }
 
 export function adminStaffPermissionForPath(pathname: string, method = 'GET'): AdminStaffPermission | '__owner_only__' | null {
+  if (pathname.startsWith('/api/reward-stock-replacements')) return requiredModulePermission('inventory', method, 'manage')
   if (pathname.startsWith('/api/auth/')) return null
   if (pathname.startsWith('/dashboard/admin/support-staff') || pathname.startsWith('/api/admin/support-staff') || pathname.startsWith('/dashboard/admin/area-managers') || pathname.startsWith('/api/admin/area-managers')) return '__owner_only__'
   if (pathname.startsWith('/dashboard/admin/settings') || pathname.startsWith('/api/admin/settings')) return '__owner_only__'

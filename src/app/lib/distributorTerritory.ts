@@ -44,3 +44,12 @@ export function territoryConflictMessage(level: ExclusiveDistributorLevel) {
   if (level === 'provincial') return 'This province is already assigned to an active Provincial Distributor.'
   return 'This city/municipality is already assigned to an active City Distributor or Hiroma Branch.'
 }
+
+
+export function distributorTerritoryWriteError(error: unknown): string | undefined {
+  const message = (error instanceof Error ? error.message : '') + JSON.stringify(error)
+  if (message.includes('DISTRIBUTOR_PARENT_TERRITORY_MISMATCH')) return 'The parent distributor must serve the same province or region as this distributor.'
+  if (message.includes('DISTRIBUTOR_CHILD_TERRITORY_MISMATCH')) return 'This location change conflicts with existing child distributors. Reassign them first.'
+  if (message.includes('DISTRIBUTOR_TERRITORY_REQUIRED') || message.includes('TERRITORY_CODE_REQUIRED')) return 'Complete the distributor region, province and city/municipality assignment before activation.'
+  if (['TERRITORY_ALREADY_ASSIGNED', 'distributor_active_region_unique', 'distributor_active_province_unique', 'distributor_active_city_branch_unique'].some(key => message.includes(key))) return 'This location is already assigned to an active distributor at that level.'
+}

@@ -19,6 +19,7 @@ type Amount = { amount: number };
 type EventSummary = {
   completed_pairs: number;
   payable_pairs: number;
+  product_reward_pairs: number;
   cap_flashout_pairs: number;
   inactive_flashout_pairs: number;
   members_reached_cap: number;
@@ -56,6 +57,8 @@ type LedgerRow = {
   points_per_pair: number;
   completed_pairs: number;
   payable_pairs: number;
+  product_reward_pairs: number;
+  reward_interval: number | null;
   cap_flashout_pairs: number;
   inactive_flashout_pairs: number;
   payable_amount: number;
@@ -325,6 +328,7 @@ export async function GET(req: NextRequest) {
       prisma.$queryRaw<EventSummary[]>`
         SELECT COALESCE(SUM(completed_pairs),0)::int completed_pairs,
                COALESCE(SUM(payable_pairs),0)::int payable_pairs,
+               COALESCE(SUM(product_reward_pairs),0)::int product_reward_pairs,
                COALESCE(SUM(cap_flashout_pairs),0)::int cap_flashout_pairs,
                COALESCE(SUM(inactive_flashout_pairs),0)::int inactive_flashout_pairs,
                COUNT(DISTINCT recipient_user_id) FILTER (WHERE cap_flashout_pairs > 0)::int members_reached_cap
@@ -399,7 +403,7 @@ export async function GET(req: NextRequest) {
                e.package_name_snapshot package_name,
                source.full_name source_name, source.username source_username,
                e.source_kind, e.source_leg, e.source_points, e.points_per_pair,
-               e.completed_pairs, e.payable_pairs, e.cap_flashout_pairs,
+               e.completed_pairs, e.payable_pairs, e.product_reward_pairs, e.reward_interval, e.cap_flashout_pairs,
                e.inactive_flashout_pairs, e.payable_amount::float, e.flashout_amount::float,
                e.pair_value_snapshot::float pair_value,e.peso_per_point::float,
                e.opening_left_points,e.opening_right_points,e.closing_left_points,e.closing_right_points,
@@ -624,6 +628,7 @@ export async function GET(req: NextRequest) {
       summary: {
         completed_pairs: reportedPairs,
         payable_pairs: reportedPayablePairs,
+        product_reward_pairs: number(eventSummary[0]?.product_reward_pairs),
         total_binary_income: number(earned[0]?.amount),
         total_approved: number(approved[0]?.amount),
         total_paid: number(released[0]?.amount),

@@ -14,6 +14,7 @@ import {
 } from '@/app/lib/auditLog'
 import {
   findActiveTerritoryHolder,
+  distributorTerritoryWriteError,
   territoryConflictMessage,
   territoryKey,
   type ExclusiveDistributorLevel,
@@ -194,6 +195,8 @@ export async function GET(req: NextRequest) {
       },
     })
   } catch (error) {
+    const territoryError = distributorTerritoryWriteError(error)
+    if (territoryError) return NextResponse.json({ error: territoryError }, { status: 409 })
     console.error('[GET DISTRIBUTORS ERROR]', error)
     return NextResponse.json(
       { error: 'Something went wrong.' },
@@ -460,6 +463,8 @@ export async function POST(req: NextRequest) {
       distributor: { id: newDist.id, username: newDist.username },
     })
   } catch (error) {
+    const territoryError = distributorTerritoryWriteError(error)
+    if (territoryError) return NextResponse.json({ error: territoryError }, { status: 409 })
     console.error('[CREATE DISTRIBUTOR ERROR]', error)
     if (error instanceof DistributorTerritoryConflictError || (error instanceof Error && error.message.includes('TERRITORY_ALREADY_ASSIGNED'))) {
       return NextResponse.json(
@@ -522,16 +527,10 @@ export async function PATCH(req: NextRequest) {
         select: { status: true },
       })
       const newStatus = current?.status === 'active' ? 'inactive' : 'active'
-      await Promise.all([
-        prisma.user.update({
-          where: { id: distributor_id },
-          data: { status: newStatus },
-        }),
-        prisma.distributorProfile.update({
-          where: { user_id: distributor_id },
-          data: { is_active: newStatus === 'active' },
-        }),
-      ])
+      await prisma.$transaction(async tx => {
+        await tx.user.update({ where: { id: distributor_id }, data: { status: newStatus } })
+        await tx.distributorProfile.update({ where: { user_id: distributor_id }, data: { is_active: newStatus === 'active' } })
+      })
       return NextResponse.json({
         success: true,
         message: `Distributor ${newStatus === 'active' ? 'activated' : 'deactivated'}.`,
@@ -762,6 +761,8 @@ export async function PATCH(req: NextRequest) {
       message: 'Parent assigned successfully.',
     })
   } catch (error) {
+    const territoryError = distributorTerritoryWriteError(error)
+    if (territoryError) return NextResponse.json({ error: territoryError }, { status: 409 })
     if (error instanceof Error && error.message === 'INVALID_FULFILLMENT_COORDINATES') return NextResponse.json({ error: 'Enter a valid latitude and longitude pair.' }, { status: 400 })
     console.error('[ADMIN DISTRIBUTORS PATCH ERROR]', error)
     return NextResponse.json(

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import styles from './reseller-theme.module.css'
+import ProductRewardsCard from '@/app/components/reseller/ProductRewardsCard'
 
 interface Stats {
   user:      { full_name: string; username: string }
@@ -17,6 +18,7 @@ interface Stats {
     quarter: { year: number; quarter: number; label: string; start: string; endExclusive: string }
   }
   product_binary: {
+    expiry_months: number
     leftPu: number; rightPu: number; readyPairs: number
     left_total_pu: number; right_total_pu: number
     leftNeeded: number; rightNeeded: number; focusSide: 'left' | 'right' | 'both'
@@ -366,6 +368,8 @@ export default function ResellerDashboardPage() {
               <div className={styles.walletOrb}>💳</div>
             </section>
 
+            <ProductRewardsCard />
+
             <section className={`${styles.premiumPanel} ${styles.referralCompact}`}>
               <h2>Daily Referral Cap</h2>
               <CircularProgress value={refCapEnabled ? refToday : 0} max={refCap} label={refCapEnabled ? 'Per Day' : 'No Cap'} />
@@ -618,6 +622,8 @@ export default function ResellerDashboardPage() {
         ))}
       </div>
 
+      <ProductRewardsCard />
+
       {/* ── Middle Row ── */}
       <div className={`grid grid-cols-1 items-start gap-4 md:grid-cols-3 xl:grid-cols-3 ${styles.middleGrid}`}>
 
@@ -745,7 +751,7 @@ export default function ResellerDashboardPage() {
               <strong className="text-[#0D1B3E]">{productBinary.lifetime_pairs.toLocaleString()}</strong>
             </div>
             <div className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 text-[10px] leading-4 text-gray-500">
-              <span>Team carryover forms Product Binary pairs; your own purchase PU determines your quarterly rank.</span>
+              <span>New Product PU expires after {stats.product_binary?.expiry_months ?? 12} months. Existing PU keeps its recorded expiry date. Your oldest valid PU is used first. New purchases do not extend existing PU expiry. Your own purchase PU determines your quarterly rank.</span>
             </div>
           </div>
 

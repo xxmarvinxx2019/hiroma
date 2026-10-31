@@ -1,7 +1,9 @@
+import { parseOrderReplacements, reserveOrderReplacements, orderReplacementError } from '@/app/lib/orderReplacements'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { buildOrderCancellationEvidence } from '@/app/lib/orderCancellation'
 import prisma from '@/app/lib/prisma'
+import { resolveOrderingSupplier, assertOrderingSupplier, OrderingSupplierChangedError } from '@/app/lib/orderingSupplier'
 import { recordInventoryOutEvents } from '@/app/lib/inventoryEvent'
 import { cityOrderListScope } from '@/app/lib/orderSecurity'
 import { createAuditLog, formatMemberId } from '@/app/lib/auditLog'
@@ -17,83 +19,6 @@ import { boundedPage, boundedPageSize } from '@/app/lib/pagination'
 // HELPER — resolve who the city distributor buys from
 // ============================================================
 
-async function resolveSupplier(cityUserId: string) {
-  const cityProfile = await prisma.distributorProfile.findUnique({
-    where: { user_id: cityUserId },
-    select: {
-      region_code:   true,
-      province_code: true,
-      city_muni_code: true,
-      parent_dist_id: true,
-      parent: {
-        include: {
-          user: { select: { id: true, full_name: true, username: true } },
-          parent: {
-            include: {
-              user: { select: { id: true, full_name: true, username: true } },
-            },
-          },
-        },
-      },
-    },
-  })
-
-  if (cityProfile?.parent?.dist_level === 'provincial' && cityProfile.parent.is_active) {
-    return {
-      id:        cityProfile.parent.user.id,
-      full_name: cityProfile.parent.user.full_name,
-      username:  cityProfile.parent.user.username,
-      level:     'Provincial Distributor',
-    }
-  }
-
-  if (cityProfile?.parent?.dist_level === 'regional' && cityProfile.parent.is_active) {
-    return {
-      id:        cityProfile.parent.user.id,
-      full_name: cityProfile.parent.user.full_name,
-      username:  cityProfile.parent.user.username,
-      level:     'Regional Distributor',
-    }
-  }
-
-  if (cityProfile?.province_code) {
-    const provincial = await prisma.distributorProfile.findFirst({
-      where: { dist_level: 'provincial', province_code: cityProfile.province_code, is_active: true },
-      include: { user: { select: { id: true, full_name: true, username: true } } },
-    })
-    if (provincial) {
-      return {
-        id:        provincial.user.id,
-        full_name: provincial.user.full_name,
-        username:  provincial.user.username,
-        level:     'Provincial Distributor',
-      }
-    }
-  }
-
-  if (cityProfile?.region_code) {
-    const regional = await prisma.distributorProfile.findFirst({
-      where: { dist_level: 'regional', region_code: cityProfile.region_code, is_active: true },
-      include: { user: { select: { id: true, full_name: true, username: true } } },
-    })
-    if (regional) {
-      return {
-        id:        regional.user.id,
-        full_name: regional.user.full_name,
-        username:  regional.user.username,
-        level:     'Regional Distributor',
-      }
-    }
-  }
-
-  const admin = await prisma.user.findFirst({
-    where: { role: 'admin' },
-    select: { id: true, full_name: true, username: true },
-  })
-  if (!admin) return null
-
-  return { id: admin.id, full_name: admin.full_name, username: admin.username, level: 'Admin' }
-}
 
 // ============================================================
 // GET orders
@@ -183,7 +108,7 @@ export async function GET(req: NextRequest) {
         _count: { status: true },
       }),
 
-      isBuyer ? resolveSupplier(user.id) : Promise.resolve(null),
+      isBuyer ? resolveOrderingSupplier(prisma, user.id, 'city') : Promise.resolve(null),
     ])
 
     const summary = { total: 0, pending: 0, processing: 0, ready_for_pickup: 0, delivered: 0, cancelled: 0 }
@@ -204,6 +129,8 @@ export async function GET(req: NextRequest) {
       meta: { total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
     console.error('[CITY ORDERS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }
@@ -220,7 +147,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, payment_method, payment_reference } = await req.json()
+    const { order_type, notes, items, payment_method, payment_reference, supplier_id, replacements } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -233,10 +160,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order type.' }, { status: 400 })
     }
 
-    const supplier = await resolveSupplier(user.id)
+    const supplier = await resolveOrderingSupplier(prisma, user.id, 'city')
     if (!supplier) {
       return NextResponse.json({ error: 'No supplier found. Please contact admin.' }, { status: 400 })
     }
+
+    assertOrderingSupplier(supplier_id, supplier)
+    const replacementSelection = parseOrderReplacements(replacements)
 
     const productIds = items.map((i: { product_id: string }) => i.product_id)
     const buyerProfile = await prisma.distributorProfile.findUnique({
@@ -245,7 +175,7 @@ export async function POST(req: NextRequest) {
     })
     const isBranch = buyerProfile?.dist_level === 'branch'
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, is_active: true },
+      where: { id: { in: productIds }, is_active: true, area_visibility: { none: { distributor: { user_id: user.id }, is_visible: false } } },
       select: { id: true, name: true, price: true, cost_price: true, city_price: true, branch_price: true },
     })
 
@@ -271,13 +201,15 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       const inventoryItem = await prisma.inventory.findFirst({
         where: { owner_id: supplier.id, product_id: item.product_id },
-        select: { quantity: true },
+        select: { quantity: true, reserved_quantity: true },
       })
-      const available = inventoryItem?.quantity || 0
+      const available = Math.max(0, (inventoryItem?.quantity || 0) - (inventoryItem?.reserved_quantity || 0))
       if (available < item.quantity) {
         const product = productMap.get(item.product_id)
         stockErrors.push(
-          `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
+          supplier.level === 'Admin'
+            ? `The requested quantity of "${product?.name || item.product_id}" is currently unavailable. Please reduce the quantity or contact Hiroma.`
+            : `Insufficient stock for "${product?.name || item.product_id}": requested ${item.quantity}, available ${available}`
         )
       }
     }
@@ -288,6 +220,8 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      const currentSupplier = await resolveOrderingSupplier(tx, user.id, 'city')
+      if (currentSupplier?.id !== supplier.id) throw new OrderingSupplierChangedError()
       await reserveOrderStock(tx, supplier.id, items)
       const created = await tx.order.create({ data: {
         buyer_id:          user.id,
@@ -311,6 +245,7 @@ export async function POST(req: NextRequest) {
         : supplier.level === 'Regional Distributor'
           ? '/dashboard/regional/orders'
           : '/dashboard/provincial/orders'
+      await reserveOrderReplacements(tx, created.id, user.actor_id || user.id, replacementSelection)
       const recipients = supplier.level === 'Admin'
         ? await tx.user.findMany({ where: { role: 'admin' }, select: { id: true } })
         : [{ id: supplier.id }]
@@ -345,6 +280,9 @@ export async function POST(req: NextRequest) {
       supplier,
     })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
+    if (error instanceof OrderingSupplierChangedError) return NextResponse.json({ error: error.message }, { status: 409 })
     if (error instanceof InsufficientStockError) {
       return NextResponse.json({ error: 'Insufficient available stock. Another order may have reserved it.' }, { status: 409 })
     }
@@ -440,6 +378,7 @@ export async function PATCH(req: NextRequest) {
       && order.payment_status !== 'paid'
 
     const updated = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('hiroma.order_actor', ${user.actor_id || user.id}, true)`
       if (status) {
         const claimed = await tx.order.updateMany({
           where: {
@@ -535,6 +474,8 @@ export async function PATCH(req: NextRequest) {
       ...(rewardsWarning ? { rewards_warning: rewardsWarning } : {}),
     })
   } catch (error) {
+    const replacementError = orderReplacementError(error)
+    if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
     console.error('[CITY ORDERS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

@@ -173,6 +173,7 @@ export async function PATCH(req: NextRequest) {
 
     // ── Transaction: update status + payment_status + credit buyer + deduct admin ──
     const updated = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('hiroma.order_actor', ${user.actor_id || user.id}, true)`
       if (status) {
         const claimed = await tx.order.updateMany({
           where: { id: order_id, status: order.status },

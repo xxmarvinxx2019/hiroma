@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface Package { id: string; name: string; point_php_value: number }
 interface Rank    { id?: string; package_id: string; name: string; sequence: number; required_pu: number; pair_income: number }
@@ -24,6 +24,37 @@ export default function AdminRanksPage() {
   const [addingPeriod, setAddingPeriod] = useState(false)
   const [saving, setSaving]             = useState(false)
   const [error, setError]               = useState('')
+  const [expiryMonths, setExpiryMonths] = useState(12)
+  const [savedExpiryMonths, setSavedExpiryMonths] = useState<number | null>(null)
+  const [expirySaving, setExpirySaving] = useState(false)
+  const [expiryMessage, setExpiryMessage] = useState('')
+  const [expiryError, setExpiryError] = useState('')
+  const expiryDialog = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    fetch('/api/admin/settings/product-pu-expiry').then(async res => {
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Unable to load Product PU expiry.')
+      setExpiryMonths(data.months); setSavedExpiryMonths(data.months)
+    }).catch(error => setExpiryMessage(error.message))
+  }, [])
+
+  const saveExpiry = async () => {
+    if (expirySaving || !Number.isInteger(expiryMonths) || expiryMonths < 1 || expiryMonths > 120 || expiryMonths === savedExpiryMonths) return
+    setExpirySaving(true); setExpiryError(''); setExpiryMessage('')
+    try {
+      const res = await fetch('/api/admin/settings/product-pu-expiry', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: expiryMonths }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Unable to save Product PU expiry.')
+      setSavedExpiryMonths(data.months)
+      expiryDialog.current?.close()
+      setExpiryMessage('Saved. Newly credited Product PU will use this period. Existing PU keeps its expiry date.')
+    } catch (error) { setExpiryError((error as Error).message) }
+    finally { setExpirySaving(false) }
+  }
 
   const fetchData = () => {
     setLoading(true)
@@ -106,6 +137,48 @@ export default function AdminRanksPage() {
         Rule: <strong>2 PU left + 2 PU right = 1 pair</strong>. Each point = <strong>₱0.50</strong>.
       </div>
 
+      <div className="rounded-xl border border-[#0D1B3E]/10 bg-white p-5 mb-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-[#0D1B3E]">Product PU expiry</p>
+            <p className="mt-2 text-xl font-semibold text-[#0D1B3E]">{savedExpiryMonths === null ? 'Loading…' : `${savedExpiryMonths} months${savedExpiryMonths === 12 ? ' (1 year)' : ''}`}</p>
+            <p className="mt-1 text-xs text-gray-500">For newly credited PU · All packages</p>
+          </div>
+          <button type="button" disabled={savedExpiryMonths === null} onClick={() => {
+            setExpiryMonths(savedExpiryMonths ?? 12); setExpiryError(''); expiryDialog.current?.showModal()
+          }} className="rounded-lg border border-[#0D1B3E]/15 px-4 py-2 text-xs font-semibold text-[#0D1B3E] transition hover:bg-[#0D1B3E]/5 focus-visible:outline-2 focus-visible:outline-[#C9A84C] disabled:opacity-50">Edit expiry</button>
+        </div>
+        <p className="mt-4 border-t border-gray-100 pt-3 text-xs leading-relaxed text-gray-500">Oldest valid PU is used first. Existing PU keeps its recorded expiry date. New purchases do not extend it. Quarterly rank qualification is separate.</p>
+        {expiryMessage && <p role="status" className="mt-2 text-xs text-[#0D1B3E]">{expiryMessage}</p>}
+      </div>
+
+      <dialog ref={expiryDialog} aria-labelledby="expiry-dialog-title" aria-describedby="expiry-dialog-description"
+        onCancel={event => { if (expirySaving) event.preventDefault() }}
+        className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border-0 bg-white p-0 text-[#0D1B3E] shadow-2xl backdrop:bg-[#010521]/60">
+        <form onSubmit={event => { event.preventDefault(); void saveExpiry() }}>
+          <div className="border-b border-gray-100 px-6 py-5">
+            <h2 id="expiry-dialog-title" className="text-lg font-semibold">Edit Product PU expiry</h2>
+            <p id="expiry-dialog-description" className="mt-1 text-xs leading-5 text-gray-500">Set how long newly credited, unmatched PU remains available for pairing.</p>
+          </div>
+          <div className="space-y-4 px-6 py-5">
+            <p className="text-xs text-gray-500">Current period: <strong className="text-[#0D1B3E]">{savedExpiryMonths} months</strong></p>
+            <div>
+              <label htmlFor="product-pu-expiry-months" className="text-sm font-medium">Expiry period (months)</label>
+              <input id="product-pu-expiry-months" type="number" required min={1} max={120} step={1} autoFocus disabled={expirySaving}
+                value={expiryMonths} onChange={event => setExpiryMonths(Number(event.target.value))}
+                aria-describedby="expiry-months-help" className="mt-2 block w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C] focus:ring-2 focus:ring-[#C9A84C]/20" />
+              <p id="expiry-months-help" className="mt-2 text-xs text-gray-500">1–120 months. 12 months equals 1 year.</p>
+            </div>
+            <div className="rounded-lg border border-[#C9A84C]/25 bg-[#fffaf0] p-3 text-xs leading-5 text-gray-600">Applies to newly credited PU across all packages. Existing PU keeps its original expiry date.</div>
+            {expiryError && <p role="alert" className="text-xs text-red-700">{expiryError}</p>}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-100 bg-gray-50 px-6 py-4">
+            <button type="button" disabled={expirySaving} onClick={() => expiryDialog.current?.close()} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium disabled:opacity-50">Cancel</button>
+            <button type="submit" disabled={expirySaving || expiryMonths === savedExpiryMonths || !Number.isInteger(expiryMonths) || expiryMonths < 1 || expiryMonths > 120} className="rounded-lg bg-[#0D1B3E] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{expirySaving ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        </form>
+      </dialog>
+
       {/* Package tabs */}
       <div className="flex gap-2 mb-5 flex-wrap">
         {packages.map(pkg => (
@@ -126,7 +199,7 @@ export default function AdminRanksPage() {
 
           <div className="rounded-xl border border-[#C9A84C]/30 bg-[#fffaf0] p-4">
             <p className="text-sm font-semibold text-[#0D1B3E]">Automatic quarterly season · Q{quarter} {now.getFullYear()}</p>
-            <p className="mt-1 text-xs text-gray-500">{fmtDate(quarterStart.toISOString())} – {fmtDate(quarterEnd.toISOString())}. Personal qualification PU and rank return to Base automatically at the start of the next quarter. Product Binary left/right carryover is separate and is not reset here.</p>
+            <p className="mt-1 text-xs text-gray-500">{fmtDate(quarterStart.toISOString())} – {fmtDate(quarterEnd.toISOString())}. Personal qualification PU and rank return to Base automatically at the start of the next quarter. Unmatched Product PU follows the separate expiry setting shown above.</p>
           </div>
 
           {/* ── Rank Period ── */}

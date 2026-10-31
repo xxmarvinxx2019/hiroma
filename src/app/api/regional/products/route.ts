@@ -1,13 +1,19 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
+import { loadSupplierOrderCatalog, OrderingSupplierChangedError } from '@/app/lib/orderingSupplier'
 
 // ── GET products visible to this city distributor ──
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user || user.role !== 'regional') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    if (req.nextUrl.searchParams.get('for_ordering') === 'true') {
+      const catalog = await prisma.$transaction(tx => loadSupplierOrderCatalog(tx, user.id, 'regional', req.nextUrl.searchParams.get('supplier_id')), { isolationLevel: 'RepeatableRead' })
+      return NextResponse.json(catalog, { headers: { 'Cache-Control': 'private, no-store' } })
     }
 
     // Get this city distributor's profile id
@@ -50,9 +56,10 @@ export async function GET() {
       },
     })
 
-    const mapped = products.map((p: any) => ({ ...p, price: Number(p.regional_price) }))
+    const mapped = products.map((p) => ({ ...p, price: Number(p.regional_price) }))
     return NextResponse.json({ products: mapped })
   } catch (error) {
+    if (error instanceof OrderingSupplierChangedError) return NextResponse.json({ error: error.message }, { status: 409 })
     console.error('[REGIONAL PRODUCTS GET ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

@@ -1,5 +1,7 @@
 'use client'
 
+import OrderReplacementSummary from '@/app/components/orders/OrderReplacementSummary'
+
 import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import Pagination, { PaginationMeta } from '@/app/components/ui/Pagination'
@@ -369,6 +371,7 @@ export default function AdminOrdersPage() {
               {expandedId === order.id && (
                 <div className="px-6 py-3 bg-[#F8F9FC] border-b border-[#0D1B3E]/5">
                   <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Order Items</p>
+                  <OrderReplacementSummary orderId={order.id} orderStatus={order.status} />
                   {order.items.length === 0 ? (
                     <p className="text-xs text-gray-400">{order.notes || 'No items'}</p>
                   ) : (
@@ -463,6 +466,7 @@ export default function AdminOrdersPage() {
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[#0D1B3E]">Order Items</h3>
                   <span className="text-xs text-gray-400">{selectedOrder.items.reduce((sum, item) => sum + item.quantity, 0)} units</span>
                 </div>
+                <OrderReplacementSummary orderId={selectedOrder.id} orderStatus={selectedOrder.status} />
                 {selectedOrder.items.length === 0 ? (
                   <p className="px-4 py-8 text-center text-xs text-gray-400">No item details available.</p>
                 ) : (
