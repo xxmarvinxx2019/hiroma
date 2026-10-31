@@ -17,6 +17,7 @@ const protectedTables = [
   "pins",
   "pin_requests",
   "registration_financials",
+  "financial_operation_receipts",
   "pin_registration_product_snapshots",
   "direct_referral_settlement_events",
   "upgrade_financials",

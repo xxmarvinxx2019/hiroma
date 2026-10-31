@@ -2499,3 +2499,17 @@ model OrderReplacementUnit {
   @@index([unit_id])
   @@map("order_replacement_units")
 }
+
+model FinancialOperationReceipt {
+  id String @id @default(uuid()) @db.Uuid
+  kind String
+  source_id String
+  owner_id String
+  actor_id String
+  request_hash String
+  response Json
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  @@unique([kind, source_id])
+  @@index([owner_id, created_at])
+  @@map("financial_operation_receipts")
+}

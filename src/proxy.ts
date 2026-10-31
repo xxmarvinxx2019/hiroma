@@ -103,6 +103,7 @@ function requiredStaffPermission(pathname: string, method: string): string | nul
   if (pathname === '/api/city/resellers/upgrade' && method === 'PATCH') return 'register_reseller'
   if (pathname === '/api/city/resellers/check-name' && method === 'POST') return 'register_reseller'
   if (pathname === '/api/city/resellers/send-welcome-sms' && method === 'POST') return 'register_reseller'
+  if (pathname.startsWith('/api/city/financial-operations')) return 'register_reseller'
   if (pathname.startsWith('/dashboard/city/top-performers') || pathname.startsWith('/api/city/top-performers')) return 'resellers'
   if (pathname.startsWith('/dashboard/city/resellers') || pathname.startsWith('/api/city/resellers')) return 'resellers'
   if (pathname.startsWith('/dashboard/city/pins') || pathname.startsWith('/api/city/pins')) return 'pins'

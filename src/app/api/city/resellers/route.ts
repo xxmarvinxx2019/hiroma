@@ -1,6 +1,7 @@
+import { operationIdentity, replayFinancialOperation, lockFinancialOperation, recordFinancialOperation, OperationRecoveryConflict } from "@/app/lib/financialOperationRecovery";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser, hashPassword } from "@/app/lib/auth";
-import { createAuditLog, formatMemberId } from "@/app/lib/auditLog";
+import { createRequiredAuditLog, formatMemberId } from "@/app/lib/auditLog";
 import prisma from "@/app/lib/prisma";
 import {
   buildPersonName,
@@ -196,6 +197,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (user.is_staff && !user.permissions?.includes("register_reseller")) return NextResponse.json({ error: "Registration permission is required." }, { status: 403 });
+    const body = await req.json();
     const {
       full_name,
       email,
@@ -227,7 +230,10 @@ export async function POST(req: NextRequest) {
       actual_parent_node_id,
       actual_position,
       pos_intake_id,
-    } = await req.json();
+    } = body;
+    const operation = operationIdentity('registration', pin_id, user.id, user.actor_id || user.id, body);
+    const recovered = await replayFinancialOperation(prisma, operation);
+    if (recovered) return NextResponse.json(recovered, { headers: { 'Cache-Control': 'private, no-store' } });
 
     if (
       !full_name ||
@@ -627,9 +633,70 @@ export async function POST(req: NextRequest) {
       pairing_bonus_value: registrationSnapshot.points,
     };
 
+    function buildRegistrationResult(newUser: { id: string }) {
+      const packageWithProducts = { name: registrationSnapshot.packageName, price: registrationSnapshot.pinAllocation, products: packageProducts };
+      return {
+        success: true,
+        message: `${full_name} has been registered successfully.`,
+        reseller: {
+          id: newUser.id,
+          full_name: cleanFullName,
+          username: cleanUsername,
+        },
+        package: packageWithProducts
+          ? (() => {
+              const isBranch = registrationSnapshot.acquisitionTier === "branch";
+              const productsTotal = packageWithProducts.products.reduce(
+                (sum, p) => sum + Number(p.product.price || 0) * p.quantity,
+                0,
+              );
+              const resellerValue = packageWithProducts.products.reduce(
+                (sum, p) =>
+                  sum +
+                  (Number(p.product.reseller_price) || Number(p.product.price)) *
+                    p.quantity,
+                0,
+              );
+              const acquisitionCost = packageWithProducts.products.reduce(
+                (sum, p) => {
+                  const unitCost = isBranch
+                    ? Number(p.product.branch_price) ||
+                      Number(p.product.cost_price)
+                    : Number(p.product.city_price) ||
+                      Number(p.product.cost_price);
+                  return sum + unitCost * p.quantity;
+                },
+                0,
+              );
+              const pinPrice = Math.max(0, productsTotal - resellerValue);
+              return {
+                name: packageWithProducts.name,
+                pin_price: pinPrice,
+                configured_pin_price: Number(packageWithProducts.price),
+                products_total: productsTotal,
+                reseller_value: resellerValue,
+                acquisition_cost: acquisitionCost,
+                registration_profit: resellerValue - acquisitionCost,
+                total_price: productsTotal,
+                products: packageWithProducts.products.map((p) => ({
+                  name: p.product.name,
+                  type: p.product.type,
+                  quantity: p.quantity,
+                  srp: Number(p.product.price || 0),
+                  subtotal: Number(p.product.price || 0) * p.quantity,
+                })),
+              };
+            })()
+          : null,
+      };
+    }
+
     const hashedPassword = await hashPassword(password);
 
     const registration = await prisma.$transaction(async (tx) => {
+      await lockFinancialOperation(tx, operation);
+      const prior = await replayFinancialOperation<ReturnType<typeof buildRegistrationResult>>(tx, operation);
+      if (prior) return prior;
       await lockPosRegistrationApplicant(tx, identityDocumentHash);
       if (!posIntake) {
         const outstandingPaidIntakes =
@@ -890,7 +957,7 @@ export async function POST(req: NextRequest) {
       // boundary makes all placement writers atomic and prevents a committed
       // node from being omitted from the derived dashboard counters.
 
-      const binaryCommission = await settleBinaryCommission(tx, {
+      await settleBinaryCommission(tx, {
         sourceUserId: created.id,
         sourcePoints: Math.round(
           ledgerAmount(packageSnapshot.pairing_bonus_value),
@@ -959,99 +1026,32 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { user: created, directReferral, binaryCommission };
-    });
-    const newUser = registration.user;
+      await createRequiredAuditLog(tx, {
+        user_id: user.actor_id || user.id,
+        user_name: user.full_name || user.username,
+        user_role: user.is_staff ? "staff" : user.role,
+        member_id: formatMemberId(
+          user.actor_id || user.id,
+          user.is_staff ? "staff" : user.role,
+        ),
+        activity_type: "reseller_registered",
+        category: "reseller",
+        description: `New reseller registered: ${cleanFullName} (@${cleanUsername})`,
+        metadata: {
+          reseller_id: created.id,
+          owner_id: user.id,
+          performed_by_staff: Boolean(user.is_staff),
+        },
+        risk_level: "low",
+        status: "normal",
+      });
 
-    const packageWithProducts = {
-      name: registrationSnapshot.packageName,
-      price: registrationSnapshot.pinAllocation,
-      products: packageProducts,
-    };
-
-    // ── Send welcome SMS ── (commented out to save SMS costs)
-    // try {
-    //   const smsMessage = smsWelcomeReseller({ full_name, username: username.trim().toLowerCase(), password, package_name: packageWithProducts?.name || 'Starter' })
-    //   await sendSMS(mobile, smsMessage)
-    // } catch (e) {
-    //   console.error('[REGISTER] SMS error:', e)
-    // }
-
-    createAuditLog({
-      user_id: user.actor_id || user.id,
-      user_name: user.full_name || user.username,
-      user_role: user.is_staff ? "staff" : user.role,
-      member_id: formatMemberId(
-        user.actor_id || user.id,
-        user.is_staff ? "staff" : user.role,
-      ),
-      activity_type: "reseller_registered",
-      category: "reseller",
-      description: `New reseller registered: ${cleanFullName} (@${cleanUsername})`,
-      metadata: {
-        reseller_id: newUser.id,
-        owner_id: user.id,
-        performed_by_staff: Boolean(user.is_staff),
-      },
-      risk_level: "low",
-      status: "normal",
+      return recordFinancialOperation(tx, operation, buildRegistrationResult(created));
     });
 
-    return NextResponse.json({
-      success: true,
-      message: `${full_name} has been registered successfully.`,
-      reseller: {
-        id: newUser.id,
-        full_name: cleanFullName,
-        username: cleanUsername,
-      },
-      package: packageWithProducts
-        ? (() => {
-            const isBranch = registrationSnapshot.acquisitionTier === "branch";
-            const productsTotal = packageWithProducts.products.reduce(
-              (sum, p) => sum + Number(p.product.price || 0) * p.quantity,
-              0,
-            );
-            const resellerValue = packageWithProducts.products.reduce(
-              (sum, p) =>
-                sum +
-                (Number(p.product.reseller_price) || Number(p.product.price)) *
-                  p.quantity,
-              0,
-            );
-            const acquisitionCost = packageWithProducts.products.reduce(
-              (sum, p) => {
-                const unitCost = isBranch
-                  ? Number(p.product.branch_price) ||
-                    Number(p.product.cost_price)
-                  : Number(p.product.city_price) ||
-                    Number(p.product.cost_price);
-                return sum + unitCost * p.quantity;
-              },
-              0,
-            );
-            const pinPrice = Math.max(0, productsTotal - resellerValue);
-            return {
-              name: packageWithProducts.name,
-              pin_price: pinPrice,
-              configured_pin_price: Number(packageWithProducts.price),
-              products_total: productsTotal,
-              reseller_value: resellerValue,
-              acquisition_cost: acquisitionCost,
-              registration_profit: resellerValue - acquisitionCost,
-              total_price: productsTotal,
-              products: packageWithProducts.products.map((p) => ({
-                name: p.product.name,
-                type: p.product.type,
-                quantity: p.quantity,
-                srp: Number(p.product.price || 0),
-                subtotal: Number(p.product.price || 0) * p.quantity,
-              })),
-            };
-          })()
-        : null,
-    });
+    return NextResponse.json(registration, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error: unknown) {
+    if (error instanceof OperationRecoveryConflict) return NextResponse.json({ error: error.message }, { status: 409 });
     if (
       error instanceof Error &&
       error.message === "POS_REGISTRATION_ALREADY_ENCODED"
