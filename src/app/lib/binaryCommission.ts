@@ -1,3 +1,5 @@
+import { planPackageBinarySession } from "@/app/lib/packageBinarySession";
+import { loadPackageBinaryDailyCaps, applyPackageBinaryCapCache, type PackageBinaryCapRow } from "@/app/lib/packageBinaryDailyCap";
 import { Prisma } from "@prisma/client";
 import {
   creditCommissionExactlyOnce,
@@ -38,12 +40,7 @@ type Ancestor = {
   depth: number;
 };
 
-type CapRow = {
-  user_id: string;
-  enabled: boolean;
-  cap: number;
-  is_today: boolean;
-};
+type CapRow = PackageBinaryCapRow;
 
 // Kept as a compatibility type for historical simulation scripts. Live
 // settlement now records a funding gap instead of rejecting a valid cascade.
@@ -135,7 +132,6 @@ export async function settleBinaryCommission(
       user_id: true,
       left_points: true,
       right_points: true,
-      daily_pairing_count: true,
       package: { select: { id: true, name: true, pairing_bonus_value: true } },
       user: { select: { status: true } },
     },
@@ -143,15 +139,7 @@ export async function settleBinaryCommission(
   const profileMap = new Map(
     profiles.map((profile) => [profile.user_id, profile]),
   );
-  const caps = await tx.$queryRaw<CapRow[]>`
-    SELECT r.user_id::text,
-           COALESCE(p.binary_pair_cap_enabled, true) AS enabled,
-           COALESCE(p.daily_binary_pair_cap, 10)::int AS cap,
-           COALESCE(r.daily_pairing_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date, false) AS is_today
-    FROM reseller_profiles r
-    JOIN packages p ON p.id = r.package_id
-    WHERE r.user_id::text = ANY(${ancestors.map((row) => row.user_id)}::text[])
-  `;
+  const caps = await loadPackageBinaryDailyCaps(tx, ancestors.map(row => row.user_id));
   const capMap = new Map(caps.map((cap) => [cap.user_id, cap]));
   const hiroma = await tx.user.findFirst({
     where: { username: "hiroma", role: "admin", status: "active" },
@@ -181,6 +169,8 @@ export async function settleBinaryCommission(
     payableAmount: number;
     flashoutAmount: number;
     consumedPoints: number;
+    acceptedPoints: number;
+    flushedPoints: number;
   }> = [];
   let currentLeg = input.position;
 
@@ -200,25 +190,22 @@ export async function settleBinaryCommission(
     );
     const openingLeftPoints = Number(profile.left_points || 0);
     const openingRightPoints = Number(profile.right_points || 0);
-    let leftPoints = openingLeftPoints;
-    let rightPoints = openingRightPoints;
-    if (sourceLeg === "left") leftPoints += input.sourcePoints;
-    else rightPoints += input.sourcePoints;
-
-    const completedPairs =
-      pointsPerPair > 0
-        ? Math.floor(Math.min(leftPoints, rightPoints) / pointsPerPair)
-        : 0;
     const cap = capMap.get(ancestor.user_id);
-    const usedToday = cap?.is_today
-      ? Number(profile.daily_pairing_count || 0)
-      : 0;
+    const usedToday = Number(cap?.used_today ?? 0);
+    const usedSession = Number(cap?.used_session ?? 0);
+    if (!Number.isSafeInteger(usedToday) || usedToday < 0 || !Number.isSafeInteger(usedSession) || usedSession < 0)
+      throw new Error("Invalid daily/session pairing usage.");
     const capLimit = Math.max(1, Number(cap?.cap ?? 10));
-    const withinCap =
-      cap?.enabled === false
-        ? completedPairs
-        : Math.min(completedPairs, Math.max(0, capLimit - usedToday));
-    const capFlashoutPairs = completedPairs - withinCap;
+    const remainingPairs = cap?.enabled === false ? null : Math.max(0, Math.min(
+      capLimit - usedToday, Number(cap?.session_cap ?? 5) - usedSession,
+    ));
+    const { leftPoints, rightPoints, completedPairs, consumedPoints, acceptedPoints, flushedPoints } = planPackageBinarySession({
+      left: openingLeftPoints, right: openingRightPoints, sourcePoints: input.sourcePoints,
+      leg: sourceLeg, pointsPerPair, remainingPairs,
+    });
+    const withinCap = completedPairs;
+    // Rejected source volume is recorded as points, never fictional cash income.
+    const capFlashoutPairs = 0;
     const isActive = profile.user.status === "active";
     const payablePairs = isActive ? withinCap : 0;
     const openingRewardCount = await getPackageRewardCount(tx, ancestor.user_id);
@@ -231,9 +218,7 @@ export async function settleBinaryCommission(
     const flashoutPairs = capFlashoutPairs + inactiveFlashoutPairs;
     const payableAmount = cashPairs * pointsPerPair * PESO_PER_POINT;
     const flashoutAmount = flashoutPairs * pointsPerPair * PESO_PER_POINT;
-    const consumedPoints = completedPairs * pointsPerPair;
-    leftPoints -= consumedPoints;
-    rightPoints -= consumedPoints;
+
 
     plans.push({
       ancestor,
@@ -258,6 +243,8 @@ export async function settleBinaryCommission(
       payableAmount,
       flashoutAmount,
       consumedPoints,
+      acceptedPoints,
+      flushedPoints,
     });
     currentLeg = (ancestor.position as "left" | "right") || currentLeg;
   }
@@ -319,15 +306,17 @@ export async function settleBinaryCommission(
       payableAmount,
       flashoutAmount,
       consumedPoints,
+      acceptedPoints,
+      flushedPoints,
     } = plan;
 
-    await createBinaryPointLot(tx, {
+    if (acceptedPoints > 0) await createBinaryPointLot(tx, {
       recipientUserId: ancestor.user_id,
       sourceUserId: input.sourceUserId,
       sourceKind: input.sourceKind,
       sourceEventId: input.sourceEventId,
       leg: sourceLeg,
-      points: input.sourcePoints,
+      points: acceptedPoints,
       generatedAt: settlementAt,
       expiryYears,
     });
@@ -378,6 +367,7 @@ export async function settleBinaryCommission(
         source_event_id: input.sourceEventId,
         source_leg: sourceLeg,
         source_points: input.sourcePoints,
+        source_points_flushed: flushedPoints,
         recipient_package_id: profile.package.id,
         package_name_snapshot: profile.package.name,
         pair_value_snapshot: pointsPerPair * PESO_PER_POINT,
@@ -425,16 +415,9 @@ export async function settleBinaryCommission(
       data: {
         left_points: leftPoints,
         right_points: rightPoints,
-        daily_pairing_count: cap?.is_today
-          ? { increment: withinCap }
-          : withinCap,
       },
     });
-    await tx.$executeRaw`
-      UPDATE reseller_profiles
-      SET daily_pairing_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
-      WHERE user_id = ${ancestor.user_id}
-    `;
+    await applyPackageBinaryCapCache(tx, ancestor.user_id, Number(cap?.used_today ?? 0) + withinCap);
     if (completedPairs > 0) {
       await tx.pairingLog.create({
         data: {

@@ -17,6 +17,7 @@ const number = (value: unknown) => Number(value || 0) || 0;
 
 type Amount = { amount: number };
 type EventSummary = {
+  source_points_flushed: number;
   completed_pairs: number;
   payable_pairs: number;
   product_reward_pairs: number;
@@ -54,6 +55,10 @@ type LedgerRow = {
   source_kind: string;
   source_leg: string;
   source_points: number;
+  source_points_flushed: number;
+  cap_session: number | null;
+  opening_session_pairing_count: number | null;
+  closing_session_pairing_count: number | null;
   points_per_pair: number;
   completed_pairs: number;
   payable_pairs: number;
@@ -203,6 +208,7 @@ async function legacyBinaryReport(req: NextRequest) {
       payable_liability: 0,
       total_flashout: number(flashout[0]?.amount),
       cap_flashout_pairs: 0,
+      source_points_flushed: 0,
       inactive_flashout_pairs: 0,
       members_reached_cap: 0,
       funding_allocated: number(funding[0]?.allocated),
@@ -297,7 +303,7 @@ export async function GET(req: NextRequest) {
     const ledgerFilter = Prisma.sql`
       e.created_at >= ${from} AND e.created_at <= ${to}
       ${search ? Prisma.sql`AND (recipient.full_name ILIKE ${searchPattern} OR recipient.username ILIKE ${searchPattern} OR source.full_name ILIKE ${searchPattern} OR source.username ILIKE ${searchPattern} OR e.package_name_snapshot ILIKE ${searchPattern} OR e.source_kind ILIKE ${searchPattern} OR COALESCE(e.source_event_id,'') ILIKE ${searchPattern} OR COALESCE(e.normal_commission_id,'') ILIKE ${searchPattern} OR COALESCE(e.flashout_commission_id,'') ILIKE ${searchPattern} OR COALESCE(rf.id::text,uf.id::text,'') ILIKE ${searchPattern} OR COALESCE(rf.package_name_snapshot,uf.to_package_name_snapshot,'') ILIKE ${searchPattern} OR COALESCE(outlet.full_name,'') ILIKE ${searchPattern} OR COALESCE(outlet.username,'') ILIKE ${searchPattern})` : Prisma.empty}
-      ${eventFilter === "payable" ? Prisma.sql`AND e.payable_pairs > 0` : eventFilter === "cap" ? Prisma.sql`AND e.cap_flashout_pairs > 0` : eventFilter === "inactive" ? Prisma.sql`AND e.inactive_flashout_pairs > 0` : eventFilter === "no_pair" ? Prisma.sql`AND e.completed_pairs = 0` : Prisma.empty}
+      ${eventFilter === "payable" ? Prisma.sql`AND e.payable_pairs > 0` : eventFilter === "cap" ? Prisma.sql`AND (e.cap_flashout_pairs > 0 OR e.source_points_flushed > 0)` : eventFilter === "inactive" ? Prisma.sql`AND e.inactive_flashout_pairs > 0` : eventFilter === "no_pair" ? Prisma.sql`AND e.completed_pairs = 0` : Prisma.empty}
     `;
 
     const openingCutoff = new Date(from.getTime() - 1);
@@ -329,9 +335,10 @@ export async function GET(req: NextRequest) {
         SELECT COALESCE(SUM(completed_pairs),0)::int completed_pairs,
                COALESCE(SUM(payable_pairs),0)::int payable_pairs,
                COALESCE(SUM(product_reward_pairs),0)::int product_reward_pairs,
+               COALESCE(SUM(source_points_flushed),0)::bigint::text source_points_flushed,
                COALESCE(SUM(cap_flashout_pairs),0)::int cap_flashout_pairs,
                COALESCE(SUM(inactive_flashout_pairs),0)::int inactive_flashout_pairs,
-               COUNT(DISTINCT recipient_user_id) FILTER (WHERE cap_flashout_pairs > 0)::int members_reached_cap
+               COUNT(DISTINCT recipient_user_id) FILTER (WHERE cap_flashout_pairs > 0 OR source_points_flushed > 0)::int members_reached_cap
         FROM binary_pair_events WHERE created_at >= ${from} AND created_at <= ${to}
       `,
       prisma.$queryRaw<Amount[]>`
@@ -392,7 +399,7 @@ export async function GET(req: NextRequest) {
                SUM(e.payable_pairs)::int payable_pairs,
                SUM(e.cap_flashout_pairs + e.inactive_flashout_pairs)::int flashout_pairs,
                SUM(e.flashout_amount)::float flashout_amount,
-               COUNT(DISTINCT e.recipient_user_id) FILTER (WHERE e.cap_flashout_pairs > 0)::int members_reached_cap
+               COUNT(DISTINCT e.recipient_user_id) FILTER (WHERE e.cap_flashout_pairs > 0 OR e.source_points_flushed > 0)::int members_reached_cap
         FROM binary_pair_events e
         WHERE e.created_at >= ${from} AND e.created_at <= ${to}
         GROUP BY e.package_name_snapshot ORDER BY e.package_name_snapshot
@@ -402,7 +409,8 @@ export async function GET(req: NextRequest) {
                recipient.full_name recipient_name, recipient.username recipient_username,
                e.package_name_snapshot package_name,
                source.full_name source_name, source.username source_username,
-               e.source_kind, e.source_leg, e.source_points, e.points_per_pair,
+               e.source_kind, e.source_leg, e.source_points, e.source_points_flushed, e.cap_session,
+               e.opening_session_pairing_count,e.closing_session_pairing_count,e.points_per_pair,
                e.completed_pairs, e.payable_pairs, e.product_reward_pairs, e.reward_interval, e.cap_flashout_pairs,
                e.inactive_flashout_pairs, e.payable_amount::float, e.flashout_amount::float,
                e.pair_value_snapshot::float pair_value,e.peso_per_point::float,
@@ -637,6 +645,7 @@ export async function GET(req: NextRequest) {
         payable_liability: payableLiability,
         total_flashout: number(flashout[0]?.amount),
         cap_flashout_pairs: number(eventSummary[0]?.cap_flashout_pairs),
+        source_points_flushed: number(eventSummary[0]?.source_points_flushed),
         inactive_flashout_pairs: number(
           eventSummary[0]?.inactive_flashout_pairs,
         ),

@@ -4,6 +4,8 @@ Admin Settings → **Package Binary product rewards** controls whether every Nth
 
 ## Entitlement rules
 
+Package Binary now uses [two daily sessions](package-binary-two-sessions.md): the approved rollout sets all packages to 5 eligible pairs before 1 PM and 5 from 1 PM, Philippine time. After the session cap, new incoming points on either leg are flushed, including unmatched volume. Existing valid carryover is preserved. This replaces the previous matched-pairs-only cap overflow behavior for new settlement events.
+
 - An active recipient's pairs within the daily cap are eligible. Cash pairs and product pairs both use that cap. Flashout and inactive pairs do not advance reward progress.
 - At interval 5, eligible ordinals 5, 10, 15, etc. earn one bottle each instead of their cash commission. Batched events may earn multiple bottles. Product Binary is unaffected.
 - The counter continues across days, package changes, registrations and upgrades. Historical pairs before activation and eligible pairs earned while disabled are excluded.
