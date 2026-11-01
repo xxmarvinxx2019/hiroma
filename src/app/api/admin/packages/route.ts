@@ -1,3 +1,4 @@
+import { createRequiredAuditLog } from '@/app/lib/auditLog'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
@@ -84,12 +85,7 @@ export async function GET(req: NextRequest) {
           direct_referral_cap_enabled: true,
           daily_referral_cap: 10,
           binary_pair_cap_enabled: true,
-          daily_binary_pair_cap:
-            pkg.name.toLowerCase() === 'gold'
-              ? 50
-              : pkg.name.toLowerCase() === 'silver'
-                ? 30
-                : 10,
+          daily_binary_pair_cap: 10,
         }))
       }
     }
@@ -135,6 +131,8 @@ export async function POST(req: NextRequest) {
 
     let newPkg: any
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('package-binary-product-reward-policy'))`
+
       newPkg = await tx.package.create({
         data: {
           name: name.trim(), price, direct_referral_bonus, pairing_bonus_value,
@@ -158,19 +156,28 @@ export async function POST(req: NextRequest) {
           pair_income: pairIncome,
         })),
       })
+      await tx.$executeRaw`
+        UPDATE packages
+        SET daily_product_pairing_cap = ${getProductBinaryDailyCap(name)},
+            product_binary_cap_enabled = true,
+            direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
+            daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
+            binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
+            daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
+        WHERE id::text = ${newPkg.id}
+      `
+
+      await createRequiredAuditLog(tx, {
+        user_id: user.id, user_name: user.full_name, user_role: 'admin',
+        activity_type: 'package_binary_cap_policy_saved', category: 'admin',
+        description: 'Saved Package Binary daily cap and its two-session allocation.',
+        metadata: { package_id: newPkg.id, before: null,
+          after: { enabled: binary_pair_cap_enabled !== false, daily_cap: Math.max(1,Number(daily_binary_pair_cap)||10) },
+          session_split: 'Half before 13:00; remainder from 13:00 Asia/Manila. All new volume rejected at cap.' },
+        risk_level: 'high', status: 'completed',
+      })
     })
 
-    // Update package-level caps via raw SQL after transaction
-    await prisma.$executeRaw`
-      UPDATE packages
-      SET daily_product_pairing_cap = ${getProductBinaryDailyCap(name)},
-          product_binary_cap_enabled = true,
-          direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
-          daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
-          binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
-          daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
-      WHERE id::text = ${newPkg.id}
-    `
 
     return NextResponse.json({ success: true, package: newPkg })
   } catch (error) {

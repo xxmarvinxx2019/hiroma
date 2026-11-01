@@ -83,8 +83,11 @@ class SimulatedFinancialDatabase {
   readonly tx = {
     $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = this.sqlText(strings)
-      if (sql.includes('UPDATE reseller_profiles') && values[0]) {
-        this.pairingDateIsToday.add(String(values[0]))
+      if (sql.includes('UPDATE reseller_profiles') && sql.includes('daily_pairing_count =')) {
+        const userId = String(values[1])
+        this.pairingDateIsToday.add(userId)
+        const profile = this.profiles.get(userId)
+        if (profile) profile.daily_pairing_count = Number(values[0])
       }
       return 1
     },
@@ -98,7 +101,7 @@ class SimulatedFinancialDatabase {
           user_id: ancestor.user_id,
           enabled: true,
           cap: this.dailyCap,
-          is_today: this.pairingDateIsToday.has(ancestor.user_id),
+          used_today: this.pairingDateIsToday.has(ancestor.user_id) ? this.profiles.get(ancestor.user_id)?.daily_pairing_count || 0 : 0,
         }))
       }
 
@@ -180,14 +183,14 @@ class SimulatedFinancialDatabase {
         data: {
           left_points: number
           right_points: number
-          daily_pairing_count: number | { increment: number }
+          daily_pairing_count?: number | { increment: number }
         }
       }) => {
         const profile = this.profiles.get(where.user_id)
         if (!profile) throw new Error(`Missing simulated profile ${where.user_id}`)
         profile.left_points = data.left_points
         profile.right_points = data.right_points
-        profile.daily_pairing_count = typeof data.daily_pairing_count === 'number'
+        if (data.daily_pairing_count !== undefined) profile.daily_pairing_count = typeof data.daily_pairing_count === 'number'
           ? data.daily_pairing_count
           : profile.daily_pairing_count + data.daily_pairing_count.increment
         return profile

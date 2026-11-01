@@ -831,6 +831,10 @@ model BinaryPairEvent {
   source_kind                 String    @db.VarChar
   source_event_id             String?   @db.VarChar(255)
   source_leg                  String    @db.VarChar
+  source_points_flushed       Int       @default(0)
+  cap_session                 Int?      @db.SmallInt
+  opening_session_pairing_count Int?
+  closing_session_pairing_count Int?
   source_points               Int
   recipient_package_id        String?
   package_name_snapshot       String    @default("Unknown") @db.VarChar
@@ -2512,4 +2516,13 @@ model FinancialOperationReceipt {
   @@unique([kind, source_id])
   @@index([owner_id, created_at])
   @@map("financial_operation_receipts")
+}
+
+model BinaryDailyCapUsage {
+  user_id String
+  pairing_day DateTime @db.Date
+  used_pairs BigInt
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  @@id([user_id, pairing_day])
+  @@map("binary_daily_cap_usage")
 }
