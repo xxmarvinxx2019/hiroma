@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import type { Prisma } from '@prisma/client'
 import {
   DuplicateBinarySettlementError,
@@ -49,7 +50,17 @@ type CommissionRecord = {
   overflow_to: string | null
 }
 
+type PointLot = { id: string; recipient_user_id: string; leg: string; original_points: number; remaining_points: number; consumed: number }
+
 class SimulatedFinancialDatabase {
+  session: 1 | 2 = 1
+  flushedPoints = 0
+  unfundedCreated = 0
+  private lotSequence = 0
+  readonly pointLots = new Map<string, PointLot>()
+  readonly lotsByUser = new Map<string, PointLot[]>()
+  readonly sessionUsage = new Map<string, number>()
+  readonly unfunded = new Map<string, number>()
   reserve: number
   paid = 0
   retained = 0
@@ -69,7 +80,31 @@ class SimulatedFinancialDatabase {
     readonly dailyCap = 10,
   ) {
     this.reserve = openingReserve
-    for (const profile of profiles) this.profiles.set(profile.user_id, profile)
+    for (const profile of profiles) {
+      this.profiles.set(profile.user_id, profile)
+      for (const leg of ['left','right'] as const) {
+        const points=leg==='left'?profile.left_points:profile.right_points
+        if(points>0) this.addPointLot(profile.user_id,leg,points)
+      }
+    }
+  }
+
+  private addPointLot(userId: string, leg: string, points: number) {
+    const lot: PointLot={id:`point-lot-${++this.lotSequence}`,recipient_user_id:userId,leg,original_points:points,remaining_points:points,consumed:0}
+    this.pointLots.set(lot.id,lot)
+    const lots=this.lotsByUser.get(userId) || [];lots.push(lot);this.lotsByUser.set(userId,lots)
+    return lot
+  }
+
+  verify() {
+    for(const [userId,profile] of this.profiles) {
+      assert.ok(profile.daily_pairing_count<=this.dailyCap,'Simulated daily allowance exceeded')
+      const lots=this.lotsByUser.get(userId) || []
+      assert.equal(lots.filter(lot=>lot.leg==='left').reduce((sum,lot)=>sum+lot.remaining_points,0),profile.left_points)
+      assert.equal(lots.filter(lot=>lot.leg==='right').reduce((sum,lot)=>sum+lot.remaining_points,0),profile.right_points)
+    }
+    for(const lot of this.pointLots.values()) assert.equal(lot.original_points-lot.remaining_points,lot.consumed)
+    for(const usage of this.sessionUsage.values()) assert.ok(usage<=5,'Simulated session allowance exceeded')
   }
 
   addReserve(amount: number) {
@@ -94,12 +129,21 @@ class SimulatedFinancialDatabase {
     $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = this.sqlText(strings)
 
+      if (sql.includes('FROM system_settings')) return [] // rewards disabled; default three-year expiry
+      if (sql.includes('FROM binary_pair_events WHERE')) return [{count:'0'}]
+      if (sql.includes('FROM binary_point_lots')) {
+        if(sql.includes('expires_at<=')) return [] // all simulated lots are current
+        return (this.lotsByUser.get(String(values[0])) || []).filter(lot=>lot.leg===String(values[1]) && lot.remaining_points>0).map(lot=>({...lot}))
+      }
       if (sql.includes('WITH RECURSIVE ancestor_chain')) return this.ancestors
 
       if (sql.includes('FROM reseller_profiles r') && sql.includes('JOIN packages p')) {
         return this.ancestors.map((ancestor) => ({
           user_id: ancestor.user_id,
           enabled: true,
+          session: this.session,
+          session_cap: 5,
+          used_session: this.pairingDateIsToday.has(ancestor.user_id) ? this.sessionUsage.get(`${this.session}:${ancestor.user_id}`) || 0 : 0,
           cap: this.dailyCap,
           used_today: this.pairingDateIsToday.has(ancestor.user_id) ? this.profiles.get(ancestor.user_id)?.daily_pairing_count || 0 : 0,
         }))
@@ -132,12 +176,13 @@ class SimulatedFinancialDatabase {
         if (record.is_pair_overflow) {
           this.retained += record.amount
         } else {
-          if (this.reserve + Number.EPSILON < record.amount) {
-            throw new Error('Simulated reserve trigger rejected an unfunded commission.')
-          }
-          this.reserve -= record.amount
+          const funded=Math.min(this.reserve,record.amount)
+          const gap=record.amount-funded
+          this.reserve -= funded
           this.paid += record.amount
-          this.funding.set(id, record.amount)
+          this.funding.set(id, funded)
+          this.unfunded.set(id,gap)
+          this.unfundedCreated+=gap
           this.walletCredits.set(id, record.amount)
         }
         return [{ id }]
@@ -145,7 +190,7 @@ class SimulatedFinancialDatabase {
 
       if (sql.includes('FROM "binary_reserve_consumptions"')) {
         const amount = this.funding.get(String(values[0])) ?? 0
-        return [{ funded_amount: amount.toFixed(2), unfunded_amount: '0.00' }]
+        return [{ funded_amount: amount.toFixed(2), unfunded_amount: (this.unfunded.get(String(values[0])) || 0).toFixed(2) }]
       }
 
       if (sql.includes('FROM "wallet_ledger_entries"')) {
@@ -161,6 +206,20 @@ class SimulatedFinancialDatabase {
 
       throw new Error(`Unhandled simulation query: ${sql.replace(/\s+/g, ' ').trim()}`)
     },
+    binaryPointLot: {
+      create: async ({data}:{data:{recipient_user_id:string;leg:string;original_points:number}}) => this.addPointLot(data.recipient_user_id,data.leg,data.original_points),
+      updateMany: async ({where,data}:{where:{id:string;remaining_points:number};data:{remaining_points:{decrement:number}}}) => {
+        const lot=this.pointLots.get(where.id)
+        if(!lot || lot.remaining_points!==where.remaining_points) return {count:0}
+        lot.remaining_points-=data.remaining_points.decrement
+        return {count:1}
+      },
+    },
+    binaryPointConsumption: { create: async ({data}:{data:{point_lot_id:string;points:number}}) => {
+      const lot=this.pointLots.get(data.point_lot_id)
+      assert.ok(lot);lot.consumed+=data.points
+      return {id:`consumption-${lot.id}-${lot.consumed}`}
+    } },
     binarySettlementEvent: {
       findUnique: async ({ where }: { where: { source_kind_source_event_id: { source_kind: string; source_event_id: string } } }) => {
         const key = `${where.source_kind_source_event_id.source_kind}:${where.source_kind_source_event_id.source_event_id}`
@@ -204,7 +263,10 @@ class SimulatedFinancialDatabase {
         this.commissions.get(where.event_key) ?? null,
     },
     binaryPairEvent: {
-      create: async () => {
+      create: async ({data}:{data:{recipient_user_id:string;payable_pairs:number;inactive_flashout_pairs:number;source_points_flushed:number}}) => {
+        this.flushedPoints+=data.source_points_flushed
+        const key=`${this.session}:${data.recipient_user_id}`
+        this.sessionUsage.set(key,(this.sessionUsage.get(key) || 0)+data.payable_pairs+data.inactive_flashout_pairs)
         this.pairEvents += 1
         return { id: `pair-${this.pairEvents}` }
       },
@@ -263,10 +325,11 @@ async function runSingleRootScenario() {
     position: null,
     depth: 1,
   }]
-  const openingReserve = MEMBERS * STARTER_BINARY_RESERVE
+  const rootVolumeMembers = Math.max(MEMBERS,10)
+  const openingReserve = rootVolumeMembers * STARTER_BINARY_RESERVE
   const database = new SimulatedFinancialDatabase(
     ancestors,
-    [packageProfile('root-user', 'Starter', STARTER_PAIR_VALUE, MEMBERS * STARTER_POINTS, 0)],
+    [packageProfile('root-user', 'Starter', STARTER_PAIR_VALUE, rootVolumeMembers * STARTER_POINTS, 0)],
     openingReserve,
   )
 
@@ -276,6 +339,16 @@ async function runSingleRootScenario() {
     completedPairs += result.completedPairs
   }
 
+  const morningPairs=completedPairs
+  const cappedResult=await settleStarterRegistration(database,'root-morning-capped','root-node')
+  assert.equal(cappedResult.completedPairs,0)
+  assert.equal(database.flushedPoints,600)
+  database.session=2
+  for(let event=1;event<=6;event+=1) completedPairs+=(await settleStarterRegistration(database,`root-afternoon-${event}`,'root-node')).completedPairs
+  assert.equal(morningPairs,5)
+  assert.equal(completedPairs,10)
+  assert.equal(database.flushedPoints,1200)
+  database.verify()
   let duplicateRejected = false
   try {
     await settleBinaryCommission(database.tx, {
@@ -291,10 +364,11 @@ async function runSingleRootScenario() {
   }
 
   return {
-    scenario: `${MEMBERS.toLocaleString()} on one root left; five new Starter registrations on root right`,
+    scenario: `${rootVolumeMembers.toLocaleString()} on one root left; two sessions plus post-cap attempts on root right`,
     openingReserve,
-    reserveAdded: 5 * STARTER_BINARY_RESERVE,
+    reserveAdded: 12 * STARTER_BINARY_RESERVE,
     completedPairs,
+    flushedIncomingPoints: database.flushedPoints,
     paid: database.paid,
     closingReserve: database.reserve,
     duplicateRejected,
@@ -333,7 +407,9 @@ async function runDeepCascadeScenario(openingReserve: number) {
       sourceKind: 'registration',
       sourceEventId: `deep-right-${openingReserve}`,
     })
+    database.verify()
     return {
+      unfundedCreated: database.unfundedCreated,
       scenario: `one Starter event through ${MEMBERS.toLocaleString()} ready uplines; opening reserve ₱${before.toLocaleString()}`,
       outcome: 'committed',
       completedPairs: result.completedPairs,
@@ -389,7 +465,9 @@ async function runDeepUpgradeScenario(input: {
       sourceKind: 'upgrade',
       sourceEventId: `upgrade-${input.label}`,
     })
+    database.verify()
     return {
+      unfundedCreated: database.unfundedCreated,
       scenario: `${input.label} through ${MEMBERS.toLocaleString()} ready ${input.uplinePackage} uplines`,
       outcome: 'committed',
       openingReserve: input.openingReserve,
@@ -460,6 +538,7 @@ async function runBalancedGrowthScenario(options: {
   for (let index = 1; index < MEMBERS; index += 1) {
     if (options.resetDailyCapBeforeEachEvent) {
       database.pairingDateIsToday.clear()
+      database.sessionUsage.clear()
     }
     const parentIndex = Math.floor((index - 1) / 2)
     const parent = nodes[parentIndex]
@@ -541,7 +620,10 @@ async function runBalancedGrowthScenario(options: {
     }
   }
 
+  database.verify()
   return {
+    unfundedCreated: database.unfundedCreated,
+    flushedIncomingPoints: database.flushedPoints,
     scenario: options.label,
     outcome: blocked ? 'blocked_before_target' : 'reached_target',
     committedMembers,
@@ -622,7 +704,11 @@ async function main() {
       pesosPerPoint: 0.5,
       reservePerRegistration: STARTER_BINARY_RESERVE,
       dailyCapPerUpline: 10,
-      note: 'The simulation executes the production settleBinaryCommission function against an isolated deterministic transaction double; no configured database is used.',
+      sessionCaps: [5,5],
+      afternoonStart: "13:00 Asia/Manila",
+      productRewardsEnabled: false,
+      fundingBehavior: "Qualified commissions record funding shortfalls; a shortage does not block settlement.",
+      note: 'The simulation executes the production settleBinaryCommission function against an isolated deterministic transaction double; no configured database is used. The legacy paid field means credited commission, not bank payouts. SQL constraints and real bottle credits are verified separately by integration tests.',
     },
     results,
   }, null, 2))
