@@ -25,6 +25,7 @@ const protectedTables = [
   "binary_reserve_lots",
   "binary_reserve_consumptions",
   "binary_pair_events",
+  "binary_daily_cap_usage",
   "package_binary_product_rewards",
   "product_reward_claims",
   "product_reward_claim_allocations",
@@ -69,6 +70,7 @@ const protectedTables = [
 ] as const;
 
 const protectedFinancialFunctions = [
+  "public.accumulate_binary_daily_cap_usage()",
   "public.reserve_combined_order_replacement()",
   "public.settle_combined_order_replacements()",
   "public.seed_reward_stock_unit()",

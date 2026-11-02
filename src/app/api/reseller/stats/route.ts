@@ -84,7 +84,7 @@ export async function GET() {
       prisma.binaryPairEvent.groupBy({
         by: ['source_leg'],
         where: { recipient_user_id: user.id },
-        _sum: { source_points: true },
+        _sum: { source_points: true, source_points_flushed: true },
       }),
     ])
 
@@ -216,8 +216,8 @@ export async function GET() {
       tree: {
         left_count:  treeNode?.left_count  || 0,
         right_count: treeNode?.right_count || 0,
-        left_lifetime_points: results[5].find(row => row.source_leg === 'left')?._sum.source_points ?? 0,
-        right_lifetime_points: results[5].find(row => row.source_leg === 'right')?._sum.source_points ?? 0,
+        left_lifetime_points: (results[5].find(row => row.source_leg === 'left')?._sum.source_points ?? 0) - (results[5].find(row => row.source_leg === 'left')?._sum.source_points_flushed ?? 0),
+        right_lifetime_points: (results[5].find(row => row.source_leg === 'right')?._sum.source_points ?? 0) - (results[5].find(row => row.source_leg === 'right')?._sum.source_points_flushed ?? 0),
         position:    treeNode?.position    || null,
         sponsor:     treeNode?.sponsor     || null,
       },

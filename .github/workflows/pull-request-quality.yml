@@ -63,6 +63,9 @@ jobs:
       - name: Generate Next.js route types
         run: npx next typegen
 
+      - name: Run deterministic 5,000-member binary stress simulation
+        run: npm run simulate:binary-5000 > binary-5000-simulation.json
+
       - name: Validate TypeScript
         run: npx tsc --noEmit
 

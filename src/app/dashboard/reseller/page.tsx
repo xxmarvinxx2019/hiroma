@@ -1,5 +1,7 @@
 'use client'
 
+import PackageBinarySessionActivity from '@/app/components/PackageBinarySessionActivity'
+
 import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -718,6 +720,8 @@ export default function ResellerDashboardPage() {
               <span className="font-semibold text-[#0D1B3E] truncate max-w-[120px]">{stats.tree?.sponsor?.full_name || '—'}</span>
             </div>
           </div>
+
+          <PackageBinarySessionActivity />
 
           <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-800">
             <p>Unmatched Package Binary points expire {stats.point_expiry.years} years after their generation date.</p>

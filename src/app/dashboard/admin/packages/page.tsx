@@ -512,7 +512,7 @@ export default function PackagesPage() {
                   {
                     label: 'Registration Binary Daily Cap',
                     hint: form.binary_pair_cap_enabled
-                      ? 'Excess package-binary pairs go to Hiroma after this daily limit'
+                      ? `Two Philippine-time sessions split this daily limit: ${Math.max(1, Math.floor(Number(form.daily_binary_pair_cap || 10) / 2))} before 1 PM, ${Math.max(1, Number(form.daily_binary_pair_cap || 10) - Math.floor(Number(form.daily_binary_pair_cap || 10) / 2))} from 1 PM. At the session cap, all new left/right points are flushed.`
                       : 'Disabled — registration binary pairs are unlimited',
                     required: false,
                     input: (
