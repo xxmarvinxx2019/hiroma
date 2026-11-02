@@ -1,4 +1,3 @@
-import { createRequiredAuditLog } from '@/app/lib/auditLog'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
@@ -30,8 +29,6 @@ export async function PUT(
       pairing_bonus_value,
       direct_referral_cap_enabled,
       daily_referral_cap,
-      binary_pair_cap_enabled,
-      daily_binary_pair_cap,
       products,
       upgrade_paths,
     } = await req.json()
@@ -43,9 +40,7 @@ export async function PUT(
       // Serialize package-economics edits so source/target validation and the
       // subsequent write cannot race against another admin package update.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('package-upgrade-funding-configuration'))`
-      const beforeCaps = await tx.$queryRaw<{ binary_pair_cap_enabled: boolean; daily_binary_pair_cap: number }[]>`
-        SELECT binary_pair_cap_enabled,daily_binary_pair_cap FROM packages WHERE id::text=${id} FOR UPDATE
-      `
+
 
       const sourcePackageIds = normalizedUpgradePaths.map((path) => path.from_package_id)
       if (sourcePackageIds.length > 0) {
@@ -164,21 +159,11 @@ export async function PUT(
         SET daily_product_pairing_cap = ${getProductBinaryDailyCap(name)},
             product_binary_cap_enabled = true,
             direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
-            daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
-            binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
-            daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
+            daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)}
         WHERE id::text = ${id}
       `
 
-      await createRequiredAuditLog(tx, {
-        user_id: user.id, user_name: user.full_name, user_role: 'admin',
-        activity_type: 'package_binary_cap_policy_saved', category: 'admin',
-        description: 'Saved Package Binary daily cap and its two-session allocation.',
-        metadata: { package_id: id, before: beforeCaps[0] || null,
-          after: { enabled: binary_pair_cap_enabled !== false, daily_cap: Math.max(1,Number(daily_binary_pair_cap)||10) },
-          session_split: 'Half before 13:00; remainder from 13:00 Asia/Manila. All new volume rejected at cap.' },
-        risk_level: 'high', status: 'completed',
-      })
+
       return updated
     })
 

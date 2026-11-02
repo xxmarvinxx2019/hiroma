@@ -510,40 +510,10 @@ export default function PackagesPage() {
                     ),
                   },
                   {
-                    label: 'Registration Binary Daily Cap',
-                    hint: form.binary_pair_cap_enabled
-                      ? `Two Philippine-time sessions split this daily limit: ${Math.max(1, Math.floor(Number(form.daily_binary_pair_cap || 10) / 2))} before 1 PM, ${Math.max(1, Number(form.daily_binary_pair_cap || 10) - Math.floor(Number(form.daily_binary_pair_cap || 10) / 2))} from 1 PM. At the session cap, all new left/right points are flushed.`
-                      : 'Disabled — registration binary pairs are unlimited',
+                    label: 'Registration Binary Cap Policy',
+                    hint: 'Manage cap mode, limits and effective date in Admin Settings with Security PIN.',
                     required: false,
-                    input: (
-                      <div className="flex shrink-0 items-center gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => setForm({ ...form, binary_pair_cap_enabled: !form.binary_pair_cap_enabled })}
-                          className={`inline-flex h-9 w-[74px] shrink-0 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-bold tracking-wide transition-colors ${
-                            form.binary_pair_cap_enabled
-                              ? 'border-[#16814d] bg-[#e8f7ef] text-[#126b41]'
-                              : 'border-gray-300 bg-gray-100 text-gray-500'
-                          }`}
-                          aria-pressed={form.binary_pair_cap_enabled}
-                        >
-                          <span className={`h-2 w-2 rounded-full ${
-                            form.binary_pair_cap_enabled ? 'bg-[#16814d]' : 'bg-gray-400'
-                          }`} />
-                          {form.binary_pair_cap_enabled ? 'ON' : 'OFF'}
-                        </button>
-                        <input
-                          type="number"
-                          min="1"
-                          disabled={!form.binary_pair_cap_enabled}
-                          value={form.daily_binary_pair_cap}
-                          onChange={(e) => setForm({ ...form, daily_binary_pair_cap: e.target.value })}
-                          placeholder="e.g. 10"
-                          aria-label="Registration binary daily limit"
-                          className="h-9 w-[72px] shrink-0 rounded-lg border border-[#0D1B3E]/15 bg-white px-3 text-sm outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-                        />
-                      </div>
-                    ),
+                    input: <a href="/dashboard/admin/settings" className="text-sm font-semibold underline">Open cap policy settings</a>,
                   },
                   {
                     label: 'Product Binary Daily Cap',

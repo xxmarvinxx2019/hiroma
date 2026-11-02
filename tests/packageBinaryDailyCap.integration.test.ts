@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { createBinaryPointLot, consumeBinaryPointLots } from '../src/app/lib/binaryPointExpiry'
-import { planPackageBinarySession } from '../src/app/lib/packageBinarySession'
+import { planPackageBinaryCarryover } from '../src/app/lib/packageBinarySession'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
@@ -57,8 +57,8 @@ async function withFixture(options: Parameters<typeof createPackageCapFixture>[1
         const progress = Number((await db.query('SELECT COALESCE(SUM(payable_pairs) FILTER(WHERE reward_interval IS NOT NULL),0)::text n FROM binary_pair_events')).rows[0].n)
         const points = input.points ?? 600, leg = input.leg || 'left'
         const left = p.left_points + (leg === 'left' ? points : 0), right = p.right_points + (leg === 'right' ? points : 0)
-        const sessionPlan = options?.sessions ? planPackageBinarySession({ left: p.left_points, right: p.right_points, sourcePoints: points, leg, pointsPerPair: 600,
-          remainingPairs: cap.enabled ? Math.max(0,Math.min(cap.cap-Number(cap.used_today),Number(cap.session_cap)-Number(cap.used_session))) : null }) : null
+        const sessionPlan = options?.sessions ? planPackageBinaryCarryover({ left: p.left_points, right: p.right_points, sourcePoints: points, leg, pointsPerPair: 600,
+          remainingPairs: cap.enabled ? Math.max(0,Math.min(cap.cap-Number(cap.used_today),Number(cap.session_cap)-Number(cap.used_session))) : null },cap.carryover_enabled?Number(cap.carryover_limit):null) : null
         const completed = sessionPlan?.completedPairs ?? Math.floor(Math.min(left, right) / 600)
         const used = Number(cap.used_today)
         const within = input.forcedEligible ?? (cap.enabled ? Math.min(completed, Math.max(0, cap.cap - used)) : completed)
@@ -245,4 +245,132 @@ test('session event replay cannot repeat credits and the last morning slot is si
     await event()
     assert.equal((await inspect('SELECT SUM(payable_pairs)::int n FROM binary_pair_events')).rows[0].n,5)
   })
+})
+
+
+async function schedulePolicy(inspect: (sql:string,values?:unknown[])=>Promise<import('pg').QueryResult>, date:string, mode:string, first:number|null=null, cutoff:number|null=null) {
+ await inspect(`WITH saved AS (
+  INSERT INTO package_binary_cap_policies(package_id,effective_day,mode,daily_limit,first_limit,cutoff_minute,created_by)
+  VALUES('package',$1::date,$2,10,$3,$4,'hiroma') RETURNING id
+ ) INSERT INTO audit_logs(id,user_name,user_role,activity_type,category,description,metadata,risk_level,status)
+ SELECT gen_random_uuid()::text,'Hiroma','admin','package_binary_cap_policy_scheduled','commission','Test scheduled policy',jsonb_build_object('policy_id',id::text,'actor_id','hiroma'),'high','completed' FROM saved`,[date,mode,first,cutoff])
+}
+
+test('scheduled daily anytime allows ten morning pairs and custom sessions activate only on their effective day', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true},async({event,inspect})=>{
+  await inspect("UPDATE binary_point_lots SET expires_at='2035-01-01'")
+  await schedulePolicy(inspect,'2030-01-01','daily_anytime')
+  await schedulePolicy(inspect,'2030-01-02','two_sessions',3,900)
+  await schedulePolicy(inspect,'2030-01-02','two_sessions',4,900) // newer version supersedes the first schedule for this date
+  await event({at:'2029-12-31T09:00:00+08:00',points:6000})
+  assert.equal((await inspect("SELECT SUM(payable_pairs)::int n FROM binary_pair_events WHERE pairing_day='2029-12-31'")).rows[0].n,5)
+  await event({at:'2030-01-01T09:00:00+08:00',points:6000})
+  await event({at:'2030-01-01T10:00:00+08:00',points:600,leg:'right'})
+  const daily=(await inspect("SELECT SUM(payable_pairs)::int n,MIN(cap_session)::int s,SUM(source_points_flushed)::int flushed FROM binary_pair_events WHERE pairing_day='2030-01-01'")).rows[0]
+  assert.deepEqual(daily,{n:10,s:0,flushed:600})
+  await event({at:'2030-01-02T14:59:59+08:00',points:6000})
+  await event({at:'2030-01-02T15:00:00+08:00',points:6000})
+  const sessions=(await inspect("SELECT cap_session,SUM(payable_pairs)::int n,MIN(cap_cutoff) cutoff FROM binary_pair_events WHERE pairing_day='2030-01-02' GROUP BY cap_session ORDER BY cap_session")).rows
+  assert.deepEqual(sessions,[{cap_session:1,n:4,cutoff:'15:00'},{cap_session:2,n:6,cutoff:'15:00'}])
+  await event({at:'2030-01-01T23:59:59+08:00'}) // delayed prior-day settlement cannot adopt the newer mode or regain allowance
+  assert.equal((await inspect("SELECT SUM(payable_pairs)::int n FROM binary_pair_events WHERE pairing_day='2030-01-01'")).rows[0].n,10)
+  assert.equal((await inspect("SELECT count(*)::int n FROM binary_pair_events WHERE pairing_day>='2030-01-01' AND cap_policy_id IS NULL")).rows[0].n,0)
+ })
+})
+
+test('cap policy history is immutable, future-dated, audited, and cannot be bypassed by legacy package edits', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true},async({inspect})=>{
+  await inspect("INSERT INTO packages VALUES('new-package','New',600,false,9999)")
+  assert.deepEqual((await inspect("SELECT binary_pair_cap_enabled,daily_binary_pair_cap FROM packages WHERE id='new-package'")).rows[0],{binary_pair_cap_enabled:true,daily_binary_pair_cap:10})
+  await assert.rejects(inspect("UPDATE packages SET daily_binary_pair_cap=20"),/Security PIN/)
+  for(const sql of ["UPDATE package_binary_cap_policies SET daily_limit=20","DELETE FROM package_binary_cap_policies","TRUNCATE package_binary_cap_policies"])await assert.rejects(inspect(sql),/immutable|append-only|foreign key/)
+  await assert.rejects(schedulePolicy(inspect,'2020-01-01','daily_anytime'),/future Philippine midnight/)
+  await assert.rejects(inspect("INSERT INTO package_binary_cap_policies(package_id,effective_day,mode,daily_limit,created_by) VALUES('package','2030-01-01','daily_anytime',10,'hiroma')"),/atomic owner audit/)
+  await assert.rejects(inspect("INSERT INTO package_binary_cap_policies(package_id,effective_day,mode,daily_limit,created_by) VALUES('package','2030-01-01','daily_anytime',10,'member')"),/owner administrator/)
+  await schedulePolicy(inspect,'2030-01-01','daily_anytime')
+  assert.equal((await inspect("SELECT count(*)::int n FROM audit_logs WHERE activity_type='package_binary_cap_policy_scheduled'")).rows[0].n,1)
+ })
+})
+
+
+async function scheduleCarry(inspect:(sql:string,values?:unknown[])=>Promise<import('pg').QueryResult>,date:string,enabled:boolean,max:number){
+ await inspect(`WITH cap_version AS (
+ INSERT INTO package_binary_cap_policies(package_id,effective_day,mode,daily_limit,first_limit,cutoff_minute,created_by)
+ VALUES('package',$1::date,'two_sessions',10,5,780,'hiroma') RETURNING id),
+ carry_version AS (INSERT INTO package_binary_carryover_policies(package_id,effective_day,enabled,max_points,cap_policy_id,created_by)
+ SELECT 'package',$1::date,$2,$3,id,'hiroma' FROM cap_version RETURNING id,cap_policy_id)
+ INSERT INTO audit_logs(id,user_name,user_role,activity_type,category,description,metadata,risk_level,status)
+ SELECT gen_random_uuid()::text,'Hiroma','admin','package_binary_cap_policy_scheduled','commission','Carry cap test',jsonb_build_object('policy_id',cap_policy_id::text,'carryover_policy_id',id::text,'actor_id','hiroma'),'high','completed' FROM carry_version`,[date,enabled,max])
+}
+
+test('unmatched cap accepts partial room, rejects either full leg, and reopens space after matching', {skip:!process.env.DATABASE_URL},async()=>{
+ for(const leg of ['left','right'] as const)await withFixture({sessions:true,left:leg==='left'?179700:0,right:leg==='right'?179700:0},async({event,inspect})=>{
+  await inspect("UPDATE binary_point_lots SET expires_at='2035-01-01'")
+  const at='2030-01-01T09:00:00+08:00',opposite=leg==='left'?'right':'left'
+  await event({at,leg});await event({at,leg});await event({at,leg:opposite});await event({at,leg});await event({at,leg})
+  const p=(await inspect('SELECT left_points,right_points FROM reseller_profiles')).rows[0]
+  assert.equal(p[leg+'_points'],180000);assert.equal(p[opposite+'_points'],0)
+  const sums=(await inspect('SELECT SUM(source_points_flushed)::int total,SUM(carryover_flushed_points)::int balance,SUM(session_flushed_points)::int session,SUM(payable_pairs)::int pairs FROM binary_pair_events')).rows[0]
+  assert.deepEqual(sums,{total:1500,balance:1500,session:0,pairs:1})
+  await event({at,leg:opposite,points:3000}) // four remaining slots, then surplus is session flush
+  await event({at,leg}) // free balance space does not bypass the exhausted session
+  const last=(await inspect('SELECT session_flushed_points,carryover_flushed_points FROM binary_pair_events ORDER BY created_at DESC,id DESC')).rows
+  assert.equal(last.filter(r=>r.session_flushed_points===600&&r.carryover_flushed_points===0).length,2)
+  assert.equal((await inspect('SELECT SUM(product_reward_pairs)::int n FROM binary_pair_events')).rows[0].n,1)
+  assert.equal((await inspect('SELECT used_pairs::int n FROM binary_daily_cap_usage')).rows[0].n,5)
+ })
+})
+
+test('scheduled carryover off/on and point-limit changes preserve usage and version history', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true,left:179700,right:0},async({event,inspect})=>{
+  await inspect("UPDATE binary_point_lots SET expires_at='2035-01-01'")
+  await scheduleCarry(inspect,'2030-01-02',false,180000)
+  await scheduleCarry(inspect,'2030-01-03',true,200000)
+  await schedulePolicy(inspect,'2030-01-04','daily_anytime') // older cap-only scheduling preserves independent carryover policy
+  await event({at:'2030-01-01T09:00:00+08:00'})
+  await event({at:'2030-01-02T09:00:00+08:00',points:6000})
+  assert.equal((await inspect('SELECT left_points n FROM reseller_profiles')).rows[0].n,186000)
+  await assert.rejects(event({at:'2030-01-03T09:00:00+08:00',points:30000,forcedFlush:0}),/source flush/)
+  await event({at:'2030-01-03T09:00:00+08:00',points:30000})
+  assert.equal((await inspect('SELECT left_points n FROM reseller_profiles')).rows[0].n,200000)
+  await event({at:'2030-01-04T09:00:00+08:00'})
+  const snapshots=(await inspect("SELECT cap_mode,carryover_cap_enabled,carryover_cap_points,carryover_flushed_points FROM binary_pair_events WHERE pairing_day='2030-01-04'")).rows[0]
+  assert.deepEqual(snapshots,{cap_mode:'daily_anytime',carryover_cap_enabled:true,carryover_cap_points:200000,carryover_flushed_points:600})
+  for(const sql of ['UPDATE package_binary_carryover_policies SET enabled=false','DELETE FROM package_binary_carryover_policies','TRUNCATE package_binary_carryover_policies'])await assert.rejects(inspect(sql),/immutable|append-only|foreign key/)
+ })
+})
+
+test('pre-existing excess is preserved and rejects new unmatched volume until matching below the limit', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true,left:185000,right:0},async({event,inspect})=>{
+  await inspect("UPDATE binary_point_lots SET expires_at='2035-01-01'")
+  await event({at:'2030-01-01T09:00:00+08:00'})
+  assert.equal((await inspect('SELECT left_points n FROM reseller_profiles')).rows[0].n,185000)
+  await event({at:'2030-01-01T09:00:00+08:00',leg:'right',points:3000})
+  await event({at:'2030-01-01T13:00:00+08:00',leg:'right',points:2400})
+  await event({at:'2030-01-01T13:00:00+08:00'})
+  assert.equal((await inspect('SELECT left_points n FROM reseller_profiles')).rows[0].n,180000)
+  assert.equal((await inspect('SELECT SUM(carryover_flushed_points)::int n FROM binary_pair_events')).rows[0].n,800)
+ })
+})
+
+
+test('carryover initialization is stable for newly created packages and full integer balances reject incoming safely', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true,left:2147483647,right:0},async({event,inspect})=>{
+  await inspect("INSERT INTO packages VALUES('carry-new','Carry New',600,true,10)")
+  assert.equal((await inspect("SELECT count(*)::int n FROM package_binary_carryover_policies WHERE package_id='carry-new' AND enabled AND max_points=180000")).rows[0].n,1)
+  await event({at:'2030-01-01T09:00:00+08:00'})
+  assert.equal((await inspect('SELECT left_points n FROM reseller_profiles')).rows[0].n,2147483647)
+  assert.equal((await inspect('SELECT carryover_flushed_points n FROM binary_pair_events')).rows[0].n,600)
+ })
+})
+
+
+test('matching before an integer-maximum carryover limit cannot overflow intermediate point sums', {skip:!process.env.DATABASE_URL},async()=>{
+ await withFixture({sessions:true,left:2147483647,right:600},async({event,inspect})=>{
+  await inspect("UPDATE binary_point_lots SET expires_at='2035-01-01'")
+  await scheduleCarry(inspect,'2030-01-01',true,2147483647)
+  await event({at:'2030-01-01T09:00:00+08:00'})
+  assert.deepEqual((await inspect('SELECT left_points,right_points FROM reseller_profiles')).rows[0],{left_points:2147483647,right_points:0})
+  assert.equal((await inspect('SELECT SUM(payable_pairs)::int n FROM binary_pair_events')).rows[0].n,1)
+ })
 })

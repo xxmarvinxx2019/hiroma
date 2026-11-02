@@ -12,7 +12,7 @@ export function capFixtureSql(sql: string, schema: string) {
 export async function installCapHardening(db: Client, schema: string) {
   await db.query(capFixtureSql(readFileSync('prisma/migrations/20261031150000_harden_package_binary_daily_caps/migration.sql', 'utf8'), schema))
 }
-export async function createPackageCapFixture(db: Client, options: { cap?: number; used?: number; day?: string; harden?: boolean; sessions?: boolean } = {}) {
+export async function createPackageCapFixture(db: Client, options: { cap?: number; used?: number; day?: string; harden?: boolean; sessions?: boolean; left?:number; right?:number } = {}) {
   const schema = `daily_cap_test_${randomUUID().replaceAll('-', '')}`
   await db.query(`CREATE SCHEMA "${schema}"; SET LOCAL search_path TO "${schema}"`)
   const prisma = readFileSync('prisma/schema.prisma', 'utf8')
@@ -63,7 +63,7 @@ export async function createPackageCapFixture(db: Client, options: { cap?: numbe
     INSERT INTO users(id,status,username,role,full_name) VALUES('hiroma','active','hiroma','admin','Hiroma');
     INSERT INTO system_settings VALUES('package_binary_product_reward','{"enabled":true,"interval":5,"product_id":"bottle"}')`)
   await db.query('UPDATE packages SET daily_binary_pair_cap=$1', [options.cap ?? 10])
-  await db.query("UPDATE reseller_profiles SET left_points=0,right_points=600000,daily_pairing_count=$1,daily_pairing_date=$2::date", [options.used ?? 0, options.day ?? null])
+  await db.query("UPDATE reseller_profiles SET left_points=$3,right_points=$4,daily_pairing_count=$1,daily_pairing_date=$2::date", [options.used ?? 0, options.day ?? null,options.left??0,options.right??600000])
   if (options.harden !== false) await installCapHardening(db, schema)
   if (options.sessions) await db.query(`CREATE TABLE audit_logs(id TEXT,user_name TEXT,user_role TEXT,activity_type TEXT,category TEXT,description TEXT,metadata JSONB,risk_level TEXT,status TEXT); INSERT INTO packages VALUES('silver','Silver',1000,true,15),('gold','Gold',2000,true,50)`)
   if (options.sessions) {
@@ -72,5 +72,17 @@ export async function createPackageCapFixture(db: Client, options: { cap?: numbe
   }
   if (options.sessions) await db.query(capFixtureSql(readFileSync('prisma/migrations/20261101090000_package_binary_two_sessions/migration.sql', 'utf8'), schema))
   else await db.query('ALTER TABLE binary_pair_events ADD COLUMN cap_session SMALLINT')
+  const config=capFixtureSql(readFileSync('prisma/migrations/20261102090000_configurable_package_binary_cap_policy/migration.sql','utf8'),schema)
+  if(options.sessions) await db.query(config)
+  else {
+    await db.query('CREATE TABLE package_binary_cap_policies(id UUID,revision BIGINT,package_id TEXT,effective_day DATE,mode TEXT,enabled BOOLEAN,daily_limit INTEGER,first_limit INTEGER,cutoff_minute INTEGER)')
+    await db.query(config.slice(config.indexOf('CREATE FUNCTION package_binary_cap_state'),config.indexOf('-- POLICY_LOOKUP_END')))
+  }
+  const carryConfig=capFixtureSql(readFileSync('prisma/migrations/20261102100000_package_binary_unmatched_balance_cap/migration.sql','utf8'),schema)
+  if(options.sessions) await db.query(carryConfig)
+  else {
+    await db.query('CREATE TABLE package_binary_carryover_policies(id UUID,revision BIGINT,package_id TEXT,effective_day DATE,enabled BOOLEAN,max_points INTEGER)')
+    await db.query(carryConfig.slice(carryConfig.indexOf('CREATE FUNCTION package_binary_cap_state_v2'),carryConfig.indexOf('ALTER TABLE binary_pair_events')))
+  }
   return schema
 }

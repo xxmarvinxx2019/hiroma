@@ -26,3 +26,18 @@ export function planPackageBinarySession(input: {
     rightPoints: right + (leg === 'right' ? acceptedPoints : 0) - consumedPoints,
   }
 }
+
+
+// Matching precedes the balance ceiling. Existing excess is grandfathered;
+// only this source's remaining unmatched volume can be rejected.
+export function planPackageBinaryCarryover(input: Parameters<typeof planPackageBinarySession>[0], limit: number | null) {
+  if(limit!==null&&(!Number.isSafeInteger(limit)||limit<1||limit>2147483647)) throw new Error('Invalid unmatched point limit.')
+  const planned=planPackageBinarySession(input)
+  const opening=input.leg==='left'?input.left:input.right
+  const acceptedPoints=limit===null?planned.acceptedPoints:Math.min(planned.acceptedPoints,Math.max(0,limit-opening+planned.consumedPoints))
+  const balanceFlushedPoints=planned.acceptedPoints-acceptedPoints
+  return {...planned,acceptedPoints,flushedPoints:input.sourcePoints-acceptedPoints,
+    leftPoints:input.left+(input.leg==='left'?acceptedPoints:0)-planned.consumedPoints,
+    rightPoints:input.right+(input.leg==='right'?acceptedPoints:0)-planned.consumedPoints,
+    sessionFlushedPoints:planned.flushedPoints,balanceFlushedPoints}
+}

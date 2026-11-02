@@ -26,6 +26,8 @@ const protectedTables = [
   "binary_reserve_consumptions",
   "binary_pair_events",
   "binary_daily_cap_usage",
+  "package_binary_cap_policies",
+  "package_binary_carryover_policies",
   "package_binary_product_rewards",
   "product_reward_claims",
   "product_reward_claim_allocations",
@@ -71,6 +73,7 @@ const protectedTables = [
 
 const protectedFinancialFunctions = [
   "public.accumulate_binary_daily_cap_usage()",
+  "public.initialize_package_binary_carryover()",
   "public.reserve_combined_order_replacement()",
   "public.settle_combined_order_replacements()",
   "public.seed_reward_stock_unit()",

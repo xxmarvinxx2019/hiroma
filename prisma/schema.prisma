@@ -832,6 +832,14 @@ model BinaryPairEvent {
   source_event_id             String?   @db.VarChar(255)
   source_leg                  String    @db.VarChar
   source_points_flushed       Int       @default(0)
+  carryover_policy_id         String? @db.Uuid
+  carryover_cap_enabled       Boolean?
+  carryover_cap_points        Int?
+  session_flushed_points      Int?
+  carryover_flushed_points    Int?
+  cap_policy_id               String?   @db.Uuid
+  cap_mode                    String?
+  cap_cutoff                  String?
   cap_session                 Int?      @db.SmallInt
   opening_session_pairing_count Int?
   closing_session_pairing_count Int?
@@ -2525,4 +2533,34 @@ model BinaryDailyCapUsage {
   updated_at DateTime @default(now()) @db.Timestamptz(6)
   @@id([user_id, pairing_day])
   @@map("binary_daily_cap_usage")
+}
+
+model PackageBinaryCapPolicy {
+ id String @id @default(uuid()) @db.Uuid
+ revision BigInt @unique @default(autoincrement())
+ package_id String
+ effective_day DateTime @db.Date
+ mode String
+ enabled Boolean @default(true)
+ daily_limit Int
+ first_limit Int?
+ cutoff_minute Int?
+ created_by String?
+ created_at DateTime @default(now()) @db.Timestamptz(6)
+ @@index([package_id, effective_day(sort: Desc), revision(sort: Desc)])
+ @@map("package_binary_cap_policies")
+}
+
+model PackageBinaryCarryoverPolicy {
+ id String @id @default(uuid()) @db.Uuid
+ revision BigInt @unique @default(autoincrement())
+ package_id String
+ effective_day DateTime @db.Date
+ enabled Boolean
+ max_points Int
+ cap_policy_id String? @unique @db.Uuid
+ created_by String?
+ created_at DateTime @default(now()) @db.Timestamptz(6)
+ @@index([package_id,effective_day(sort: Desc),revision(sort: Desc)])
+ @@map("package_binary_carryover_policies")
 }

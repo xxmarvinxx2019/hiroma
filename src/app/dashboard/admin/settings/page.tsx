@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import PasskeySettings from '@/app/components/security/PasskeySettings'
 import DistributorSecurityPinSettings from '@/app/components/security/DistributorSecurityPinSettings'
 import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
+import PackageBinaryCapSettings from '@/app/components/admin/PackageBinaryCapSettings'
 import PackageBinaryRewardSettings from '@/app/components/admin/PackageBinaryRewardSettings'
 import { readSettingsResponse } from '@/app/lib/settingsResponse'
 
@@ -381,6 +382,7 @@ export default function SettingsPage() {
 
         <PasskeySettings />
 
+        <PackageBinaryCapSettings />
         <PackageBinaryRewardSettings />
 
         <SettingsSection
