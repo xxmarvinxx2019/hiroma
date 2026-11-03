@@ -1,4 +1,4 @@
-import { planPackageBinarySession } from "@/app/lib/packageBinarySession";
+import { planPackageBinaryCarryover } from "@/app/lib/packageBinarySession";
 import { loadPackageBinaryDailyCaps, applyPackageBinaryCapCache, type PackageBinaryCapRow } from "@/app/lib/packageBinaryDailyCap";
 import { Prisma } from "@prisma/client";
 import {
@@ -199,10 +199,10 @@ export async function settleBinaryCommission(
     const remainingPairs = cap?.enabled === false ? null : Math.max(0, Math.min(
       capLimit - usedToday, Number(cap?.session_cap ?? 5) - usedSession,
     ));
-    const { leftPoints, rightPoints, completedPairs, consumedPoints, acceptedPoints, flushedPoints } = planPackageBinarySession({
+    const { leftPoints, rightPoints, completedPairs, consumedPoints, acceptedPoints, flushedPoints } = planPackageBinaryCarryover({
       left: openingLeftPoints, right: openingRightPoints, sourcePoints: input.sourcePoints,
       leg: sourceLeg, pointsPerPair, remainingPairs,
-    });
+    }, cap?.carryover_enabled ? Number(cap.carryover_limit) : null);
     const withinCap = completedPairs;
     // Rejected source volume is recorded as points, never fictional cash income.
     const capFlashoutPairs = 0;

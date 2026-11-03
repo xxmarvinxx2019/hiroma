@@ -69,9 +69,9 @@ export async function GET(req: NextRequest) {
                  COALESCE(product_binary_cap_enabled, true) AS product_binary_cap_enabled,
                  COALESCE(direct_referral_cap_enabled, true) AS direct_referral_cap_enabled,
                  COALESCE(daily_referral_cap, 10)::int AS daily_referral_cap,
-                 COALESCE(binary_pair_cap_enabled, true) AS binary_pair_cap_enabled,
-                 COALESCE(daily_binary_pair_cap, 10)::int AS daily_binary_pair_cap
-          FROM packages
+                 s.enabled AS binary_pair_cap_enabled,
+                 s.cap AS daily_binary_pair_cap
+          FROM packages CROSS JOIN LATERAL package_binary_cap_state(packages.id,'',CURRENT_TIMESTAMP) s
           WHERE id::text = ANY(${ids}::text[])
         `
       } catch (capError) {
@@ -122,7 +122,6 @@ export async function POST(req: NextRequest) {
       name, price, direct_referral_bonus, pairing_bonus_value,
       point_php_value,
       direct_referral_cap_enabled, daily_referral_cap, products,
-      binary_pair_cap_enabled, daily_binary_pair_cap,
     } = await req.json()
     if (!name || !price || !direct_referral_bonus || !pairing_bonus_value || !point_php_value) {
       return NextResponse.json({ error: 'All required fields must be filled.' }, { status: 400 })
@@ -162,20 +161,15 @@ export async function POST(req: NextRequest) {
             product_binary_cap_enabled = true,
             direct_referral_cap_enabled = ${direct_referral_cap_enabled !== false},
             daily_referral_cap = ${Math.max(1, Number(daily_referral_cap) || 10)},
-            binary_pair_cap_enabled = ${binary_pair_cap_enabled !== false},
-            daily_binary_pair_cap = ${Math.max(1, Number(daily_binary_pair_cap) || 10)}
+            binary_pair_cap_enabled = true,
+            daily_binary_pair_cap = 10
         WHERE id::text = ${newPkg.id}
       `
+      await createRequiredAuditLog(tx, {user_id:user.id,user_name:user.full_name,user_role:'admin',
+        activity_type:'package_binary_cap_initialized',category:'admin',description:'New package starts with enabled 10/day cap, split 5 + 5 at 13:00 Philippine time.',
+        metadata:{package_id:newPkg.id,daily_limit:10,mode:'two_sessions',first_limit:5,cutoff_minute:780},risk_level:'high',status:'completed'})
 
-      await createRequiredAuditLog(tx, {
-        user_id: user.id, user_name: user.full_name, user_role: 'admin',
-        activity_type: 'package_binary_cap_policy_saved', category: 'admin',
-        description: 'Saved Package Binary daily cap and its two-session allocation.',
-        metadata: { package_id: newPkg.id, before: null,
-          after: { enabled: binary_pair_cap_enabled !== false, daily_cap: Math.max(1,Number(daily_binary_pair_cap)||10) },
-          session_split: 'Half before 13:00; remainder from 13:00 Asia/Manila. All new volume rejected at cap.' },
-        risk_level: 'high', status: 'completed',
-      })
+
     })
 
 

@@ -56,6 +56,10 @@ type LedgerRow = {
   source_leg: string;
   source_points: number;
   source_points_flushed: number;
+  carryover_policy_id: string | null; carryover_cap_enabled: boolean | null; carryover_cap_points: number | null; session_flushed_points: number | null; carryover_flushed_points: number | null;
+  cap_policy_id: string | null;
+  cap_mode: string | null;
+  cap_cutoff: string | null;
   cap_session: number | null;
   opening_session_pairing_count: number | null;
   closing_session_pairing_count: number | null;
@@ -409,7 +413,7 @@ export async function GET(req: NextRequest) {
                recipient.full_name recipient_name, recipient.username recipient_username,
                e.package_name_snapshot package_name,
                source.full_name source_name, source.username source_username,
-               e.source_kind, e.source_leg, e.source_points, e.source_points_flushed, e.cap_session,
+               e.source_kind, e.source_leg, e.source_points, e.source_points_flushed, e.cap_session,e.cap_policy_id::text,e.cap_mode,e.cap_cutoff,e.carryover_policy_id::text,e.carryover_cap_enabled,e.carryover_cap_points,e.session_flushed_points,e.carryover_flushed_points,
                e.opening_session_pairing_count,e.closing_session_pairing_count,e.points_per_pair,
                e.completed_pairs, e.payable_pairs, e.product_reward_pairs, e.reward_interval, e.cap_flashout_pairs,
                e.inactive_flashout_pairs, e.payable_amount::float, e.flashout_amount::float,

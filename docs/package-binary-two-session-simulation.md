@@ -4,7 +4,7 @@
 
 The root scenario asserts five eligible pairs in each session, rejection of the next source in each capped session, and duplicate-source rejection. Every scenario checks remaining lot balances against member carryover and consumed point evidence. Session usage must never exceed five. Actual SQL triggers, concurrency, and enabled bottle rewards remain covered separately by integration tests; this double is not a database or HTTP load benchmark.
 
-Default deterministic results with 5,000 accounts, 600 Starter points per pair, PHP 300 per cash pair, and PHP 300 binary funding per registration:
+Historical results before the unmatched-point ceiling, with 5,000 accounts, 600 Starter points per pair, PHP 300 per cash pair, and PHP 300 binary funding per registration:
 
 | Scenario | Credited cash commission | Recorded unfunded creation | Incoming points flushed |
 | --- | ---: | ---: | ---: |
@@ -18,3 +18,5 @@ Funding gaps are recorded at the time each commission is created. Their cumulati
 The deep-chain scenarios also complete: one registration can produce one pair for each of 5,000 pre-positioned uplines. For example, PHP 1.5 million of credited cash against PHP 1.2 million opening reserve plus PHP 300 new funding records PHP 299,700 unfunded. The cap does not prevent each separate ancestor from earning its first pair.
 
 These are stress constructions, not forecasts of real member placement or timing. Bottle rewards are disabled for this cash-exposure run; product costs, direct referral, shipping, operating expenses, refunds, and actual company gross margin are excluded. A passing simulation establishes the asserted rule behavior, not financial sustainability. The figures explicitly show that two sessions alone do not ensure all binary liabilities fit the per-registration binary allocation.
+
+The current simulator also applies the approved 180,000-point ceiling to incoming unmatched volume per leg, preserving existing seeded excess. Under that version the two same-day balanced runs above retain the same PHP 1,873,500 credited cash result; the no-buffer case still records PHP 373,800 unfunded creation. The slow-growth construction now credits PHP 7,224,000 and flushes 1,489,200 incoming points. These remain synthetic cash-only measurements; see `package-binary-unmatched-cap.md` for the new rule and its separate SQL tests.

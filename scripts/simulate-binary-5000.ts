@@ -137,10 +137,12 @@ class SimulatedFinancialDatabase {
       }
       if (sql.includes('WITH RECURSIVE ancestor_chain')) return this.ancestors
 
-      if (sql.includes('FROM reseller_profiles r') && sql.includes('JOIN packages p')) {
+      if (sql.includes('FROM reseller_profiles r') && sql.includes('package_binary_cap_state')) {
         return this.ancestors.map((ancestor) => ({
           user_id: ancestor.user_id,
           enabled: true,
+          carryover_enabled: true,
+          carryover_limit: 180000,
           session: this.session,
           session_cap: 5,
           used_session: this.pairingDateIsToday.has(ancestor.user_id) ? this.sessionUsage.get(`${this.session}:${ancestor.user_id}`) || 0 : 0,
@@ -704,6 +706,7 @@ async function main() {
       pesosPerPoint: 0.5,
       reservePerRegistration: STARTER_BINARY_RESERVE,
       dailyCapPerUpline: 10,
+      unmatchedPointLimitPerLeg: 180000,
       sessionCaps: [5,5],
       afternoonStart: "13:00 Asia/Manila",
       productRewardsEnabled: false,
