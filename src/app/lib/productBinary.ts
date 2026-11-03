@@ -164,22 +164,6 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       )
     `
 
-    // Personal PU drives Rank Engine. Registration/package products are not
-    // counted here; only a delivered, binary-eligible product order is counted.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + order.buyer_id}))`
-    await lockFinancialUser(tx, order.buyer_id)
-    await ensureCurrentProductBinaryQuarter(tx, order.buyer_id)
-    await tx.$executeRaw`
-      UPDATE reseller_profiles SET total_pu=COALESCE(total_pu,0)+${Number(order.total_pu)} WHERE user_id=${order.buyer_id}
-    `
-    const buyerProfile = await tx.$queryRaw<{ package_id: string; total_pu: number }[]>`
-      SELECT package_id::text,total_pu FROM reseller_profiles WHERE user_id=${order.buyer_id} LIMIT 1
-    `
-    if (buyerProfile[0]) {
-      const buyerRank = await getRankSnapshot(tx, buyerProfile[0].package_id, Number(buyerProfile[0].total_pu))
-      await tx.$executeRaw`UPDATE reseller_profiles SET rank=${buyerRank?.name || 'default'} WHERE user_id=${order.buyer_id}`
-    }
-
     const ancestors = await tx.$queryRaw<{
       user_id: string; source_leg: 'left' | 'right'; depth: number;
     }[]>`
@@ -193,6 +177,25 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         JOIN binary_tree_nodes p ON p.id=c.parent_id
       ) SELECT user_id::text,source_leg,depth FROM chain ORDER BY depth
     `
+    // Match Package Binary's member lock order before touching any member state.
+    for (const userId of [...new Set([order.buyer_id, ...ancestors.map(row => row.user_id)])].sort()) {
+      await lockFinancialUser(tx, userId)
+    }
+
+    // Personal PU drives Rank Engine. Registration/package products are not
+    // counted here; only a delivered, binary-eligible product order is counted.
+    await ensureCurrentProductBinaryQuarter(tx, order.buyer_id)
+    await tx.$executeRaw`
+      UPDATE reseller_profiles SET total_pu=COALESCE(total_pu,0)+${Number(order.total_pu)} WHERE user_id=${order.buyer_id}
+    `
+    const buyerProfile = await tx.$queryRaw<{ package_id: string; total_pu: number }[]>`
+      SELECT package_id::text,total_pu FROM reseller_profiles WHERE user_id=${order.buyer_id} LIMIT 1
+    `
+    if (buyerProfile[0]) {
+      const buyerRank = await getRankSnapshot(tx, buyerProfile[0].package_id, Number(buyerProfile[0].total_pu))
+      await tx.$executeRaw`UPDATE reseller_profiles SET rank=${buyerRank?.name || 'default'} WHERE user_id=${order.buyer_id}`
+    }
+
     const hiroma = await tx.$queryRaw<{ id: string }[]>`
       SELECT id::text
       FROM users
@@ -205,8 +208,6 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
     let flashout = 0
 
     for (const ancestor of ancestors) {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'product-binary-user:' + ancestor.user_id}))`
-      await lockFinancialUser(tx, ancestor.user_id)
       await ensureCurrentProductBinaryQuarter(tx, ancestor.user_id)
       const profiles = await tx.$queryRaw<{
         status: string; package_id: string; package_name: string; total_pu: number;

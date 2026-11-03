@@ -10,6 +10,9 @@ if (!connectionString) {
 }
 
 const protectedTables = [
+  "person_account_totals",
+  "person_account_memberships",
+  "person_account_documents",
   "users",
   "reseller_profiles",
   "packages",
@@ -18,6 +21,7 @@ const protectedTables = [
   "pin_requests",
   "registration_financials",
   "financial_operation_receipts",
+  "request_receipts",
   "pin_registration_product_snapshots",
   "direct_referral_settlement_events",
   "upgrade_financials",
@@ -72,6 +76,7 @@ const protectedTables = [
 ] as const;
 
 const protectedFinancialFunctions = [
+  "public.enforce_lifetime_person_accounts()",
   "public.accumulate_binary_daily_cap_usage()",
   "public.initialize_package_binary_carryover()",
   "public.reserve_combined_order_replacement()",

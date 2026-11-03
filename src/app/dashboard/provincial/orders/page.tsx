@@ -1,4 +1,5 @@
 'use client'
+import { retryableRequest } from '@/app/lib/retryableRequest'
 
 import { useOrderReplacementSelection } from '@/app/components/orders/OrderReplacementPicker'
 import OrderReplacementSummary from '@/app/components/orders/OrderReplacementSummary'
@@ -167,7 +168,7 @@ function CreateOrderModal({
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch('/api/provincial/orders', {
+      const res = await retryableRequest('/api/provincial/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

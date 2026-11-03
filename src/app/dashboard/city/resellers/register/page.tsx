@@ -1636,7 +1636,7 @@ function CityRegisterResellerPageInner() {
             </h3>
             <p className="mt-2 text-sm text-gray-500">
               The system found {nameCapInfo.matching_usernames?.length || 1}{" "}
-              active account with the same legal name and birth date.
+              account(s), including inactive or suspended, with matching identity details.
             </p>
             <p className="mt-3 text-xs text-gray-500">
               Existing account
@@ -1656,18 +1656,13 @@ function CityRegisterResellerPageInner() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={() => {
-                  setIdentityConfirmation("different");
                   setIdentityPromptOpen(false);
-                  checkNameCap(
-                    form.full_name,
-                    form.birthday,
-                    form.birthplace,
-                    "different",
-                  );
+                  setIdentityConfirmation(null);
+                  setFormError('Verify the applicant identity before continuing. A different ID does not reset the seven-account limit.');
                 }}
                 className="flex-1 rounded-xl bg-[#F0F2F8] py-3 text-sm font-semibold text-[#0D1B3E]"
               >
-                No, different
+                Cancel and verify identity
               </button>
               <button
                 onClick={() => {

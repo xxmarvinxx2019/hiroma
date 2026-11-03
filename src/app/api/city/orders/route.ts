@@ -1,3 +1,4 @@
+import { createRequestIdentity, readRequestReceipt, lockRequestReceipt, saveRequestReceipt, RequestReceiptError } from '@/app/lib/requestReceipt'
 import { parseOrderReplacements, reserveOrderReplacements, orderReplacementError } from '@/app/lib/orderReplacements'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
@@ -147,7 +148,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { order_type, notes, items, payment_method, payment_reference, supplier_id, replacements } = await req.json()
+    const body = await req.json()
+    const request = createRequestIdentity(req, 'city', user.id, user.actor_id || user.id, body)
+    const replay = await readRequestReceipt(prisma, request)
+    if (replay) return NextResponse.json({ success: true, order: replay })
+
+    const { order_type, notes, items, payment_method, payment_reference, supplier_id, replacements } = body
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Order must have at least one item.' }, { status: 400 })
@@ -219,7 +225,9 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    const order = await prisma.$transaction(async (tx) => {
+    const { result: order, replayed } = await prisma.$transaction(async (tx) => {
+      const previous = await lockRequestReceipt(tx, request)
+      if (previous) return { result: previous, replayed: true as const }
       const currentSupplier = await resolveOrderingSupplier(tx, user.id, 'city')
       if (currentSupplier?.id !== supplier.id) throw new OrderingSupplierChangedError()
       await reserveOrderStock(tx, supplier.id, items)
@@ -259,8 +267,10 @@ export async function POST(req: NextRequest) {
         entity_id: created.id,
         action_url: supplierActionUrl,
       })) })
-      return created
+      await saveRequestReceipt(tx, request, created)
+      return { result: created, replayed: false as const }
     })
+    if (replayed) return NextResponse.json({ success: true, order })
     createAuditLog({
   user_id:       user.actor_id || user.id,
   user_name:     user.full_name || user.username,
@@ -280,6 +290,7 @@ export async function POST(req: NextRequest) {
       supplier,
     })
   } catch (error) {
+    if (error instanceof RequestReceiptError) return NextResponse.json({ error: error.message }, { status: error.status })
     const replacementError = orderReplacementError(error)
     if (replacementError) return NextResponse.json({ error: replacementError }, { status: 409 })
     if (error instanceof OrderingSupplierChangedError) return NextResponse.json({ error: error.message }, { status: 409 })

@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createRequiredAuditLog, formatMemberId, getClientInfo } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
 import prisma from '@/app/lib/prisma'
-import { claimIdentityAccountSlot, IdentityAccountLimitError, releaseIdentityAccountSlot } from '@/app/lib/identityAccountLimit'
 import {
   ConcurrentDeactivationError,
   ReservedPayoutBlocksDeactivationError,
@@ -142,9 +141,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             overflowTo: hiromaUser!.id,
           })
         }
-        if (reseller.identity_document_hash) {
-          await releaseIdentityAccountSlot(tx, reseller.identity_document_hash)
-        }
         await createRequiredAuditLog(tx, {
           user_id: user.id,
           user_name: user.full_name || user.username,
@@ -177,11 +173,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Activate or suspend
     await prisma.$transaction(async (tx) => {
-      if (reseller.status === 'inactive' && status !== 'inactive' && reseller.identity_document_hash) {
-        await claimIdentityAccountSlot(tx, reseller.identity_document_hash)
-      } else if (reseller.status !== 'inactive' && status === 'inactive' && reseller.identity_document_hash) {
-        await releaseIdentityAccountSlot(tx, reseller.identity_document_hash)
-      }
+      // All statuses retain their lifetime identity slot.
       const claimed = await tx.user.updateMany({
         where: { id: userId, role: 'reseller', status: reseller.status },
         data:  { status },
@@ -219,9 +211,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       || error instanceof ConcurrentDeactivationError
       || error instanceof UnreconciledWalletBlocksDeactivationError
     ) {
-      return NextResponse.json({ error: error.message }, { status: 409 })
-    }
-    if (error instanceof IdentityAccountLimitError) {
       return NextResponse.json({ error: error.message }, { status: 409 })
     }
     const message = error instanceof Error ? error.message : 'Something went wrong.'

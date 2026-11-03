@@ -1,4 +1,5 @@
 'use client'
+import { retryableRequest } from '@/app/lib/retryableRequest'
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
@@ -140,19 +141,24 @@ function PayoutModal({
 
   const submitPayout = async (securityPin = ''): Promise<string | null> => {
     setSubmitting(true)
-    const res = await fetch('/api/reseller/wallet', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: parseFloat(amount), payment_method: method, payment_reference: reference, security_pin: securityPin }),
-    })
-    const data = await res.json()
-    setSubmitting(false)
-    if (res.ok) {
-      setShowSecurityPinModal(false)
-      onSuccess()
-      return null
+    try {
+      const res = await retryableRequest('/api/reseller/wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: parseFloat(amount), payment_method: method, payment_reference: reference, security_pin: securityPin }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setShowSecurityPinModal(false)
+        onSuccess()
+        return null
+      }
+      return data.error || 'Something went wrong.'
+    } catch {
+      return 'Unable to confirm the request. Retry with the same details.'
+    } finally {
+      setSubmitting(false)
     }
-    return data.error || 'Something went wrong.'
   }
 
   const handleSubmit = async () => {

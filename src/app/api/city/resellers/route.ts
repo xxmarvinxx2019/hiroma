@@ -1091,6 +1091,15 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
+    const identityError = error instanceof Error ? error.message : '';
+    const safeIdentityErrors = [
+      'Maximum accounts (7) reached for this person.',
+      'Maximum accounts (7) reached for this person, including inactive and suspended accounts.',
+      'This ID belongs to an existing identity with different legal details. Identity review is required.',
+      'Matching legal name and birth date require identity review. Choosing a different person cannot reset the account limit.',
+    ];
+    const identityDetail = safeIdentityErrors.find(text => identityError.includes(text));
+    if (identityDetail) return NextResponse.json({ error: identityDetail }, { status: 409 });
     if (error instanceof IdentityAccountLimitError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

@@ -1,3 +1,4 @@
+import { createRequestIdentity, readRequestReceipt, lockRequestReceipt, saveRequestReceipt, RequestReceiptError } from '@/app/lib/requestReceipt'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/app/lib/auth'
 import { getCutoffDays, getMinimumPayoutAmount, getPayoutDateMap } from '@/app/api/admin/settings/route'
@@ -226,7 +227,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { amount, payment_method, payment_reference, security_pin } = await req.json()
+    const body = await req.json()
+    const request = createRequestIdentity(req, 'reseller', user.id, user.actor_id || user.id, body)
+    const replay = await readRequestReceipt(prisma, request)
+    if (replay) return NextResponse.json({ success: true, payout: replay })
+
+    const { amount, payment_method, payment_reference, security_pin } = body
     const pinVerification = await verifyResellerSecurityPin(user.id, security_pin)
     if (!isSensitiveResellerPinAccepted(pinVerification)) {
       const failure = getSensitiveResellerPinFailure(pinVerification)
@@ -276,7 +282,9 @@ export async function POST(req: NextRequest) {
     const { cutoffDate, payoutDate, batchId } = getNextPayoutSchedule(cutoffDays, payoutDateMap)
     // Create payout — do NOT deduct balance here
     // Balance is deducted only when admin approves the payout
-    const payout = await prisma.$transaction(async (tx) => {
+    const { result: payout, replayed } = await prisma.$transaction(async (tx) => {
+      const previous = await lockRequestReceipt(tx, request)
+      if (previous) return { result: previous, replayed: true as const }
       await lockPayoutRequestsForUser(tx, user.id)
       const existingPending = await tx.payout.findFirst({
         where: { user_id: user.id, status: 'pending' },
@@ -316,14 +324,17 @@ export async function POST(req: NextRequest) {
         entityId: created.id,
         actionUrl: '/dashboard/admin/payouts',
       })
-      return created
+      await saveRequestReceipt(tx, request, created)
+      return { result: created, replayed: false as const }
     })
+    if (replayed) return NextResponse.json({ success: true, payout })
 
     return NextResponse.json({
       success: true,
       payout,
     })
   } catch (error) {
+    if (error instanceof RequestReceiptError) return NextResponse.json({ error: error.message }, { status: error.status })
     if (error instanceof InsufficientPayoutFundsError) {
       return NextResponse.json({ error: 'Insufficient available balance. Existing payouts may have reserved part of your wallet.' }, { status: 409 })
     }

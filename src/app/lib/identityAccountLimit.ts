@@ -20,14 +20,3 @@ export async function claimIdentityAccountSlot(tx: IdentityTx, identityHash: str
   `
   if (changed !== 1) throw new IdentityAccountLimitError()
 }
-
-export async function releaseIdentityAccountSlot(tx: IdentityTx, identityHash: string) {
-  const changed = await tx.$executeRaw`
-    UPDATE "identity_account_limits"
-    SET "count" = "count" - 1,
-        "updated_at" = CURRENT_TIMESTAMP
-    WHERE "identity_hash" = ${identityHash}
-      AND "count" > 0
-  `
-  if (changed !== 1) throw new Error('Verified identity account counter is inconsistent.')
-}
