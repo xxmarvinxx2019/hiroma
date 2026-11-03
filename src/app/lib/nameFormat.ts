@@ -43,3 +43,9 @@ export function getPersonNameInitials(value: string): string {
     .join('')
     .toLocaleLowerCase('en-US')
 }
+
+/** Full legal name including middle names; suffixes do not create another person. */
+export function getPersonAccountNameKey(fullName: string): string {
+  return getPersonNameCoreParts(fullName).map(part => part.normalize('NFKC').toLowerCase())
+    .join(' ').replace(/['’.-]+/g, '')
+}

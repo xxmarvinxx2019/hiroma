@@ -1,0 +1,51 @@
+# Critical transaction audit — 2026-11-03
+
+Scope: current workspace, including unpushed lifetime-person hardening. Reviewed registration/upgrade recovery, Package/Product Binary settlement, payout request/approval/release, upstream purchase creation, inventory reservation and reward claims. Database observations are from the configured development connection; production configuration was not inspected. No business settings, migrations or real financial records were changed by this audit. Disposable schemas/advisory keys and temporary tables were used for reproductions.
+
+## Findings
+
+### 1. High: retry worker cannot drain a large Product Binary backlog
+
+`src/app/api/cron/process-product-binary/route.ts:28` leases at most ten jobs and processes them sequentially. `vercel.json:6` invokes it once daily. A healthy run can therefore retry at most ten queued orders per day through this scheduled path; 1,000 queued failures need at least 100 daily runs absent direct/manual settlement. Each settlement allows 30 seconds, while the worker has a 60-second maximum, so slow jobs can reduce that throughput further. Durable jobs protect against loss/duplication, but do not guarantee prompt credit. Use a regularly scheduled, bounded resumable worker, deadline-aware leasing, and backlog-age/failure alerts. Do not silently change cap dates or reward eligibility to compensate for queue delay.
+
+### 2. High: payout import allows far more sequential work than its transaction budget
+
+`src/app/api/admin/payouts/batch/route.ts:8,197` accepts 5,000 rows and releases all eligible rows in one interactive transaction, with multiple database operations/triggers per row. Neither this call nor `src/app/lib/prisma.ts` overrides Prisma's installed default transaction timeout (5 seconds; acquisition maxWait 2 seconds, confirmed in installed runtime). Large imports are liable to timeout and roll back the whole release, even if the actual bank transfers already happened outside the application. No 5,000-row bank-release benchmark was executed. Use bounded resumable chunks with per-row durable results and an idempotent batch-run reference. Rollback protects database balances, but cannot reverse external bank payments.
+
+### 3. High: database duplicate bank-reference protection differs from application normalization
+
+`prisma/migrations/20260911100000_add_payout_disbursement_evidence/migration.sql:14` creates a case-sensitive unique index on (disbursement_provider, external_reference). Batch validation lowercases the provider for duplicate detection, but stores its original case and validates before the release transaction. Two concurrent imports for different payouts can both pass pre-validation, then insert the same reference under `BDO` and `bdo`. The current database index was inspected and an isolated temporary table with its uniqueness semantics accepted both variants. This is reuse of one piece of bank evidence across two internal releases; it does not demonstrate that the application itself sends two bank transfers. Enforce a canonical provider identifier and normalized reference in database uniqueness and write-time validation.
+
+### 4. Medium: payout and purchase creation lack durable request idempotency
+
+`src/app/api/reseller/wallet/route.ts:282` blocks a second pending payout under a member lock and reserves source-backed funds. It has no client request key/receipt. If a successful response is lost and the original request becomes approved before retry, the pending-only check permits a second payout if sufficient unreserved funds remain. Rejection/release of the first request also changes retry semantics. Funds cannot be overdrawn by this route's reservation guard, but the same user intention is not durably recognized. Upstream purchase POST routes similarly create fresh order IDs and reserve stock without a persistent request key (`src/app/api/city/orders/route.ts:226`, and provincial/regional creation paths). Repeating a request can reserve stock twice across two separately valid orders. Bind a unique client request UUID to actor, operation and payload fingerprint, and return the original result on replay; reject changed payloads under that UUID.
+
+### 5. Medium: conflicting member-lock order can deadlock Package and Product Binary
+
+Package settlement takes financial-user locks in sorted user-ID order (`binaryCommission.ts:118`). Product settlement locks the buyer first, then ancestors by depth (`productBinary.ts:170,209`). A valid tree can have sorted order A→Z while buyer-first order is Z→A. A concurrent registration whose ancestors include both members and a product order from Z can then deadlock. Isolated advisory-lock reproduction of those orders returned SQLSTATE 40P01 for one transaction. PostgreSQL rollback avoids partial credit; Product Binary queues failures, whereas registrations surface an uncertain/error result and rely on same-PIN recovery/retry. Use one shared lock ordering protocol across transaction types and bounded safe retries for retryable errors.
+
+### 6. Medium: global locks serialize otherwise independent registrations
+
+Every Package Binary cascade takes the same exclusive product-reward-policy advisory lock (`binaryCommission.ts:91`) and point-expiry-policy lock. The transaction walks every ancestor and has no explicit extended timeout. `prisma.ts` sets a pool maximum of two per application instance. With Prisma's default 5-second transaction budget, long ancestry and lock contention can cause rollback/timeouts under bursts. No end-to-end throughput number can be inferred from a 5,000-account in-memory simulation. Measure real API concurrency on an isolated staging database, introduce bounded admission/backpressure, and reduce shared locking only with equivalent immutable policy snapshots and financial tests. Increasing pool size or timeout alone is not a demonstrated fix.
+
+## Deployment and financial restrictions
+
+- The configured development connection owns financial tables/public schema, has BYPASSRLS and can update wallets directly. FINANCIAL_RUNTIME_DATABASE_URL is not configured locally. This does not establish production's role. Before live traffic, use a separate least-privilege runtime role and pass the existing financial-role verifier. Keep owner credentials for migrations. No disabled critical public-table triggers were found in the inspected set.
+- Migration history lacks 20260924160000_fix_product_binary_compensation_plan, 20260927090000_track_actual_binary_liability_shortfall and the newly prepared 20261103090000_lifetime_person_account_limit. The fixed Product Binary package-plan guard function is also absent in the inspected development database. Missing history is a reconciliation requirement, not proof that every corresponding function is absent: later migrations may redefine objects. Review checksums/current definitions before applying old SQL. Do not blanket-apply financial migrations blindly.
+- Commission replay protection does not limit company-wide liability. `binaryCommission.ts:268` deliberately permits the qualified cascade to become liability when available funding is smaller, recording shortfall. Reserve admission defaults to monitor and controls PIN issuance; it is not a guarantee that each cascade stays within that package's sales revenue. The 5+5 cap and 180K ceiling are per-account controls. Any change to company funding/eligibility restrictions needs an explicitly approved business rule.
+- Bank release evidence is supplied by the authorized operator; the application does not itself prove the bank payment occurred. Reconcile the maker file, actual bank results and internal payout references. Unique internal ledger keys cannot prevent a person from manually paying twice outside the application.
+
+## Existing duplicate/consistency protections
+
+- Registration/upgrade: atomic unused-PIN claim; (operation kind, original PIN ID) unique durable receipt; HMAC payload fingerprint; same-PIN replay and recovery; receipt and financial effects commit together.
+- Package Binary: unique source settlement and source/recipient event keys; stable member locking within that path; database entitlement/cap/point-lot checks; immutable events; commission-to-wallet reconciliation.
+- Wallet/commission: unique event keys, conflicting-payload rejection, protected ledger mutation, nonnegative and reservation invariants, immutable commission evidence.
+- Payout: source-backed reservation, member serialization, pending-request check, compare-and-set approval/rejection/release, unique ledger lifecycle keys, external evidence requirement; midnight cron never invents a release.
+- Product Binary: durable paid-delivered qualification job, unique order event, serializable settlement, guarded member balances and retry state; completion is atomic.
+- Inventory/rewards: conditional available-stock reservation/deduction, claim request/proof references, per-bottle allocation uniqueness, receipt/distribution records, and replacement obligations rather than new sales.
+
+## Verification limits
+
+The audit ran the repository test suite separately and isolated reproductions for reference-index semantics and opposite advisory-lock ordering. Existing tests mix static source assertions, mocked unit tests and real PostgreSQL integration tests. Passing them is not equivalent to thousands of simultaneous authenticated API requests. A launch gate should additionally exercise real HTTP load, dropped responses, killed connections, retries, midnight/session boundaries, queue drain and external payout reconciliation in staging, checking ledger totals and unique sources after each run.
+
+Audit run result: `npm run test:all` completed with 669 tests: 668 passed, 1 skipped, 0 failures (246.9 seconds). Full output is in `tmp/critical-transactions-audit-tests.log`. The passing suite does not invalidate the findings: missing request idempotency, backlog throughput, transaction batch sizing and canonical database uniqueness are not exhaustively exercised by the current suite. `tmp/critical-audit-reproduce.ts` separately confirmed the current payout-index definition and provider-case uniqueness gap in a temporary table, and reproduced a 40P01 deadlock using isolated advisory keys. No production HTTP load test or actual bank transfer was performed.

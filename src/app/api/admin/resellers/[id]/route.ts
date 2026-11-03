@@ -129,6 +129,9 @@ export async function PATCH(
 
     return NextResponse.json({ success: true, reseller: updated })
   } catch (error) {
+    if (error instanceof Error && error.message.includes('Registered legal name and birthday require identity review')) {
+      return NextResponse.json({ error: 'Registered legal name and birthday require identity review and cannot be reassigned.' }, { status: 409 })
+    }
     console.error('[ADMIN RESELLER PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

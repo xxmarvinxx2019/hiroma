@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 
 type Batch = { batch_id: string; count: number; amount: number }
-type PreviewRow = { row_number: number; payout_id: string; result: string; external_reference: string; ready: boolean; errors: string[] }
+type PreviewRow = { row_number: number; payout_id: string; result: string; external_reference: string; ready: boolean; already_released?: boolean; errors: string[] }
 
 const peso = (value: number) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 const key = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
@@ -15,6 +15,7 @@ export default function PayoutBatchTools({ onReleased }: { onReleased: () => voi
   const [batchId, setBatchId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [progress, setProgress] = useState('')
   const [pinPrompt, setPinPrompt] = useState<'export' | 'commit' | null>(null)
   const [pin, setPin] = useState('')
   const [uploadedRows, setUploadedRows] = useState<Record<string, unknown>[]>([])
@@ -55,10 +56,21 @@ export default function PayoutBatchTools({ onReleased }: { onReleased: () => voi
   const commit = async () => {
     if (pin.length !== 6 || !preview.length) return
     setBusy(true); setError('')
-    const response = await fetch('/api/admin/payouts/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'commit', batch_id: batchId, rows: uploadedRows, security_pin: pin }) })
-    const data = await response.json(); setBusy(false)
-    if (!response.ok) { setError(data.error || 'Unable to release payout batch.'); if (data.rows) setPreview(data.rows); return }
-    setPin(''); setPinPrompt(null); setPreview([]); setUploadedRows([]); await loadBatches(); onReleased()
+    try {
+      const response = await fetch('/api/admin/payouts/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'commit', batch_id: batchId, rows: uploadedRows, security_pin: pin }) })
+      const data = await response.json()
+      if (data.rows) setPreview(data.rows)
+      if (!response.ok) throw new Error(data.error || 'Unable to confirm payout results.')
+      setProgress(`${data.released} confirmed in this step. ${data.remaining} ready for the next step.`)
+      onReleased()
+      await loadBatches()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to confirm progress. Retry using the same bank results.')
+    } finally {
+      setBusy(false)
+      setPin('')
+      setPinPrompt(null)
+    }
   }
 
   const invalid = preview.filter(row => row.errors.length).length
@@ -71,7 +83,8 @@ export default function PayoutBatchTools({ onReleased }: { onReleased: () => voi
     </div>
     <p className="mt-2 text-[11px] leading-5 text-amber-700">Contains complete payout destinations and is restricted to the Admin owner with Security PIN. Store it securely and upload it only through this page. PDF is for audit copies, not release import.</p>
     {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
-    {preview.length > 0 && <div className="mt-4 overflow-hidden rounded-xl border"><div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3"><p className="text-xs font-bold">Validation preview: <span className="text-green-700">{ready} ready</span> · <span className="text-amber-700">{preview.length-ready-invalid} unchanged</span> · <span className="text-red-700">{invalid} invalid</span></p><button disabled={invalid > 0 || ready < 1 || busy} onClick={() => setPinPrompt('commit')} className="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Confirm successful releases</button></div><div className="max-h-64 overflow-auto divide-y">{preview.map(row => <div key={`${row.row_number}-${row.payout_id}`} className="grid grid-cols-[65px_1fr_100px_1.3fr] gap-2 px-3 py-2 text-[11px]"><span>Row {row.row_number}</span><span className="font-mono">{row.payout_id}</span><span className="capitalize">{row.result || '—'}</span><span className={row.errors.length ? 'text-red-700' : row.ready ? 'text-green-700' : 'text-amber-700'}>{row.errors.join('; ') || (row.ready ? `Ready · ${row.external_reference}` : 'No release; retained for next review')}</span></div>)}</div></div>}
-    {pinPrompt && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[#010521]/70 p-4" onMouseDown={event => event.target === event.currentTarget && setPinPrompt(null)}><section role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5"><h2 className="text-lg font-extrabold">Admin owner confirmation</h2><p className="mt-1 text-xs leading-5 text-gray-500">{pinPrompt === 'export' ? 'This export reveals complete financial destinations. The download will be audit-logged.' : `Release ${ready} externally successful payouts. This cannot be undone.`}</p><input autoFocus type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pin} onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0,6))} placeholder="6-digit Security PIN" className="mt-4 w-full rounded-xl border px-3 py-2.5 text-sm"/><div className="mt-4 flex justify-end gap-2"><button onClick={() => { setPinPrompt(null); setPin('') }} className="rounded-xl border px-4 py-2 text-sm">Cancel</button><button disabled={pin.length !== 6 || busy} onClick={() => void (pinPrompt === 'export' ? securedExport() : commit())} className="rounded-xl bg-[#0D1B3E] px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{busy ? 'Verifying…' : pinPrompt === 'export' ? 'Download' : 'Confirm release'}</button></div></section></div>}
+    {progress && <p role="status" className="mt-2 text-sm">{progress}</p>}
+    {preview.length > 0 && <div className="mt-4 overflow-hidden rounded-xl border"><div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3"><p className="text-xs font-bold">Validation preview: <span className="text-green-700">{ready} ready</span> · <span className="text-amber-700">{preview.length-ready-invalid} unchanged</span> · <span className="text-red-700">{invalid} invalid</span></p><button disabled={invalid > 0 || ready < 1 || busy} onClick={() => setPinPrompt('commit')} className="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Confirm next payouts</button></div><div className="max-h-64 overflow-auto divide-y">{preview.map(row => <div key={`${row.row_number}-${row.payout_id}`} className="grid grid-cols-[65px_1fr_100px_1.3fr] gap-2 px-3 py-2 text-[11px]"><span>Row {row.row_number}</span><span className="font-mono">{row.payout_id}</span><span className="capitalize">{row.result || '—'}</span><span className={row.errors.length ? 'text-red-700' : row.ready ? 'text-green-700' : 'text-amber-700'}>{row.errors.join('; ') || (row.already_released ? 'Already confirmed' : row.ready ? `Ready · ${row.external_reference}` : 'No release; retained for next review')}</span></div>)}</div></div>}
+    {pinPrompt && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[#010521]/70 p-4" onMouseDown={event => event.target === event.currentTarget && setPinPrompt(null)}><section role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5"><h2 className="text-lg font-extrabold">Admin owner confirmation</h2><p className="mt-1 text-xs leading-5 text-gray-500">{pinPrompt === 'export' ? 'This export reveals complete financial destinations. The download will be audit-logged.' : `Confirm the next ${Math.min(ready, 10)} externally successful payouts.`}</p><input autoFocus type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pin} onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0,6))} placeholder="6-digit Security PIN" className="mt-4 w-full rounded-xl border px-3 py-2.5 text-sm"/><div className="mt-4 flex justify-end gap-2"><button onClick={() => { setPinPrompt(null); setPin('') }} className="rounded-xl border px-4 py-2 text-sm">Cancel</button><button disabled={pin.length !== 6 || busy} onClick={() => void (pinPrompt === 'export' ? securedExport() : commit())} className="rounded-xl bg-[#0D1B3E] px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{busy ? 'Verifying…' : pinPrompt === 'export' ? 'Download' : 'Confirm release'}</button></div></section></div>}
   </section>
 }

@@ -1,4 +1,5 @@
 'use client'
+import { retryableRequest } from '@/app/lib/retryableRequest'
 
 import { useOrderReplacementSelection } from '@/app/components/orders/OrderReplacementPicker'
 import OrderReplacementSummary from '@/app/components/orders/OrderReplacementSummary'
@@ -161,7 +162,7 @@ function CreateOrderModal({ supplier, onClose, onSuccess }: {
     if (cart.length === 0) { setError('Add at least one item.'); return }
     setSubmitting(true); setError('')
     try {
-      const res = await fetch('/api/city/orders', {
+      const res = await retryableRequest('/api/city/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ supplier_id: supplier.id,
         replacements: replacement.selection, order_type: orderType, notes, payment_method: paymentMethod, payment_reference: paymentReference.trim() || null, items: currentCart.map((c) => ({ product_id: c.product.id, quantity: c.quantity, unit_price: c.product.price })) }),

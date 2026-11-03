@@ -1,3 +1,4 @@
+import { matchesReleasedPayout } from '@/app/lib/payoutEvidence'
 import { NextRequest, NextResponse } from 'next/server'
 import { createRequiredAuditLog, getClientInfo } from '@/app/lib/auditLog'
 import { getCurrentUser } from '@/app/lib/auth'
@@ -6,6 +7,7 @@ import prisma from '@/app/lib/prisma'
 import { getSensitiveResellerPinFailure, isSensitiveResellerPinAccepted, verifyResellerSecurityPin } from '@/app/lib/resellerSecurityPin'
 
 const MAX_IMPORT_ROWS = 5000
+const MAX_RELEASE_ROWS = 10
 const SUCCESS_RESULTS = new Set(['successful', 'success', 'released', 'paid'])
 const NON_RELEASE_RESULTS = new Set(['pending', 'failed'])
 
@@ -55,7 +57,7 @@ async function validateRows(batchId: string, inputRows: ImportedRow[]) {
   const payoutIds = inputRows.map(row => clean(row.payout_id, 64)).filter(Boolean)
   const payouts = await prisma.payout.findMany({
     where: { id: { in: [...new Set(payoutIds)] } },
-    select: { id: true, batch_id: true, status: true, amount: true, payout_date: true, external_reference: true, user: { select: { identity_document_hash: true } } },
+    select: { id: true, batch_id: true, status: true, amount: true, payout_date: true, external_reference: true, disbursement_provider: true, disbursed_at: true, disbursed_amount: true, user: { select: { identity_document_hash: true } } },
   })
   const payoutMap = new Map(payouts.map(payout => [payout.id, payout]))
   const validationHashes = [...new Set(payouts.map(payout => payout.user.identity_document_hash).filter((value): value is string => Boolean(value)))]
@@ -63,7 +65,7 @@ async function validateRows(batchId: string, inputRows: ImportedRow[]) {
   const validationLimitMap = new Map(validationLimits.map(limit => [limit.identity_hash, limit]))
   const references = inputRows.map(row => normalizedReference(row.external_reference)).filter(Boolean)
   const existingReferences = references.length ? await prisma.payout.findMany({
-    where: { external_reference: { in: [...new Set(references)] } },
+    where: { external_reference: { in: [...new Set(references)], mode: 'insensitive' } },
     select: { id: true, disbursement_provider: true, external_reference: true },
   }) : []
   const existingKeys = new Set(existingReferences.map(row => `${clean(row.disbursement_provider).toLowerCase()}|${normalizedReference(row.external_reference)}`))
@@ -74,18 +76,21 @@ async function validateRows(batchId: string, inputRows: ImportedRow[]) {
   const rows = inputRows.map((input, index) => {
     const payoutId = clean(input.payout_id, 64)
     const rowBatch = clean(input.batch_id, 40)
-    const provider = clean(input.provider, 80)
+    const provider = clean(input.provider, 80).toLowerCase()
     const reference = normalizedReference(input.external_reference)
     const result = clean(input.result, 20).toLowerCase()
     const amount = Number(input.approved_amount)
     const disbursedAt = parseDate(input.transaction_date_time)
     const payout = payoutMap.get(payoutId)
+    const alreadyReleased = SUCCESS_RESULTS.has(result) && matchesReleasedPayout(payout, {
+      provider, reference, amount, disbursedAt,
+    })
     const errors: string[] = []
     if (!payout) errors.push('Unknown payout ID')
     if (seenPayouts.has(payoutId)) errors.push('Duplicate payout row')
     seenPayouts.add(payoutId)
     if (rowBatch !== batchId || payout?.batch_id !== batchId) errors.push('Wrong batch')
-    if (payout && payout.status !== 'approved') errors.push(`Payout is ${payout.status}, not approved`)
+    if (payout && payout.status !== 'approved' && !alreadyReleased) errors.push(`Payout is ${payout.status}, not approved`)
     const identityHash = payout?.user.identity_document_hash
     const identityLimit = identityHash ? validationLimitMap.get(identityHash) : null
     if (identityLimit && identityLimit.count > identityLimit.max_allowed) errors.push(`Account limit exceeded (${identityLimit.count} of ${identityLimit.max_allowed})`)
@@ -96,7 +101,7 @@ async function validateRows(batchId: string, inputRows: ImportedRow[]) {
       if (!reference) errors.push('External reference is required')
       if (!disbursedAt || disbursedAt > now) errors.push('Enter a valid transaction date/time that is not in the future')
       const referenceKey = `${provider.toLowerCase()}|${reference}`
-      if (seenReferences.has(referenceKey) || existingKeys.has(referenceKey)) errors.push('Duplicate provider/reference')
+      if (seenReferences.has(referenceKey) || (!alreadyReleased && existingKeys.has(referenceKey))) errors.push('Duplicate provider/reference')
       seenReferences.add(referenceKey)
     }
     return {
@@ -110,7 +115,8 @@ async function validateRows(batchId: string, inputRows: ImportedRow[]) {
       result,
       notes: clean(input.notes, 500),
       errors,
-      ready: errors.length === 0 && SUCCESS_RESULTS.has(result),
+      already_released: alreadyReleased,
+      ready: !alreadyReleased && errors.length === 0 && SUCCESS_RESULTS.has(result),
     }
   })
   return { rows, valid: rows.every(row => row.errors.length === 0), error: null }
@@ -193,7 +199,7 @@ export async function POST(req: NextRequest) {
       const batchId = clean(body.batch_id, 40)
       const validation = await validateRows(batchId, body.rows)
       if (!validation.valid || validation.error) return NextResponse.json({ error: validation.error || 'Resolve every validation error before confirming.', ...validation }, { status: 409 })
-      const readyRows = validation.rows.filter(row => row.ready)
+      const readyRows = validation.rows.filter(row => row.ready).slice(0, MAX_RELEASE_ROWS)
       const released = await prisma.$transaction(async tx => {
         let count = 0
         for (const row of readyRows) {
@@ -213,7 +219,11 @@ export async function POST(req: NextRequest) {
         }
         return count
       })
-      return NextResponse.json({ success: true, released, unchanged: validation.rows.length - readyRows.length })
+      const committed = new Set(readyRows.map(row => row.payout_id))
+      const rows = validation.rows.map(row => committed.has(row.payout_id)
+        ? { ...row, ready: false, already_released: true }
+        : row)
+      return NextResponse.json({ success: true, released, remaining: rows.filter(row => row.ready).length, rows })
     }
     return NextResponse.json({ error: 'Invalid action.' }, { status: 400 })
   } catch (error) {

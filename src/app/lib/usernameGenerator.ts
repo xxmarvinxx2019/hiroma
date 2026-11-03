@@ -1,5 +1,5 @@
 import prisma from '@/app/lib/prisma'
-import { getPersonNameCoreParts, normalizePersonName } from '@/app/lib/nameFormat'
+import { getPersonNameCoreParts, normalizePersonName, getPersonAccountNameKey } from '@/app/lib/nameFormat'
 import { hashIdentityDocument } from '@/app/lib/identityDocument'
 
 const MAX_ACCOUNTS_PER_PERSON = 7
@@ -73,7 +73,6 @@ export async function generateUsernamePlan(input: {
            identity_document_hash
     FROM users
     WHERE role = 'reseller'
-      AND status != 'inactive'
       AND (
         birthday::text = ${birthdayKey}
         OR (${identityDocumentHash}::text IS NOT NULL AND identity_document_hash = ${identityDocumentHash})
@@ -86,7 +85,10 @@ export async function generateUsernamePlan(input: {
     (identityDocumentHash !== null && account.identity_document_hash === identityDocumentHash)
   )
   const confirmationRequired = samePersonAccounts.length > 0 && !input.identityConfirmation
-  const existingAccountCount = input.identityConfirmation === 'same' ? samePersonAccounts.length : 0
+  const existingAccountCount = samePersonAccounts.length
+  if (samePersonAccounts.length > 0 && input.identityConfirmation === 'different') {
+    throw new Error('Matching legal name and birth date require identity review. Choosing a different person cannot reset the account limit.')
+  }
   if (existingAccountCount >= MAX_ACCOUNTS_PER_PERSON) {
     throw new Error(`Maximum accounts (${MAX_ACCOUNTS_PER_PERSON}) reached for this person.`)
   }
@@ -132,6 +134,5 @@ export async function generateUsernamePlan(input: {
 }
 
 function getLegalNameCoreKey(fullName: string): string {
-  const parts = getPersonNameCoreParts(fullName)
-  return `${cleanUsernamePart(parts[0] || '')}|${cleanUsernamePart(parts.at(-1) || '')}`
+  return getPersonAccountNameKey(fullName)
 }
