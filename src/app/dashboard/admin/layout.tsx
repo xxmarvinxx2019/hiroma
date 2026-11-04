@@ -40,6 +40,7 @@ const navItems = [
     section: 'Catalog',
     items: [
       { label: 'Products', href: '/dashboard/admin/products', icon: '🧴' },
+      { label: 'Bonuses', href: '/dashboard/admin/bonuses', icon: '📊' },
       { label: 'Ranks', href: '/dashboard/admin/ranks', icon: '🏅' },
       { label: 'Packages', href: '/dashboard/admin/packages', icon: '📦' },
       { label: 'PIN Manager', href: '/dashboard/admin/pins', icon: '🔑' },

@@ -93,6 +93,7 @@ export default function AdminOrdersPage() {
   const [page, setPage]                 = useState(1)
   const [expandedId, setExpandedId]     = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [paymentError, setPaymentError] = useState('')
   const [updatingId, setUpdatingId]     = useState<string | null>(null)
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null)
 
@@ -161,6 +162,8 @@ export default function AdminOrdersPage() {
         <h1 className="text-xl font-semibold text-[#0D1B3E]">Distributor Orders</h1>
         <p className="text-sm text-gray-400 mt-0.5">Orders placed by distributors across all levels</p>
       </div>
+
+      {paymentError && <p role="alert" className="mb-4 text-sm text-red-700">{paymentError}</p>}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
@@ -314,13 +317,26 @@ export default function AdminOrdersPage() {
                   </button>
                     {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
                       <button
+                        disabled={updatingId === order.id}
                         onClick={async () => {
-                          await fetch('/api/admin/orders', {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ order_id: order.id, payment_status: 'paid' }),
-                          })
-                          fetchOrders()
+                          setUpdatingId(order.id)
+                          setPaymentError('')
+                          try {
+                            const response = await fetch('/api/admin/orders', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ order_id: order.id, payment_status: 'paid' }),
+                            })
+                            if (!response.ok) {
+                              const result = await response.json()
+                              throw new Error(result.error || 'Unable to confirm payment.')
+                            }
+                            fetchOrders()
+                          } catch (error) {
+                            setPaymentError(error instanceof Error ? error.message : 'Unable to confirm payment.')
+                          } finally {
+                            setUpdatingId(null)
+                          }
                         }}
                         className="w-7 h-7 rounded-lg bg-[#e8f7ef] hover:bg-[#1a7a4a] flex items-center justify-center transition-colors group flex-shrink-0"
                       title="Mark as paid">

@@ -4,7 +4,7 @@ import prisma from '@/app/lib/prisma'
 import {
   ensureCurrentProductBinaryQuarter,
 } from '@/app/lib/productBinaryQuarter'
-import { PRODUCT_BINARY_PAIR_AMOUNT } from '@/app/lib/productBinaryPlan'
+import { getProductBinaryPairAmount } from '@/app/lib/productBinaryMatchPolicy'
 import { calculateProductBinaryBalance } from '@/app/lib/productBinaryBalance'
 import { expireProductPu } from '@/app/lib/productBinaryExpiry'
 import { getProductPuExpiryMonths } from '@/app/lib/productPuExpiryPolicy'
@@ -342,6 +342,7 @@ export async function GET(req: NextRequest) {
     const currentRank = currentRankIndex >= 0 ? sortedRanks[currentRankIndex] : null
     const nextRank = sortedRanks[currentRankIndex + 1] || (currentRank ? null : sortedRanks[0]) || null
 
+    const pairAmount = await getProductBinaryPairAmount(prisma)
     return NextResponse.json({
       tree,
       meta: {
@@ -375,12 +376,12 @@ export async function GET(req: NextRequest) {
         total_earned: selfCommissions.points,
         rank_progress: {
           current_rank: currentRank?.name || 'Base',
-          current_pair_rate_amount: PRODUCT_BINARY_PAIR_AMOUNT,
+          current_pair_rate_amount: pairAmount,
           next_rank: nextRank ? {
             name: nextRank.name,
             required_pu: Number(nextRank.required_pu),
             remaining_pu: Math.max(0, Number(nextRank.required_pu) - selfRankData.total_pu),
-            pair_rate_amount: PRODUCT_BINARY_PAIR_AMOUNT,
+            pair_rate_amount: pairAmount,
           } : null,
         },
       },

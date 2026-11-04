@@ -101,7 +101,7 @@ export default function RankAdvancementPage() {
 
         <div className="space-y-5">
           <InfoCard number="1" title="Buy products for your own rank" text="Your own eligible, delivered product purchases add Personal PU to your account for the current quarter. PU depends on the product, so always check its PU value before ordering." />
-          <InfoCard number="2" title="Team purchases create binary pairs" text="Eligible purchases by downlines add volume to the correct left or right team. Every 2 PU on the left plus 2 PU on the right creates one Product Binary pair." />
+          <InfoCard number="2" title="Team purchases create binary pairs" text="Eligible purchases by downlines add volume to the correct left or right team. One Product Binary pair requires the configured PU amount on each leg." />
           <InfoCard number="3" title="Your qualified rate pays the pair" text={`Your current rate is ${money(currentPoints)} per completed pair. Reaching the next rank changes the rate used for eligible Product Binary pairs.`} />
         </div>
       </section>

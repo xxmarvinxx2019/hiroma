@@ -1,9 +1,10 @@
+import { isProductBinaryReleaseApproved, requiresProductBinaryReleaseApproval } from '@/app/lib/productBinaryReleaseGate'
 import { randomUUID } from 'crypto'
 import { Prisma } from '@prisma/client'
 import prisma from '@/app/lib/prisma'
 import { ensureCurrentProductBinaryQuarter, PRODUCT_BINARY_PESO_PER_POINT } from '@/app/lib/productBinaryQuarter'
 import { calculateProductBinaryDailyCap } from '@/app/lib/productBinaryCap'
-import { getProductBinaryDailyCap, PRODUCT_BINARY_PAIR_AMOUNT } from '@/app/lib/productBinaryPlan'
+import { getProductBinaryDailyCap } from '@/app/lib/productBinaryPlan'
 import {
   creditCommissionExactlyOnce,
   recordCommissionExactlyOnce,
@@ -12,7 +13,7 @@ import { lockFinancialUser } from '@/app/lib/walletLedger'
 import { createAuditLog } from '@/app/lib/auditLog'
 import { expireProductPu, addProductPuLot, consumeProductPuFifo } from '@/app/lib/productBinaryExpiry'
 
-const PU_PER_LEG_PER_PAIR = 2
+import { getProductBinaryPairAmount, getProductBinaryPuPerLeg, PRODUCT_BINARY_MATCH_KEY } from '@/app/lib/productBinaryMatchPolicy'
 const PESO_PER_POINT = PRODUCT_BINARY_PESO_PER_POINT
 const PRODUCT_BINARY_RETRY_BASE_SECONDS = 30
 const PRODUCT_BINARY_RETRY_MAX_SECONDS = 60 * 60
@@ -145,6 +146,10 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         return { processed: false, reason: 'already_processed' as const }
       }
 
+      if (!await isProductBinaryReleaseApproved(tx)) {
+        return { processed: false, reason: 'release_approval_pending' as const }
+      }
+
       const order = {
         order_id: orderId,
         buyer_id: job.buyer_user_id,
@@ -202,7 +207,19 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       WHERE username='hiroma' AND role='admin'::"Role" AND status='active'::"UserStatus"
       LIMIT 1
     `
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${PRODUCT_BINARY_MATCH_KEY}))`
+    const rateAmount = await getProductBinaryPairAmount(tx)
+    const puPerLeg = await getProductBinaryPuPerLeg(tx)
     const settlementAt = new Date()
+    const [poolSchema] = await tx.$queryRaw<{ ready: boolean }[]>`
+      SELECT to_regprocedure('public.queue_product_binary_pool_order(uuid,timestamptz,integer)') IS NOT NULL AS ready
+    `
+    const weeklyPool = poolSchema.ready && (await tx.$queryRaw<{ queued: boolean }[]>`
+      SELECT public.queue_product_binary_pool_order(${orderEventId}::uuid,${settlementAt}::timestamptz,${rateAmount * 100}::integer) AS queued
+    `)[0].queued
+    if (!weeklyPool && requiresProductBinaryReleaseApproval()) {
+      throw new Error('Approved Product Binary settlement could not enter the weekly pool.')
+    }
     const day = manilaDayRange(settlementAt)
     let credited = 0
     let flashout = 0
@@ -222,7 +239,6 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       const rank = await getRankSnapshot(tx, profile.package_id, Number(profile.total_pu))
       // Compensation plan: every Product Binary pair pays a fixed ₱5. Package
       // and rank values cannot increase the monetary entitlement.
-      const rateAmount = PRODUCT_BINARY_PAIR_AMOUNT
       const effectiveRatePoints = rateAmount / PESO_PER_POINT
       const planCap = getProductBinaryDailyCap(profile.package_name)
 
@@ -250,10 +266,9 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       `
       const availableLeft = Number(available.left_carryover_pu)
       const availableRight = Number(available.right_carryover_pu)
-      const completedPairs = Math.floor(Math.min(availableLeft, availableRight) / PU_PER_LEG_PER_PAIR)
-      await consumeProductPuFifo(tx, ancestor.user_id, completedPairs * PU_PER_LEG_PER_PAIR, settlementAt)
-      const closingLeft = availableLeft - completedPairs * PU_PER_LEG_PER_PAIR
-      const closingRight = availableRight - completedPairs * PU_PER_LEG_PER_PAIR
+      const completedPairs = Math.floor(Math.min(availableLeft, availableRight) / puPerLeg)
+      const closingLeft = availableLeft - completedPairs * puPerLeg
+      const closingRight = availableRight - completedPairs * puPerLeg
 
       const today = await tx.$queryRaw<{ used: number }[]>`
         SELECT COALESCE(SUM(payable_pairs),0)::int used FROM product_binary_pair_events
@@ -263,12 +278,12 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
       const { payablePairs, capFlashPairs, inactivePairs } = calculateProductBinaryDailyCap(
         completedPairs,
         used,
-        true,
+        !weeklyPool,
         planCap,
         profile.status === 'active',
       )
-      const payableAmount = payablePairs*rateAmount
-      const flashoutAmount = (capFlashPairs+inactivePairs)*rateAmount
+      const payableAmount = weeklyPool ? 0 : payablePairs*rateAmount
+      const flashoutAmount = weeklyPool ? 0 : (capFlashPairs+inactivePairs)*rateAmount
       const closingLifetimePairs = openingLifetimePairs + completedPairs
       const closingLifetimePayable = openingLifetimePayable + payablePairs
       const closingLifetimeFlashout = openingLifetimeFlashout + capFlashPairs + inactivePairs
@@ -326,14 +341,15 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
           ${completedPairs},${payablePairs},${capFlashPairs},${inactivePairs},${closingLeft},${closingRight},
           ${closingLifetimePairs},${closingLifetimePayable},${closingLifetimeFlashout},
           ${profile.package_id},${profile.package_name},${rank?.id || null},${rank?.name || 'Default'},${effectiveRatePoints},${PESO_PER_POINT},
-          ${rateAmount},${payableAmount},${flashoutAmount},${true},${planCap},${normalCommissionId},${flashCommissionId})
+          ${rateAmount},${payableAmount},${flashoutAmount},${!weeklyPool},${weeklyPool ? null : planCap},${normalCommissionId},${flashCommissionId})
       `
+      await consumeProductPuFifo(tx, ancestor.user_id, completedPairs * puPerLeg, settlementAt)
       await tx.$executeRaw`
         UPDATE product_binary_positions SET left_carryover_pu=${closingLeft},right_carryover_pu=${closingRight},
           lifetime_pairs=${closingLifetimePairs},lifetime_payable=${closingLifetimePayable},
           lifetime_flashout=${closingLifetimeFlashout},updated_at=CURRENT_TIMESTAMP WHERE user_id=${ancestor.user_id}
       `
-      await tx.$executeRaw`UPDATE reseller_profiles SET total_points=COALESCE(total_points,0)+${payablePairs*effectiveRatePoints} WHERE user_id=${ancestor.user_id}`
+      if (!weeklyPool) await tx.$executeRaw`UPDATE reseller_profiles SET total_points=COALESCE(total_points,0)+${payablePairs*effectiveRatePoints} WHERE user_id=${ancestor.user_id}`
     }
       await tx.$executeRaw`
         UPDATE product_binary_settlement_jobs

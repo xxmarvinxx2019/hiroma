@@ -44,8 +44,8 @@ const incomeStreams = [
   },
   {
     icon: '⭐',
-    title: 'Sponsor pairing points',
-    desc: 'Earn points when both your personally referred left & right members each purchase 2 bottles. Points convert to PHP. Up to 12 pairs per day.',
+    title: 'Weekly Product Matching Bonus',
+    desc: 'Earn points when qualified purchases on both legs meet the matching requirement. Qualified pairs share the weekly bonus pool.',
     color: 'border-l-[#C9A84C]',
   },
 ]
@@ -57,9 +57,9 @@ const rules = [
     note: 'Overflow goes to Hiroma',
   },
   {
-    label: 'Daily pairs cap',
-    value: '12 pairs/day',
-    note: 'Overflow goes to Hiroma',
+    label: 'Product Binary pool',
+    value: '₱5 per qualified bottle',
+    note: 'Weekly bonus depends on qualified pairs and available pool',
   },
   {
     label: 'Name cap',

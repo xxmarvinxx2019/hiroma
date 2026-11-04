@@ -135,6 +135,15 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
     }
 
+    if (!status && payment_status === 'paid') {
+      if (order.status === 'cancelled') {
+        return NextResponse.json({ error: 'A cancelled order cannot be marked paid.' }, { status: 409 })
+      }
+      if (order.payment_status === 'paid') {
+        return NextResponse.json({ success: true, order })
+      }
+    }
+
     // Allow payment_status updates on finalized orders
     if ((order.status === 'delivered' || order.status === 'cancelled') && status) {
       return NextResponse.json({ error: 'Order is already finalized.' }, { status: 400 })
@@ -174,14 +183,21 @@ export async function PATCH(req: NextRequest) {
     // ── Transaction: update status + payment_status + credit buyer + deduct admin ──
     const updated = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('hiroma.order_actor', ${user.actor_id || user.id}, true)`
+      const paymentUpdate = payment_status === 'paid' && order.payment_status !== 'paid'
+        ? { payment_status, payment_verified_by_actor_id: user.actor_id || user.id }
+        : payment_status ? { payment_status } : {}
       if (status) {
         const claimed = await tx.order.updateMany({
           where: { id: order_id, status: order.status },
-          data: { status, ...(payment_status && { payment_status }), ...(status === 'cancelled' && buildOrderCancellationEvidence(user, cancellation_reason, 'admin')) },
+          data: { status, ...paymentUpdate, ...(status === 'cancelled' && buildOrderCancellationEvidence(user, cancellation_reason, 'admin')) },
         })
         if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
       } else {
-        await tx.order.update({ where: { id: order_id }, data: { ...(payment_status && { payment_status }) } })
+        const claimed = await tx.order.updateMany({
+          where: { id: order_id, status: order.status, payment_status: order.payment_status },
+          data: paymentUpdate,
+        })
+        if (claimed.count !== 1) throw new Error('ORDER_ALREADY_TRANSITIONED')
       }
 
       if (status === 'delivered') {
@@ -247,6 +263,9 @@ export async function PATCH(req: NextRequest) {
       ...(rewardsWarning ? { rewards_warning: rewardsWarning } : {}),
     })
   } catch (error) {
+    if (error instanceof Error && error.message === 'ORDER_ALREADY_TRANSITIONED') {
+      return NextResponse.json({ error: 'The order changed. Refresh before trying again.' }, { status: 409 })
+    }
     console.error('[ADMIN ORDERS PATCH ERROR]', error)
     return NextResponse.json({ error: 'Something went wrong.' }, { status: 500 })
   }

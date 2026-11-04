@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import styles from './reseller-theme.module.css'
+import ProductBinaryPoolPreview from '@/app/components/reseller/ProductBinaryPoolPreview'
 import ProductRewardsCard from '@/app/components/reseller/ProductRewardsCard'
 
 interface Stats {
@@ -736,7 +737,7 @@ export default function ResellerDashboardPage() {
                 <p className="text-xs font-bold text-[#0D1B3E]">Product Binary PU Balance</p>
                 <p className="mt-0.5 text-[10px] text-gray-500">Verified team carryover · read-only</p>
               </div>
-              <span className="rounded-full bg-[#0D1B3E] px-2.5 py-1 text-[10px] font-bold text-white">2 + 2 PU = 1 pair</span>
+              <span className="rounded-full bg-[#0D1B3E] px-2.5 py-1 text-[10px] font-bold text-white">Matched PU from both legs</span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-blue-100 bg-white p-2.5">
@@ -773,6 +774,7 @@ export default function ResellerDashboardPage() {
 
         {/* Daily Referral Cap + Quick Actions */}
         <div className={`space-y-4 ${styles.sideStack}`}>
+          <ProductBinaryPoolPreview totalEarned={stats.commission_summary?.sponsor_point?.amount ?? 0} />
           {/* Referral cap */}
           <div className={`bg-white rounded-2xl border border-[#0D1B3E]/8 p-5 ${styles.panel} ${styles.referralPanel}`}>
             <div className="mb-3 flex items-center justify-between gap-2">

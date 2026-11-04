@@ -43,7 +43,8 @@ test('delivered-order processing resets only personal qualification before credi
   assert.match(source, /ensureCurrentProductBinaryQuarter\(tx, order\.buyer_id\)/)
   assert.match(source, /SET total_pu=COALESCE\(total_pu,0\)\+/)
   assert.match(source, /ensureCurrentProductBinaryQuarter\(tx, ancestor\.user_id\)/)
-  assert.match(source, /PU_PER_LEG_PER_PAIR = 2/)
+  assert.match(source, /getProductBinaryPuPerLeg\(tx\)/)
+  assert.match(read('../src/app/lib/productBinaryMatchPolicy.ts'), /if \(!setting\) return 2/)
 })
 
 test('Product Binary daily cap pays only the remaining Manila-day allowance', () => {
