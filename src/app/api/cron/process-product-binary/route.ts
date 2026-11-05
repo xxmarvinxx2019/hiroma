@@ -1,6 +1,9 @@
+import { isProductBinaryReleaseApproved } from '@/app/lib/productBinaryReleaseGate'
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/app/lib/prisma'
 import { processDeliveredProductBinaryOrder } from '@/app/lib/productBinary'
+
+import { settleClosedProductBinaryPools } from '@/app/lib/productBinaryPoolSettlement'
 
 export const maxDuration = 60
 
@@ -14,6 +17,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    if (!await isProductBinaryReleaseApproved(prisma)) {
+      return NextResponse.json({ success: false, held: true, reason: 'release_approval_pending' }, { status: 503 })
+    }
+    const weeklyPool = await settleClosedProductBinaryPools()
     // Claim a short lease in one statement. SKIP LOCKED prevents concurrent
     // cron workers from selecting the same obligation, while the lease makes
     // an interrupted worker eligible again without losing the job.
@@ -50,7 +57,8 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      success: errors.length === 0,
+      success: errors.length === 0 && weeklyPool.failed === 0,
+      weeklyPool,
       attempted: jobs.length,
       completed,
       failed: errors.length,

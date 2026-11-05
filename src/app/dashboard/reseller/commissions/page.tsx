@@ -50,7 +50,7 @@ const COMMISSION_META: Record<string, { label: string; color: string; bg: string
     label: 'Sponsor Point',
     color: '#1a7a4a',
     bg:    '#e8f7ef',
-    desc:  'Points converted when both referred legs each purchase 2 bottles',
+    desc:  'Points converted when both legs meet the matching requirement',
   },
 }
 

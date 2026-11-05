@@ -7,7 +7,7 @@ to or above the protected obligations recorded by the system.
 ## Temporary Vercel Hobby preview schedule
 
 While the project is being sampled on Vercel Hobby, the durable Product Binary
-retry worker runs once daily at `0 16 * * *` (nominally midnight in
+retry worker runs once daily at `0 2 * * *` (nominally 10:00 AM in
 Asia/Manila). A paid and delivered order still attempts Product Binary
 settlement immediately; this cron is the safety net for obligations that remain
 pending or fail because of a temporary error.

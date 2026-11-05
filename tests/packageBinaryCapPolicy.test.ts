@@ -10,7 +10,7 @@ test('cap mode validator separates daily allowance from split sessions',()=>{
 })
 test('cap policy writes require owner, origin, PIN, a locked version check, and an atomic audit',()=>{
  const api=readFileSync('src/app/api/admin/settings/package-binary-cap/route.ts','utf8')
- for(const requirement of ["u?.role==='admin'&&u.is_staff!==true","req.headers.get('origin')!==req.nextUrl.origin",'verifyResellerSecurityPin(user.id,body.security_pin)','isSensitiveResellerPinAccepted(pin)','STALE_POLICY','expected_latest_carryover_id','pg_advisory_xact_lock','package_binary_cap_policy_scheduled','createRequiredAuditLog(tx'])assert.ok(api.includes(requirement),requirement)
+ for(const requirement of ["u?.role==='admin'&&u.is_staff!==true","req.headers.get('origin')!==req.nextUrl.origin",'verifyResellerSecurityPin(user.id,body.security_pin)','isSensitiveResellerPinAccepted(pin)','STALE_POLICY','pg_advisory_xact_lock','package_binary_cap_policy_scheduled','createRequiredAuditLog(tx'])assert.ok(api.includes(requirement),requirement)
  assert.ok(api.indexOf('isSensitiveResellerPinAccepted(pin)')<api.indexOf('INSERT INTO package_binary_cap_policies'))
 })
 

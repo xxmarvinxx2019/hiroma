@@ -132,9 +132,9 @@ export default function AdminRanksPage() {
       {/* Info banner */}
       <div className="bg-[#010521]/5 border border-[#0D1B3E]/10 rounded-xl px-4 py-3 mb-5 text-xs text-gray-500 leading-relaxed">
         <p className="font-medium text-[#0D1B3E] mb-1">How it works</p>
-        Every package and rank pays a fixed <strong>₱5 per Product Binary pair</strong>. Rank names and required PU remain customizable.
+        All packages and ranks use the fixed payout in <strong>Admin Settings → Product Binary matching</strong>. Rank names and required PU remain customizable.
         Qualification PU resets automatically every calendar quarter.
-        Rule: <strong>2 PU left + 2 PU right = 1 pair</strong>. Each point = <strong>₱0.50</strong>.
+        Rule: <strong>Equal qualifying PU from each leg = 1 pair</strong>. Each point = <strong>₱0.50</strong>.
       </div>
 
       <div className="rounded-xl border border-[#0D1B3E]/10 bg-white p-5 mb-5">

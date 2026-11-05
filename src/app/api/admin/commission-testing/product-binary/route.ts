@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
       total_flashout:n(s.flashout)+n(old.flashout),left_carryover_pu:n(c.left_pu),right_carryover_pu:n(c.right_pu),legacy_earned:n(old.earned),legacy_flashout:n(old.flashout),legacy_events:n(old.events),
     }, ranks, ledger, notes:{
       pu:'PU is product volume, not always bottle quantity. Each product uses its configured PU value.',
-      reserve:'Liability uses the exact rank rate when a pair completes. Funding is realized Hiroma product gross margin; available fund and liability remain separate accounting balances.',
+      reserve:'Weekly allocations use the final pool rate and the configured maximum per pair. Funding is realized Hiroma product gross margin; available fund and liability remain separate accounting balances.',
       legacy:'Legacy sponsor-point credits are preserved but excluded from exact pair/rank/carryover counts because old rows did not save those snapshots.',
     }})
   } catch (error) {

@@ -175,7 +175,41 @@ export async function GET(req: NextRequest) {
       packageBreakdown[pkgName].value += Number(r.amount || 0)
     }
 
+    const [poolSchema] = await prisma.$queryRaw<{ ready: boolean }[]>`
+      SELECT to_regclass('public.product_binary_pool_weeks') IS NOT NULL AS ready
+    `
+    const retainedPools = poolSchema.ready && !user.is_staff ? await prisma.$queryRaw<{
+      week_start: string; week_end: string; budget: string; allocated: string; retained: string
+    }[]>`
+      SELECT to_char(week_start, 'YYYY-MM-DD') AS week_start,
+        to_char(week_start + 6, 'YYYY-MM-DD') AS week_end,
+        (pool_centavos::numeric / 100)::text AS budget,
+        (allocated_centavos::numeric / 100)::text AS allocated,
+        ((pool_centavos - allocated_centavos)::numeric / 100)::text AS retained
+      FROM product_binary_pool_weeks
+      WHERE closed_at IS NOT NULL
+        AND week_start + 6 >= ${dateFrom || '2020-01-01'}::date
+        AND week_start + 6 <= COALESCE(NULLIF(${dateTo}, '')::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date)
+      ORDER BY week_start DESC
+    ` : null
+
+    const [nonMemberSchema] = await prisma.$queryRaw<{ ready: boolean }[]>`
+      SELECT to_regclass('public.product_binary_non_member_reserve_releases') IS NOT NULL AS ready
+    `
+    const [nonMemberRetained] = nonMemberSchema.ready && !user.is_staff ? await prisma.$queryRaw<{
+      units: string; retained: string
+    }[]>`
+      SELECT COALESCE(SUM(units), 0)::text AS units,
+        (COALESCE(SUM(units), 0)::numeric * 5)::text AS retained
+      FROM public.product_binary_non_member_reserve_releases
+      WHERE (released_at AT TIME ZONE 'Asia/Manila')::date >= ${dateFrom || '2020-01-01'}::date
+        AND (released_at AT TIME ZONE 'Asia/Manila')::date <=
+          COALESCE(NULLIF(${dateTo}, '')::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date)
+    ` : []
+
     return NextResponse.json({
+      product_binary_non_member_retained: nonMemberRetained ?? null,
+      product_binary_retained_pools: retainedPools,
       records: formattedRecords,
       summary: {
         total_pairs_today: totalPairsToday,

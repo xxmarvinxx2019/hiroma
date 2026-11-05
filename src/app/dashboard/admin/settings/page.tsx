@@ -1,10 +1,11 @@
 'use client'
 
 import PasswordInput from '@/app/components/ui/PasswordInput'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId, useRef } from 'react'
 import PasskeySettings from '@/app/components/security/PasskeySettings'
 import DistributorSecurityPinSettings from '@/app/components/security/DistributorSecurityPinSettings'
 import ProfilePhotoUploader from '@/app/components/profile/ProfilePhotoUploader'
+import ProductBinaryMatchSettings from '@/app/components/admin/ProductBinaryMatchSettings'
 import PackageBinaryCapSettings from '@/app/components/admin/PackageBinaryCapSettings'
 import PackageBinaryRewardSettings from '@/app/components/admin/PackageBinaryRewardSettings'
 import { readSettingsResponse } from '@/app/lib/settingsResponse'
@@ -35,14 +36,45 @@ function SettingsSection({
   desc: string
   children: React.ReactNode
 }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (open && !dialog.current?.open) dialog.current?.showModal()
+  }, [open])
+
   return (
-    <div className="bg-white rounded-xl border border-[#0D1B3E]/8 overflow-hidden">
-      <div className="px-5 py-4 border-b border-[#0D1B3E]/8">
-        <h2 className="text-sm font-semibold text-[#0D1B3E]">{title}</h2>
-        <p className="text-xs text-gray-400 mt-0.5">{desc}</p>
-      </div>
-      <div className="p-5">{children}</div>
-    </div>
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0D1B3E]"
+      >
+        <span>
+          <span className="block text-sm font-semibold text-[#0D1B3E]">{title}</span>
+          <span className="mt-0.5 block text-xs text-slate-600">{desc}</span>
+        </span>
+        <span aria-hidden="true" className="text-lg text-slate-500">›</span>
+      </button>
+      <dialog
+        ref={dialog}
+        aria-labelledby={titleId}
+        onClose={() => { setOpen(false); trigger.current?.focus() }}
+        className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-white text-[#0D1B3E] shadow-xl backdrop:bg-slate-950/50"
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
+          <h2 id={titleId} className="font-semibold">{title}</h2>
+          <button type="button" autoFocus onClick={() => dialog.current?.close()} className="rounded-md px-3 py-2 text-sm hover:bg-slate-100">
+            Close
+          </button>
+        </div>
+        {open && <div className="p-5">{children}</div>}
+      </dialog>
+    </>
   )
 }
 
@@ -223,7 +255,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-5">
+      <div className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
 
         {/* Profile Settings */}
         <SettingsSection
@@ -378,12 +410,23 @@ export default function SettingsPage() {
           </div>
         </SettingsSection>
 
-        <DistributorSecurityPinSettings />
+        <SettingsSection title="Security PIN" desc="Manage your PIN for sensitive actions.">
+          <DistributorSecurityPinSettings />
+        </SettingsSection>
 
-        <PasskeySettings />
+        <SettingsSection title="Passkeys" desc="Manage passkeys for your account.">
+          <PasskeySettings />
+        </SettingsSection>
 
-        <PackageBinaryCapSettings />
-        <PackageBinaryRewardSettings />
+        <SettingsSection title="Package Binary cap" desc="Manage daily limits and unmatched points.">
+          <PackageBinaryCapSettings />
+        </SettingsSection>
+        <SettingsSection title="Product Binary matching" desc="Set the product units required on each leg.">
+          <ProductBinaryMatchSettings />
+        </SettingsSection>
+        <SettingsSection title="Package Binary rewards" desc="Manage reward settings for packages.">
+          <PackageBinaryRewardSettings />
+        </SettingsSection>
 
         <SettingsSection
           title="Package Binary point expiry"

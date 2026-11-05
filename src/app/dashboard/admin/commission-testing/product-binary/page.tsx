@@ -21,7 +21,7 @@ const cards = [
   [
     "completed_pairs",
     "Total Product Pairs",
-    "2 PU left + 2 PU right = 1 pair",
+    "Each pair requires the configured PU amount on both legs",
     "blue",
   ],
   [

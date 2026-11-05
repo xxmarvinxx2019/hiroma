@@ -55,7 +55,7 @@ export const ordersAndEarningsCourse = {
       points: [
         'Direct referral income is created from a qualified registration under the package rules and the sponsor account qualification.',
         'Binary commission is created only when eligible left and right registration points form a payable pair under the member package and daily cap.',
-        'Product Binary uses product units: 2 PU on the left plus 2 PU on the right form one pair, valued using the qualified rank rate when the pair completes.',
+        'Product Binary uses product units: the configured PU amount on each leg forms one pair, with payout based on the final weekly pool rate.',
         'Rank, package, qualification, caps, status, and the triggering transaction can affect the final payable amount.',
         'A displayed point, carryover volume, or allocation is not automatically withdrawable cash.',
       ],
@@ -126,7 +126,7 @@ export const ordersAndEarningsCourse = {
   quickChecks: [
     { question: 'Is an approved payout already paid?', answer: 'No. Approved is still unreleased; only released funds belong in Total Paid.' },
     { question: 'Is carryover a cash balance?', answer: 'No. It is unmatched volume that may support a future pair.' },
-    { question: 'What does 2 PU left + 2 PU right create?', answer: 'One Product Binary pair, valued using the qualified rank rate at completion.' },
+    { question: 'What creates a Product Binary pair?', answer: 'The configured PU amount on each leg creates one pair, with payout based on the final weekly pool rate.' },
     { question: 'What protects payout submission?', answer: 'A configured and valid six-digit Security PIN, in addition to payout eligibility checks.' },
     { question: 'Where should flashout appear?', answer: 'In the report for its exact source: Direct Referral, Binary Commission, or Product Binary.' },
     { question: 'What is the first step in a discrepancy?', answer: 'Match the date range, status, source type, and detailed ledger before comparing the total.' },
@@ -137,7 +137,7 @@ export const ordersAndEarningsHiroKnowledge = [
   { id: 'orders-pricing', phrases: ['reseller price', 'srp difference', 'why price different', 'order pricing', 'presyo sa reseller'], answer: 'SRP is the public or non-member price. Your signed-in reseller account receives the price allowed by the current product and membership rules. Confirm the product, quantity, seller, and total inside Hiroma before paying.' },
   { id: 'orders-status', phrases: ['order status', 'pending order', 'processing order', 'ready for pickup', 'cancel my order', 'asa na akong order'], answer: 'Orders progress through pending, processing, ready for pickup when applicable, delivered, or cancelled. A reseller can directly cancel only a pending order; contact the responsible distributor or Support Center for a later-stage correction.' },
   { id: 'earnings-wallet', phrases: ['total earned versus balance', 'available balance', 'wallet difference', 'why balance different', 'unsa akong wallet'], answer: 'Total earned is cumulative qualified income, while available balance is what currently remains eligible under the wallet and payout rules. Approved payouts are not yet released, and only actually released funds count as paid.' },
-  { id: 'earnings-sources', phrases: ['commission types', 'direct referral income', 'binary commission', 'product binary', 'where earnings come from'], answer: 'Hiroma separately records Direct Referral, Binary Commission, and Product Binary. Direct Referral comes from qualified registrations, Binary from payable left/right registration pairs, and Product Binary from 2 PU left plus 2 PU right using the qualified rank rate.' },
+  { id: 'earnings-sources', phrases: ['commission types', 'direct referral income', 'binary commission', 'product binary', 'where earnings come from'], answer: 'Hiroma separately records Direct Referral, Binary Commission, and Product Binary. Direct Referral comes from qualified registrations, Binary from payable left/right registration pairs, and Product Binary from matching the configured PU amount on each leg using the final weekly pool rate.' },
   { id: 'earnings-flashout', phrases: ['flashout meaning', 'daily cap', 'package difference', 'excess commission', 'ngano na flashout'], answer: 'Flashout is retained under an applicable rule and is not payable. It can come from a direct-referral cap or package difference, a Binary daily pair cap, or a Product Binary cap/inactivity rule. Reports must keep those sources separate.' },
   { id: 'earnings-carryover', phrases: ['carryover points', 'unmatched points', 'unpaired pu', 'is carryover money'], answer: 'Unmatched Binary points and unpaired Product Binary PU may carry forward under the plan rules. They are volume, not cash reserve, liability, or withdrawable balance.' },
   { id: 'payout-requirements', phrases: ['how to payout', 'payout requirements', 'minimum withdrawal', 'withdraw wallet', 'request payout'], answer: 'A payout request requires an approved payment method, enough available balance for the live Admin-configured minimum, no conflicting pending request, and a configured valid Security PIN. Processing follows the live cutoff and release schedule.' },

@@ -56,6 +56,10 @@ const protectedTables = [
   "product_binary_funding_lots",
   "product_binary_funding_consumptions",
   "product_binary_settlement_jobs",
+  "product_binary_pool_weeks",
+  "product_binary_pool_orders",
+  "product_binary_pool_pairs",
+  "product_binary_pool_allocations",
   "orders",
   "order_items",
   "inventory_movements",
@@ -268,6 +272,33 @@ async function main() {
     if (missingTables.length > 0) {
       throw new Error(
         `Financial schema is incomplete; missing protected tables: ${quoteSummary([...missingTables])}. Apply migrations with the owner role first.`,
+      );
+    }
+
+    const weeklyAccess = await client.query<{ name: string; safe: boolean }>(`
+      SELECT name, has_table_privilege(current_user, name, 'SELECT')
+        AND NOT has_any_column_privilege(current_user, name, 'INSERT,UPDATE')
+        AND NOT has_table_privilege(current_user, name, 'DELETE') AS safe
+      FROM unnest(ARRAY[
+        'public.product_binary_pool_weeks', 'public.product_binary_pool_orders',
+        'public.product_binary_pool_pairs', 'public.product_binary_pool_allocations'
+      ]) AS tables(name)
+      UNION ALL
+      SELECT name, has_function_privilege(current_user, name, 'EXECUTE')
+      FROM unnest(ARRAY[
+        'public.queue_product_binary_pool_order(uuid,timestamptz,integer)',
+        'public.close_product_binary_pool_week(date)',
+        'public.release_product_binary_pool_week(date)'
+      ]) AS functions(name)
+    `);
+    const [directCredit] = (await client.query<{ allowed: boolean }>(`
+      SELECT has_function_privilege(current_user, 'public.credit_product_binary_pool_allocation(date,text)', 'EXECUTE') AS allowed
+    `)).rows;
+    if (directCredit.allowed) throw new Error('Runtime can bypass synchronized weekly release.');
+    const unsafeWeeklyAccess = weeklyAccess.rows.filter(row => !row.safe);
+    if (unsafeWeeklyAccess.length) {
+      throw new Error(
+        `Weekly Product Binary requires read-only pool tables and executable guarded entry points: ${quoteSummary(unsafeWeeklyAccess.map(row => row.name))}.`,
       );
     }
 

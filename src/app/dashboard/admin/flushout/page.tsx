@@ -95,9 +95,13 @@ function DonutChart({ breakdown, total }: { breakdown: PackageBreakdown; total: 
   )
 }
 
+type RetainedPool = { week_start: string; week_end: string; budget: string; allocated: string; retained: string }
+
 const PAGE_SIZE = 15
 
 export default function AdminFlushoutPage() {
+  const [nonMemberRetained, setNonMemberRetained] = useState<{ units: string; retained: string } | null>(null)
+  const [retainedPools, setRetainedPools] = useState<RetainedPool[] | null>(null)
   const [records, setRecords]           = useState<FlushoutRecord[]>([])
   const [summary, setSummary]           = useState<Summary>({ total_pairs_today: 0, total_value_today: 0, affected_members: 0, avg_flushout: 0 })
   const [breakdown, setBreakdown]       = useState<PackageBreakdown>({})
@@ -124,6 +128,8 @@ export default function AdminFlushoutPage() {
     fetch(`/api/admin/flushout?${params}`)
       .then(r => r.json())
       .then(d => {
+        setNonMemberRetained(d.product_binary_non_member_retained ?? null)
+        setRetainedPools(d.product_binary_retained_pools ?? null)
         setRecords(d.records || [])
         setSummary(d.summary || { total_pairs_today: 0, total_value_today: 0, affected_members: 0, avg_flushout: 0 })
         setBreakdown(d.package_breakdown || {})
@@ -386,6 +392,41 @@ export default function AdminFlushoutPage() {
           )}
         </div>
       </div>
+
+      {nonMemberRetained && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="font-semibold text-[#0D1B3E]">Product Binary — Inventory Reserve Released on Non-Member Sales</h2>
+          <p className="mt-1 text-sm text-slate-600">{BigInt(nonMemberRetained.units).toLocaleString('en-PH')} funded bottles sold to non-members in this date range.</p>
+          <p className="mt-2 text-sm">Gross reserve released <strong>{fmt(Number(nonMemberRetained.retained))}</strong></p>
+        </section>
+      )}
+
+      {retainedPools !== null && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="font-semibold text-[#0D1B3E]">Product Binary Bonus — Unused Weekly Pool</h2>
+          <p className="mt-1 text-xs text-slate-600">Finalized weeks by Sunday cutoff date. Retained budget equals the weekly pool less all reseller allocations, including credits still pending.</p>
+          <p className="mt-2 text-sm">Retained by Hiroma <strong>{fmt(retainedPools.reduce((total, pool) => total + Number(pool.retained), 0))}</strong></p>
+          {retainedPools.length ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-medium">View finalized weeks ({retainedPools.length})</summary>
+              <div className="mt-2 max-h-80 overflow-auto">
+              <table className="w-full text-left text-sm">
+                <thead><tr className="border-b"><th className="p-2">Week</th><th className="p-2 text-right">Pool budget</th><th className="p-2 text-right">Allocated</th><th className="p-2 text-right">Retained by Hiroma</th></tr></thead>
+                <tbody>{retainedPools.map(pool => (
+                  <tr key={pool.week_start} className="border-b border-slate-100">
+                    <td className="whitespace-nowrap p-2">{pool.week_start} – {pool.week_end}</td>
+                    <td className="p-2 text-right">{fmt(Number(pool.budget))}</td>
+                    <td className="p-2 text-right">{fmt(Number(pool.allocated))}</td>
+                    <td className="p-2 text-right font-semibold">{fmt(Number(pool.retained))}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              </div>
+            </details>
+          ) : <p className="mt-3 text-sm text-slate-500">No finalized Product Binary weeks in this date range.</p>}
+        </section>
+      )}
+
 
     </div>
   )
