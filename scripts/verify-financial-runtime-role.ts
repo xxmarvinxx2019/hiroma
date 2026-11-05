@@ -288,7 +288,10 @@ async function main() {
       FROM unnest(ARRAY[
         'public.queue_product_binary_pool_order(uuid,timestamptz,integer)',
         'public.close_product_binary_pool_week(date)',
-        'public.release_product_binary_pool_week(date)'
+        'public.release_product_binary_pool_week(date)',
+        'public.verify_product_binary_week_readiness(date)',
+        'public.retry_deferred_product_binary_credit(date,text)',
+        'public.expire_deferred_product_binary_credits()'
       ]) AS functions(name)
     `);
     const [directCredit] = (await client.query<{ allowed: boolean }>(`

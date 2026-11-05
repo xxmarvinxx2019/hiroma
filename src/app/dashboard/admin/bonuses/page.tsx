@@ -34,15 +34,17 @@ export default async function BonusesPage({ searchParams }: {
       start: new Date(`${date.slice(0, 7)}-01T00:00:00+08:00`),
       endExclusive: new Date(Date.UTC(year, month, 1) - 8 * 60 * 60 * 1000),
     }
-  const { bottles, actualPaid, pool, finalized, pendingCredit, funding, monthly, inventoryReserve, blockedRecipients, nonMemberFunding } = await prisma.$transaction(async tx => {
+  const { bottles, actualPaid, pool, finalized, funding, monthly, inventoryReserve, blockedRecipients, nonMemberFunding, readiness, releaseSummary, unreleased } = await prisma.$transaction(async tx => {
     const [schema] = await tx.$queryRaw<{ ready: boolean }[]>`
       SELECT to_regclass('public.product_binary_pool_weeks') IS NOT NULL AS ready
     `
     const weekKey = new Date(start.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const [weekRecord] = schema.ready && period === 'weekly' ? await tx.$queryRaw<{
-      max_rate_centavos: number; allocated_centavos: bigint | null
+      max_rate_centavos: number; allocated_centavos: bigint | null; checked: string | null; blocker: string | null
     }[]>`
-      SELECT max_rate_centavos, allocated_centavos FROM product_binary_pool_weeks WHERE week_start = ${weekKey}::date
+      SELECT max_rate_centavos, allocated_centavos,
+        to_jsonb(w)->>'readiness_checked_at' AS checked, to_jsonb(w)->>'readiness_blocker' AS blocker
+      FROM product_binary_pool_weeks w WHERE week_start = ${weekKey}::date
     ` : []
     const [volume] = weekRecord ? await tx.$queryRaw<{ bottles: bigint }[]>`
       SELECT COALESCE(SUM(COALESCE((to_jsonb(o)->>'funded_units')::integer, e.eligible_units)), 0)::bigint AS bottles
@@ -73,7 +75,32 @@ export default async function BonusesPage({ searchParams }: {
           (u.role <> 'reseller' OR u.status <> 'active' OR w.id IS NULL))::int AS blocked
       FROM product_binary_pool_allocations a JOIN users u ON u.id = a.recipient_user_id
       LEFT JOIN wallets w ON w.user_id = u.id
-      WHERE a.week_start = ${weekKey}::date AND a.commission_id IS NULL
+      WHERE a.week_start = ${weekKey}::date AND a.commission_id IS NULL AND to_jsonb(a)->>'retained_at' IS NULL
+    ` : []
+    const [releaseSummary] = weekRecord ? await tx.$queryRaw<{
+      credited: string; pending: string; retained: string; pending_count: number
+    }[]>`
+      SELECT (COALESCE(SUM(amount_centavos) FILTER (WHERE commission_id IS NOT NULL), 0)::numeric / 100)::text AS credited,
+        (COALESCE(SUM(amount_centavos) FILTER (WHERE commission_id IS NULL AND to_jsonb(a)->>'retained_at' IS NULL), 0)::numeric / 100)::text AS pending,
+        (COALESCE(SUM(amount_centavos) FILTER (WHERE to_jsonb(a)->>'retained_at' IS NOT NULL), 0)::numeric / 100)::text AS retained,
+        COUNT(*) FILTER (WHERE commission_id IS NULL AND amount_centavos > 0)::int AS pending_count
+      FROM public.product_binary_pool_allocations a WHERE week_start = ${weekKey}::date
+    ` : []
+    const unreleased = weekRecord ? await tx.$queryRaw<{
+      id: string; name: string; member: string; amount: string; reason: string
+    }[]>`
+      SELECT u.id, u.full_name AS name, u.member_id AS member, (a.amount_centavos::numeric / 100)::text AS amount,
+        COALESCE(to_jsonb(a)->>'retained_reason', CASE
+          WHEN u.status = 'inactive' THEN 'Account inactive'
+          WHEN u.status = 'suspended' THEN 'Account suspended'
+          WHEN wallet.id IS NULL THEN 'Wallet missing'
+          WHEN w.released_at IS NULL THEN COALESCE(to_jsonb(w)->>'readiness_blocker', 'Awaiting weekly release')
+          ELSE 'Awaiting credit retry'
+        END) AS reason
+      FROM public.product_binary_pool_allocations a JOIN public.product_binary_pool_weeks w USING (week_start)
+      JOIN public.users u ON u.id=a.recipient_user_id LEFT JOIN public.wallets wallet ON wallet.user_id=u.id
+      WHERE a.week_start=${weekKey}::date AND a.commission_id IS NULL AND a.amount_centavos > 0
+      ORDER BY u.member_id LIMIT 100
     ` : []
     const [inventorySchema] = await tx.$queryRaw<{ ready: boolean }[]>`
       SELECT to_regclass('public.product_binary_inventory_reserves') IS NOT NULL AS ready
@@ -116,10 +143,12 @@ export default async function BonusesPage({ searchParams }: {
             WHERE remaining_amount > 0 AND allocated_at <= CURRENT_TIMESTAMP)
             - ${inventoryReserve?.reserved ?? '0'}::numeric
             - ${retainedFunding?.amount ?? '0'}::numeric
-            - ${netNonMemberFunding?.amount ?? 0}::numeric) AS reserve,
+            - ${netNonMemberFunding?.amount ?? 0}::numeric
+            - (SELECT COALESCE(SUM(amount_centavos), 0)::numeric / 100 FROM product_binary_pool_allocations a
+               WHERE to_jsonb(a)->>'retained_at' IS NOT NULL)) AS reserve,
           (SELECT COALESCE(SUM(amount_centavos), 0)::numeric / 100
             FROM product_binary_pool_allocations
-            WHERE commission_id IS NULL) AS outstanding
+            WHERE commission_id IS NULL AND to_jsonb(product_binary_pool_allocations)->>'retained_at' IS NULL) AS outstanding
       )
       SELECT reserve::text, outstanding::text, GREATEST(0, outstanding - reserve)::text AS shortfall
       FROM balances
@@ -145,8 +174,10 @@ export default async function BonusesPage({ searchParams }: {
       inventoryReserve,
       nonMemberFunding: netNonMemberFunding,
       monthly,
+      releaseSummary,
+      unreleased,
+      readiness: weekRecord?.checked ? { checked: weekRecord.checked, blocker: weekRecord.blocker } : null,
       blockedRecipients: pending?.blocked ?? 0,
-      pendingCredit: Number(pending?.cents ?? 0) / 100,
       finalized: weekRecord?.allocated_centavos ?? null,
     }
   }, { isolationLevel: 'RepeatableRead' })
@@ -189,8 +220,28 @@ export default async function BonusesPage({ searchParams }: {
           ))}
         </dl>
         <p className="mt-4 border-t border-slate-200 pt-3 text-sm">Actual wallet credits in this date range <strong>{pesos.format(actualPaid)}</strong></p>
-        {finalized !== null && <p className="mt-2 text-sm">Finalized commissions pending wallet credit <strong>{pesos.format(pendingCredit)}</strong></p>}
-        {blockedRecipients > 0 && <p role="status" className="mt-2 text-sm text-amber-800">Release blocked by {blockedRecipients} inactive or missing-wallet recipients.</p>}
+        {period === 'weekly' && (
+          <div className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
+            <h3 className="mb-2 font-semibold">Weekly wallet release</h3>
+            {finalized === null && <p className="mb-2 text-slate-600">No finalized payout for this week yet.</p>}
+            <p><strong>Credited</strong> {pesos.format(Number((releaseSummary?.credited ?? 0)))}</p>
+            <p><strong>Pending wallet credit</strong> {pesos.format(Number((releaseSummary?.pending ?? 0)))}</p>
+            <p><strong>Retained after next cutoff</strong> {pesos.format(Number((releaseSummary?.retained ?? 0)))}</p>
+            <details className="mt-2">
+              <summary className="cursor-pointer font-medium">View uncredited recipients ({(releaseSummary?.pending_count ?? 0)})</summary>
+              {unreleased.length === 0 && <p className="mt-2 text-xs text-slate-600">No uncredited recipients for this week.</p>}
+              <ul className="mt-2 max-h-80 divide-y overflow-auto">
+                {unreleased.map(row => <li key={row.id} className="py-2">
+                  <strong>{row.name}</strong> · {row.member} · {pesos.format(Number(row.amount))}
+                  <p className="text-xs text-slate-600">{row.reason}</p>
+                </li>)}
+              </ul>
+              {(releaseSummary?.pending_count ?? 0) > unreleased.length && <p className="mt-2 text-xs">Showing the first {unreleased.length} recipients.</p>}
+            </details>
+          </div>
+        )}
+        {readiness && <p className="mt-2 text-sm">Last release check <strong>{readiness.blocker ? 'Held' : 'Ready'}</strong> · {manilaTime.format(new Date(readiness.checked))} Philippine time.{readiness.blocker && ` ${readiness.blocker}`}</p>}
+        {blockedRecipients > 0 && <p role="status" className="mt-2 text-sm text-amber-800">{blockedRecipients} recipient bonuses are pending account activation or wallet setup.</p>}
         <p className="mt-2 text-xs text-slate-600">{manilaTime.format(start)} through {manilaTime.format(new Date(endExclusive.getTime() - 60_000))} Philippine time.</p>
         <p className="text-xs text-slate-600">Snapshot {manilaTime.format(asOf)} Philippine time.</p>
       </section>
