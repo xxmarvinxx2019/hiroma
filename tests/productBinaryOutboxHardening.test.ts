@@ -24,7 +24,7 @@ test('temporary Vercel Hobby schedule is daily and the Pro cutover is tracked', 
     (cron) => cron.path === '/api/cron/process-product-binary',
   )
 
-  assert.equal(worker?.schedule, '0 16 * * *')
+  assert.equal(worker?.schedule, '0 2 * * *')
   assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
   assert.match(rollout, /restore `\*\/5 \* \* \* \*`/)
 })
