@@ -26,9 +26,9 @@ export async function GET() {
           WHERE week_start = ${week}::date) AS max_rate
       ` : []
       const active = config?.active === true
-      const [latest] = active ? await tx.$queryRaw<{ week: string; amount: string; credited: boolean }[]>`
+      const [latest] = active ? await tx.$queryRaw<{ week: string; amount: string; credited: boolean; retained: boolean }[]>`
         SELECT to_char(a.week_start, 'YYYY-MM-DD') AS week, a.amount_centavos::text AS amount,
-          a.commission_id IS NOT NULL AS credited
+          a.commission_id IS NOT NULL AS credited, to_jsonb(a)->>'retained_at' IS NOT NULL AS retained
         FROM product_binary_pool_allocations a JOIN product_binary_pool_weeks w USING (week_start)
         WHERE a.recipient_user_id = ${user.id} AND w.closed_at IS NOT NULL
         ORDER BY a.week_start DESC LIMIT 1
