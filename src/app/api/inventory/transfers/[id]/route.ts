@@ -249,6 +249,9 @@ export async function PATCH(
     if (error instanceof Error && error.message === 'TRANSFER_ALREADY_RESOLVED') {
       return NextResponse.json({ error: 'This transfer was already resolved by another request.' }, { status: 409 })
     }
+    if (error instanceof Error && error.message.includes('Branch receipt requires PHP 5 of available Product Binary funding')) {
+      return NextResponse.json({ error: 'Hiroma needs ₱5 in available Product Binary funding per eligible bottle before this branch delivery can be accepted.' }, { status: 409 })
+    }
     console.error('[INVENTORY TRANSFER RECEIVING ERROR]', error)
     return NextResponse.json({ error: 'Unable to record delivery receiving.' }, { status: 500 })
   }

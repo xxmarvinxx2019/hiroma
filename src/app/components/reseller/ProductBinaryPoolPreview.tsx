@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 
 type Preview = {
   mode: 'simulation' | 'weekly'
-  latest: { week: string; amount: string; credited: boolean } | null
+  latest: { week: string; amount: string; credited: boolean; retained: boolean } | null
   endExclusive: string
   asOf: string
   qualifiedPairs: string
@@ -86,7 +86,7 @@ export default function ProductBinaryPoolPreview({ totalEarned }: { totalEarned:
         </div>
       </>}
       {preview?.latest && <p className="mt-3 text-xs text-slate-600">
-        Last finalized week ({preview.latest.week}) · {pesos.format(Number(preview.latest.amount) / 100)} · {preview.latest.credited ? 'Credited' : Number(preview.latest.amount) === 0 ? 'No payout' : 'Pending credit'}
+        Last finalized week ({preview.latest.week}) · {pesos.format(Number(preview.latest.amount) / 100)} · {preview.latest.credited ? 'Credited' : preview.latest.retained ? 'Expired at next cutoff' : Number(preview.latest.amount) === 0 ? 'No payout' : 'Pending credit'}
       </p>}
       {failed ? <p role="status" className="mt-2 text-xs text-red-700">Unable to refresh the preview. Retrying automatically.</p>
         : !preview && <p role="status" className="mt-2 text-xs text-slate-600">Loading pool preview…</p>}
