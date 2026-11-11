@@ -21,9 +21,9 @@ At the same Pro cutover, change `/api/cron/expire-unpaid-orders` to
 This daily schedule is temporary and is not the approved nationwide-production
 capacity. The worker leases at most ten due obligations per invocation, so a
 daily retry can delay recovery and accumulate a backlog. Before the public
-production rollout, upgrade the Vercel project to Pro and set
-`PRODUCT_BINARY_FREQUENT_CRON=true` in the Vercel production build environment
-to enable `* * * * *`. Deploy, verify the cron in Vercel, and force one safe staging
+production rollout, use a Vercel plan that supports per-minute cron and set
+the Product Binary schedule in `vercel.json` to `* * * * *`. Deploy, verify
+the cron in Vercel, and force one safe staging
 retry to prove that the job completes exactly once.
 
 The worker reads funded orders and source pairs in pages of 5,000, then

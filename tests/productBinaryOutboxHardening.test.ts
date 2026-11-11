@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { config as vercel } from '../vercel'
 
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
 
@@ -16,15 +15,18 @@ test('Product Binary cron atomically leases due obligations', () => {
   assert.match(cron, /RETURNING jobs\.order_id/)
 })
 
-test('Product Binary cron supports a daily preview and per-minute production runs', () => {
+test('temporary Vercel Hobby schedule is daily and the Pro cutover is tracked', () => {
+  const vercel = JSON.parse(read('../vercel.json')) as {
+    crons: Array<{ path: string; schedule: string }>
+  }
   const rollout = read('../docs/financial-hardening-rollout.md')
   const worker = vercel.crons.find(
     (cron) => cron.path === '/api/cron/process-product-binary',
   )
 
-  assert.equal(worker?.schedule, process.env.PRODUCT_BINARY_FREQUENT_CRON === 'true' ? '* * * * *' : '0 2 * * *')
+  assert.equal(worker?.schedule, '0 2 * * *')
   assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
-  assert.match(rollout, /PRODUCT_BINARY_FREQUENT_CRON=true/)
+  assert.match(rollout, /Product Binary schedule in `vercel\.json` to `\* \* \* \* \*`/)
 })
 
 test('Product Binary failures use bounded exponential retry and remain durable', () => {

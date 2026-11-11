@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { config as vercel } from '../vercel'
 import {
   DEFAULT_BINARY_POINT_EXPIRY_YEARS,
   validateBinaryPointExpiryYears,
@@ -12,6 +11,7 @@ const settlement = readFileSync('src/app/lib/binaryCommission.ts', 'utf8')
 const expiry = readFileSync('src/app/lib/binaryPointExpiry.ts', 'utf8')
 const setting = readFileSync('src/app/api/admin/settings/binary-point-expiry/route.ts', 'utf8')
 const cron = readFileSync('src/app/api/cron/expire-binary-points/route.ts', 'utf8')
+const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: Array<{ path: string }> }
 
 test('Package Binary points default to a configurable three-year term', () => {
   assert.equal(DEFAULT_BINARY_POINT_EXPIRY_YEARS, 3)
