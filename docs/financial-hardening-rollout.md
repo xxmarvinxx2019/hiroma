@@ -6,9 +6,10 @@ to or above the protected obligations recorded by the system.
 
 ## Temporary Vercel Hobby preview schedule
 
-While the project is being sampled on Vercel Hobby, the durable Product Binary
-retry worker runs once daily at `0 2 * * *` (nominally 10:00 AM in
-Asia/Manila). A paid and delivered order still attempts Product Binary
+The Product Binary scheduler defaults to once per minute. A Vercel Hobby
+preview can explicitly set `PRODUCT_BINARY_FREQUENT_CRON=false` to use
+`0 2 * * *` (nominally 10:00 AM in Asia/Manila).
+A paid and delivered order still attempts Product Binary
 settlement immediately; this cron is the safety net for obligations that remain
 pending or fail because of a temporary error.
 
@@ -21,10 +22,22 @@ At the same Pro cutover, change `/api/cron/expire-unpaid-orders` to
 This daily schedule is temporary and is not the approved nationwide-production
 capacity. The worker leases at most ten due obligations per invocation, so a
 daily retry can delay recovery and accumulate a backlog. Before the public
-production rollout, upgrade the Vercel project to Pro, restore `*/5 * * * *`,
-deploy, verify the cron in Vercel, and force one safe staging retry to prove that
-the job completes exactly once. Do not remove the durable job, lease,
-idempotency, funding, or audit protections when changing only the schedule.
+production rollout, upgrade the Vercel project to Pro and set
+`PRODUCT_BINARY_FREQUENT_CRON=true` in the Vercel production build environment
+to enable `* * * * *`. Deploy, verify the cron in Vercel, and force one safe staging
+retry to prove that the job completes exactly once.
+
+The worker reads funded orders and source pairs in pages of 5,000, then
+prepares and verifies recipient allocations in pages of 1,000. It saves each
+page before continuing. Preparation freezes that week's source membership.
+Verified allocation amounts are sealed. The worker rechecks their funding
+hourly, including Monday and Tuesday in Philippine time, and again before
+release. Deferred credits get their own processing window before new
+payouts. Wednesday crediting can start at 10:00 AM Philippine time.
+Each committed batch handles up to 250 recipients. A subsequent invocation
+resumes from the uncredited allocations, including after an interruption.
+Measure staging throughput using the production scheduler cadence before
+approving a release for the expected weekly recipient volume.
 
 ## Protected invariants
 

@@ -38,6 +38,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (reseller.role !== 'reseller') {
       return NextResponse.json({ error: 'Reseller not found' }, { status: 404 })
     }
+    if (reseller.status === 'suspended') {
+      return NextResponse.json({ error: 'Suspended reseller accounts are permanently disabled.' }, { status: 409 })
+    }
 
     const isDeactivating = reseller.status !== 'inactive' && status === 'inactive'
 
