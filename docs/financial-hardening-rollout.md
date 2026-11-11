@@ -6,9 +6,8 @@ to or above the protected obligations recorded by the system.
 
 ## Temporary Vercel Hobby preview schedule
 
-The Product Binary scheduler defaults to once per minute. A Vercel Hobby
-preview can explicitly set `PRODUCT_BINARY_FREQUENT_CRON=false` to use
-`0 2 * * *` (nominally 10:00 AM in Asia/Manila).
+The Product Binary scheduler defaults to `0 2 * * *` (nominally 10:00 AM
+in Asia/Manila), which supports Vercel Hobby previews.
 A paid and delivered order still attempts Product Binary
 settlement immediately; this cron is the safety net for obligations that remain
 pending or fail because of a temporary error.

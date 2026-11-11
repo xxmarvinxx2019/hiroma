@@ -301,7 +301,8 @@ async function main() {
         'public.verify_product_binary_week_readiness(date)',
         'public.retry_deferred_product_binary_credit(date,text)',
         'public.expire_deferred_product_binary_credits()',
-        'public.product_binary_weekly_pair_eligible(text)'
+        'public.product_binary_weekly_pair_eligible(text)',
+        'public.product_binary_surviving_pairs(date,text)'
       ]) AS functions(name)
     `);
     const [directCredit] = (await client.query<{ allowed: boolean }>(`

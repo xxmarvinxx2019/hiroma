@@ -4,7 +4,7 @@ export const config = {
     { path: '/api/cron/release-payouts', schedule: '0 16 * * *' },
     {
       path: '/api/cron/process-product-binary',
-      schedule: process.env.PRODUCT_BINARY_FREQUENT_CRON === 'false' ? '0 2 * * *' : '* * * * *',
+      schedule: process.env.PRODUCT_BINARY_FREQUENT_CRON === 'true' ? '* * * * *' : '0 2 * * *',
     },
     { path: '/api/cron/reset-ranks', schedule: '0 16 * * *' },
     { path: '/api/cron/expire-pin-requests', schedule: '0 16 * * *' },

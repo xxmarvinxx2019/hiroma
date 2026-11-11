@@ -22,7 +22,7 @@ test('Product Binary cron supports a daily preview and per-minute production run
     (cron) => cron.path === '/api/cron/process-product-binary',
   )
 
-  assert.equal(worker?.schedule, process.env.PRODUCT_BINARY_FREQUENT_CRON === 'false' ? '0 2 * * *' : '* * * * *')
+  assert.equal(worker?.schedule, process.env.PRODUCT_BINARY_FREQUENT_CRON === 'true' ? '* * * * *' : '0 2 * * *')
   assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
   assert.match(rollout, /PRODUCT_BINARY_FREQUENT_CRON=true/)
 })

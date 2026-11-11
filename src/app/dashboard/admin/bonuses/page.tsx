@@ -182,13 +182,20 @@ export default async function BonusesPage({ searchParams }: {
       weeks: number; budget: string; allocated: string; retained: string
     }[]>`
       SELECT COUNT(*)::int AS weeks,
-        (COALESCE(SUM(pool_centavos), 0)::numeric / 100)::text AS budget,
-        (COALESCE(SUM(allocated_centavos), 0)::numeric / 100)::text AS allocated,
-        (COALESCE(SUM(pool_centavos - allocated_centavos), 0)::numeric / 100)::text AS retained
-      FROM product_binary_pool_weeks
-      WHERE closed_at IS NOT NULL
-        AND week_start + 6 >= (${start}::timestamptz AT TIME ZONE 'Asia/Manila')::date
-        AND week_start + 6 < (${endExclusive}::timestamptz AT TIME ZONE 'Asia/Manila')::date
+        (COALESCE(SUM(w.pool_centavos), 0)::numeric / 100)::text AS budget,
+        (COALESCE(SUM(w.allocated_centavos - account.retained_centavos), 0)::numeric / 100)::text AS allocated,
+        (COALESCE(SUM(w.pool_centavos - w.allocated_centavos + account.retained_centavos), 0)::numeric / 100)::text AS retained
+      FROM product_binary_pool_weeks w
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(CASE
+          WHEN to_jsonb(a)->>'retained_at' IS NOT NULL THEN a.amount_centavos
+          ELSE COALESCE((to_jsonb(a)->>'partial_retained_centavos')::bigint, 0)
+        END), 0) AS retained_centavos
+        FROM product_binary_pool_allocations a WHERE a.week_start = w.week_start
+      ) account
+      WHERE w.closed_at IS NOT NULL
+        AND w.week_start + 6 >= (${start}::timestamptz AT TIME ZONE 'Asia/Manila')::date
+        AND w.week_start + 6 < (${endExclusive}::timestamptz AT TIME ZONE 'Asia/Manila')::date
     ` : []
     const maxRate = BigInt(weekRecord?.max_rate_centavos ?? (await getProductBinaryPairAmount(tx)) * 100)
     return {
@@ -294,7 +301,7 @@ export default async function BonusesPage({ searchParams }: {
           <dl className="mt-4 grid gap-3 sm:grid-cols-3">
             {[
               ['Finalized pool budget', monthly.budget],
-              ['Finalized commissions', monthly.allocated],
+              ['Net finalized commissions', monthly.allocated],
               ['Retained by Hiroma', monthly.retained],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg bg-slate-50 p-3">
