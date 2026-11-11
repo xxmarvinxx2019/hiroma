@@ -4,27 +4,12 @@ This release makes commission and payout correctness a database invariant. It
 does not replace treasury management: Hiroma must still keep actual cash equal
 to or above the protected obligations recorded by the system.
 
-## Temporary Vercel Hobby preview schedule
+## Product Binary cron schedule
 
-The Product Binary scheduler defaults to `0 2 * * *` (nominally 10:00 AM
-in Asia/Manila), which supports Vercel Hobby previews.
-A paid and delivered order still attempts Product Binary
-settlement immediately; this cron is the safety net for obligations that remain
-pending or fail because of a temporary error.
-
-The unpaid-order expiry worker is also temporarily scheduled once daily on
-Hobby. Its 48-hour `payment_due_at` remains authoritative: late proof is
-rejected immediately, while reserved stock is released by the next daily sweep.
-At the same Pro cutover, change `/api/cron/expire-unpaid-orders` to
-`0 * * * *` so automatic stock release occurs within one hour of expiry.
-
-This daily schedule is temporary and is not the approved nationwide-production
-capacity. The worker leases at most ten due obligations per invocation, so a
-daily retry can delay recovery and accumulate a backlog. Before the public
-production rollout, use a Vercel plan that supports per-minute cron and set
-the Product Binary schedule in `vercel.json` to `* * * * *`. Deploy, verify
-the cron in Vercel, and force one safe staging
-retry to prove that the job completes exactly once.
+Vercel invokes the Product Binary worker every minute on Pro or Enterprise.
+Wednesday wallet crediting starts at 10:00 AM Philippine time. Subsequent
+invocations resume any batches that are still pending. Confirm the hosted
+schedule and verify a staging retry before approving live payouts.
 
 The worker reads funded orders and source pairs in pages of 5,000, then
 prepares and verifies recipient allocations in pages of 1,000. It saves each

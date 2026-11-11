@@ -15,18 +15,15 @@ test('Product Binary cron atomically leases due obligations', () => {
   assert.match(cron, /RETURNING jobs\.order_id/)
 })
 
-test('temporary Vercel Hobby schedule is daily and the Pro cutover is tracked', () => {
+test('Product Binary worker runs every minute in production', () => {
   const vercel = JSON.parse(read('../vercel.json')) as {
     crons: Array<{ path: string; schedule: string }>
   }
-  const rollout = read('../docs/financial-hardening-rollout.md')
   const worker = vercel.crons.find(
     (cron) => cron.path === '/api/cron/process-product-binary',
   )
 
-  assert.equal(worker?.schedule, '0 2 * * *')
-  assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
-  assert.match(rollout, /Product Binary schedule in `vercel\.json` to `\* \* \* \* \*`/)
+  assert.equal(worker?.schedule, '* * * * *')
 })
 
 test('Product Binary failures use bounded exponential retry and remain durable', () => {
