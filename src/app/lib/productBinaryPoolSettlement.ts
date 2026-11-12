@@ -138,11 +138,20 @@ export async function settleClosedProductBinaryPools(releaseDeadline = Date.now(
           if (validationBudget <= 0) throw new Error('Weekly release exceeded its transaction budget.')
           await tx.$queryRaw`SELECT set_config('statement_timeout', ${String(validationBudget)}, true)`
           await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`
-          return release.credited
+          // A batch may retain expired allocations without crediting a wallet.
+          // The database marks the week released only when no eligible work remains.
+          const [state] = release.credited === 0 ? await tx.$queryRaw<{ complete: boolean }[]>`
+            SELECT released_at IS NOT NULL AS complete
+            FROM public.product_binary_pool_weeks WHERE week_start = ${week}::date
+          ` : []
+          return { credited: release.credited, complete: state?.complete === true }
         }, { maxWait: 1_000, timeout: remaining })
-        if (result < 0) held++
-        if (result <= 0) break
-        credited += result
+        if (result.credited < 0) {
+          held++
+          break
+        }
+        credited += result.credited
+        if (result.complete) break
       } catch (error) {
         failed++
         console.error('[PRODUCT BINARY WEEKLY RELEASE]', error)

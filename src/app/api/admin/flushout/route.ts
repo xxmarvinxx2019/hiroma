@@ -179,18 +179,28 @@ export async function GET(req: NextRequest) {
       SELECT to_regclass('public.product_binary_pool_weeks') IS NOT NULL AS ready
     `
     const retainedPools = poolSchema.ready && !user.is_staff ? await prisma.$queryRaw<{
-      week_start: string; week_end: string; budget: string; allocated: string; retained: string
+      week_start: string; week_end: string; budget: string; allocated: string
+      unused: string; account_retained: string; retained: string
     }[]>`
-      SELECT to_char(week_start, 'YYYY-MM-DD') AS week_start,
-        to_char(week_start + 6, 'YYYY-MM-DD') AS week_end,
-        (pool_centavos::numeric / 100)::text AS budget,
-        (allocated_centavos::numeric / 100)::text AS allocated,
-        ((pool_centavos - allocated_centavos)::numeric / 100)::text AS retained
-      FROM product_binary_pool_weeks
-      WHERE closed_at IS NOT NULL
-        AND week_start + 6 >= ${dateFrom || '2020-01-01'}::date
-        AND week_start + 6 <= COALESCE(NULLIF(${dateTo}, '')::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date)
-      ORDER BY week_start DESC
+      SELECT to_char(w.week_start, 'YYYY-MM-DD') AS week_start,
+        to_char(w.week_start + 6, 'YYYY-MM-DD') AS week_end,
+        (w.pool_centavos::numeric / 100)::text AS budget,
+        ((w.allocated_centavos - account.retained_centavos)::numeric / 100)::text AS allocated,
+        ((w.pool_centavos - w.allocated_centavos)::numeric / 100)::text AS unused,
+        (account.retained_centavos::numeric / 100)::text AS account_retained,
+        ((w.pool_centavos - w.allocated_centavos + account.retained_centavos)::numeric / 100)::text AS retained
+      FROM public.product_binary_pool_weeks w
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(CASE
+          WHEN to_jsonb(a)->>'retained_at' IS NOT NULL THEN a.amount_centavos
+          ELSE COALESCE((to_jsonb(a)->>'partial_retained_centavos')::bigint, 0)
+        END), 0) AS retained_centavos
+        FROM public.product_binary_pool_allocations a WHERE a.week_start = w.week_start
+      ) account
+      WHERE w.closed_at IS NOT NULL
+        AND w.week_start + 6 >= ${dateFrom || '2020-01-01'}::date
+        AND w.week_start + 6 <= COALESCE(NULLIF(${dateTo}, '')::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date)
+      ORDER BY w.week_start DESC
     ` : null
 
     const [nonMemberSchema] = await prisma.$queryRaw<{ ready: boolean }[]>`

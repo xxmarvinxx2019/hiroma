@@ -95,7 +95,10 @@ function DonutChart({ breakdown, total }: { breakdown: PackageBreakdown; total: 
   )
 }
 
-type RetainedPool = { week_start: string; week_end: string; budget: string; allocated: string; retained: string }
+type RetainedPool = {
+  week_start: string; week_end: string; budget: string; allocated: string
+  unused: string; account_retained: string; retained: string
+}
 
 const PAGE_SIZE = 15
 
@@ -403,20 +406,22 @@ export default function AdminFlushoutPage() {
 
       {retainedPools !== null && (
         <section className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="font-semibold text-[#0D1B3E]">Product Binary Bonus — Unused Weekly Pool</h2>
-          <p className="mt-1 text-xs text-slate-600">Finalized weeks by Sunday cutoff date. Retained budget equals the weekly pool less all reseller allocations, including credits still pending.</p>
+          <h2 className="font-semibold text-[#0D1B3E]">Retained Product Binary Bonuses</h2>
+          <p className="mt-1 text-xs text-slate-600">Finalized weeks by Sunday cutoff date. Retained amounts include unused pool funds and bonuses forfeited under the account policy. Net allocations include credits still pending.</p>
           <p className="mt-2 text-sm">Retained by Hiroma <strong>{fmt(retainedPools.reduce((total, pool) => total + Number(pool.retained), 0))}</strong></p>
           {retainedPools.length ? (
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-medium">View finalized weeks ({retainedPools.length})</summary>
               <div className="mt-2 max-h-80 overflow-auto">
               <table className="w-full text-left text-sm">
-                <thead><tr className="border-b"><th className="p-2">Week</th><th className="p-2 text-right">Pool budget</th><th className="p-2 text-right">Allocated</th><th className="p-2 text-right">Retained by Hiroma</th></tr></thead>
+                <thead><tr className="border-b"><th className="p-2">Week</th><th className="p-2 text-right">Pool budget</th><th className="p-2 text-right">Net allocated</th><th className="p-2 text-right">Unused pool</th><th className="p-2 text-right">Account policy</th><th className="p-2 text-right">Retained by Hiroma</th></tr></thead>
                 <tbody>{retainedPools.map(pool => (
                   <tr key={pool.week_start} className="border-b border-slate-100">
                     <td className="whitespace-nowrap p-2">{pool.week_start} – {pool.week_end}</td>
                     <td className="p-2 text-right">{fmt(Number(pool.budget))}</td>
                     <td className="p-2 text-right">{fmt(Number(pool.allocated))}</td>
+                    <td className="p-2 text-right">{fmt(Number(pool.unused))}</td>
+                    <td className="p-2 text-right">{fmt(Number(pool.account_retained))}</td>
                     <td className="p-2 text-right font-semibold">{fmt(Number(pool.retained))}</td>
                   </tr>
                 ))}</tbody>
