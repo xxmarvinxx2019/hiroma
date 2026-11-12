@@ -51,10 +51,10 @@ export default function ProductBinaryMatchSettings() {
     <h2 className="font-bold">Product Binary matching rule</h2>
     {current !== undefined && <form onSubmit={save} className="mt-3 space-y-3">
       <p>Current rule: {current} PU left + {current} PU right = 1 pair.</p>
-      <p className="text-gray-600">Changes apply to future settlements, including existing unmatched PU used in those settlements.</p>
+      <p className="text-gray-600">PU changes apply to future matches, including unmatched PU. The maximum payout rate applies to the open week.</p>
       <fieldset disabled={saving} className="grid gap-3 sm:grid-cols-2">
         <label>PU required per leg<input className="mt-1 block w-full rounded border p-2" type="number" required min={1} max={2147483647} step={1} value={threshold} onChange={e => setThreshold(e.target.value)} /></label>
-        <label>Fixed payout per qualified pair (₱)<input className="mt-1 block w-full rounded border p-2" type="number" required min={0.5} max={20} step={0.5} value={amount} onChange={e => setAmount(e.target.value)} /></label>
+        <label>Maximum payout per qualified pair (₱)<input className="mt-1 block w-full rounded border p-2" type="number" required min={0.5} max={20} step={0.5} value={amount} onChange={e => setAmount(e.target.value)} /></label>
         <label>Admin Security PIN<input className="mt-1 block w-full rounded border p-2" type="password" autoComplete="off" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} /></label>
       </fieldset>
       <button disabled={saving || (Number(threshold) === current && Number(amount) === currentAmount) || !/^\d{6}$/.test(pin)} className="rounded bg-[#0D1B3E] px-4 py-2 text-white disabled:opacity-40">

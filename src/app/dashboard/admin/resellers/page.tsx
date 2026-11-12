@@ -54,6 +54,7 @@ export default function ResellersPage() {
   const [pageSize, setPageSize] = useState(15)
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [selected, setSelected]   = useState<Reseller | null>(null)
+  const [statusError, setStatusError] = useState('')
   const [showEdit, setShowEdit]     = useState(false)
   const [showResetConfirmation, setShowResetConfirmation] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
@@ -114,13 +115,24 @@ export default function ResellersPage() {
   const filtered = resellers
 
   const handleStatusChange = async (userId: string, newStatus: string) => {
-    await fetch(`/api/admin/resellers/${userId}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    })
-    fetchResellers()
-    setSelected(null)
+    if (newStatus === 'suspended' && !window.confirm('Permanently suspend this reseller and retain their pending Product Binary bonus?')) return
+    setStatusError('')
+    try {
+      const response = await fetch(`/api/admin/resellers/${userId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null)
+        setStatusError(result?.error || 'Unable to change reseller status.')
+        return
+      }
+      fetchResellers()
+      setSelected(null)
+    } catch {
+      setStatusError('Unable to change reseller status.')
+    }
   }
 
   const openEdit = (r: Reseller) => {
@@ -354,7 +366,7 @@ export default function ResellersPage() {
 
               {/* Action */}
               <button
-                onClick={() => setSelected(r)}
+                onClick={() => { setStatusError(''); setSelected(r) }}
                 className="text-xs text-[#C9A84C] hover:underline font-medium text-left"
               >
                 View
@@ -423,8 +435,10 @@ export default function ResellersPage() {
 
               {/* Status Actions */}
               <p className="text-xs text-gray-400 mb-2 uppercase tracking-wide">Change status</p>
+              {selected.status === 'suspended' && <p className="text-xs text-gray-600">Permanently suspended</p>}
+              {statusError && <p role="alert" className="mb-2 text-xs text-red-700">{statusError}</p>}
               <div className="flex gap-2">
-                {selected.status !== 'active' && (
+                {selected.status === 'inactive' && (
                   <button
                     onClick={() => handleStatusChange(selected.id, 'active')}
                     className="flex-1 bg-[#e8f7ef] text-[#1a7a4a] text-xs font-semibold rounded-lg py-2.5 hover:bg-[#d0f0e0] transition-colors"
@@ -432,12 +446,20 @@ export default function ResellersPage() {
                     ✓ Activate
                   </button>
                 )}
-                {selected.status !== 'inactive' && (
+                {selected.status === 'active' && (
                   <button
                     onClick={() => handleStatusChange(selected.id, 'inactive')}
                     className="flex-1 bg-[#fdecea] text-[#a03030] text-xs font-semibold rounded-lg py-2.5 hover:bg-[#fbd5d5] transition-colors"
                   >
                     ✕ Deactivate
+                  </button>
+                )}
+                {selected.status !== 'suspended' && (
+                  <button
+                    onClick={() => handleStatusChange(selected.id, 'suspended')}
+                    className="flex-1 rounded-lg bg-[#fdecea] py-2.5 text-xs font-semibold text-[#a03030] hover:bg-[#fbd5d5]"
+                  >
+                    Suspend permanently
                   </button>
                 )}
               </div>

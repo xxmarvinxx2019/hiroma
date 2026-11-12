@@ -60,6 +60,9 @@ const protectedTables = [
   "product_binary_pool_orders",
   "product_binary_pool_pairs",
   "product_binary_pool_allocations",
+  "product_binary_account_holds",
+  "product_binary_week_preparation",
+  "product_binary_prepared_recipients",
   "orders",
   "order_items",
   "inventory_movements",
@@ -80,6 +83,12 @@ const protectedTables = [
 ] as const;
 
 const protectedFinancialFunctions = [
+  "public.track_product_binary_account_hold()",
+  "public.apply_product_binary_expired_window(date,text)",
+  "public.require_fully_funded_product_binary_pool_order()",
+  "public.sync_open_product_binary_week_rate()",
+  "public.verify_legacy_product_binary_week_readiness(date)",
+  "public.seal_closed_product_binary_allocation()",
   "public.enforce_lifetime_person_accounts()",
   "public.accumulate_binary_daily_cap_usage()",
   "public.initialize_package_binary_carryover()",
@@ -291,7 +300,9 @@ async function main() {
         'public.release_product_binary_pool_week(date)',
         'public.verify_product_binary_week_readiness(date)',
         'public.retry_deferred_product_binary_credit(date,text)',
-        'public.expire_deferred_product_binary_credits()'
+        'public.expire_deferred_product_binary_credits()',
+        'public.product_binary_weekly_pair_eligible(text)',
+        'public.product_binary_surviving_pairs(date,text)'
       ]) AS functions(name)
     `);
     const [directCredit] = (await client.query<{ allowed: boolean }>(`

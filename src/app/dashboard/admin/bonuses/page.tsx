@@ -10,13 +10,18 @@ const manilaTime = new Intl.DateTimeFormat('en-PH', {
 })
 
 export default async function BonusesPage({ searchParams }: {
-  searchParams: Promise<{ period?: string; date?: string }>
+  searchParams: Promise<{ period?: string; date?: string; member?: string; recipientsPage?: string }>
 }) {
   const user = await getCurrentUser()
   if (!user || user.role !== 'admin' || user.is_staff) redirect('/dashboard')
 
   const asOf = new Date()
   const filters = await searchParams
+  const memberFilter = typeof filters.member === 'string' ? filters.member.trim().slice(0, 100) : ''
+  const requestedPage = Number(filters.recipientsPage)
+  const recipientsPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= 100000
+    ? requestedPage : 1
+  const recipientPageSize = 50
   const period = filters.period === 'daily' || filters.period === 'monthly' ? filters.period : 'weekly'
   const today = new Date(asOf.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const requested = filters.date && /^\d{4}-\d{2}-\d{2}$/.test(filters.date)
@@ -78,13 +83,30 @@ export default async function BonusesPage({ searchParams }: {
       WHERE a.week_start = ${weekKey}::date AND a.commission_id IS NULL AND to_jsonb(a)->>'retained_at' IS NULL
     ` : []
     const [releaseSummary] = weekRecord ? await tx.$queryRaw<{
-      credited: string; pending: string; retained: string; pending_count: number
+      credited: string; pending: string; deferred: string; retained: string
+      credited_count: number; pending_count: number; deferred_count: number; uncredited_count: number
     }[]>`
-      SELECT (COALESCE(SUM(amount_centavos) FILTER (WHERE commission_id IS NOT NULL), 0)::numeric / 100)::text AS credited,
-        (COALESCE(SUM(amount_centavos) FILTER (WHERE commission_id IS NULL AND to_jsonb(a)->>'retained_at' IS NULL), 0)::numeric / 100)::text AS pending,
-        (COALESCE(SUM(amount_centavos) FILTER (WHERE to_jsonb(a)->>'retained_at' IS NOT NULL), 0)::numeric / 100)::text AS retained,
-        COUNT(*) FILTER (WHERE commission_id IS NULL AND amount_centavos > 0)::int AS pending_count
-      FROM public.product_binary_pool_allocations a WHERE week_start = ${weekKey}::date
+      WITH recipients AS (
+        SELECT a.amount_centavos, COALESCE((to_jsonb(a)->>'partial_retained_centavos')::bigint, 0) AS partial_retained_centavos, CASE
+          WHEN a.commission_id IS NOT NULL THEN 'credited'
+          WHEN to_jsonb(a)->>'retained_at' IS NOT NULL THEN 'retained'
+          WHEN u.status <> 'active' OR u.role <> 'reseller' OR w.id IS NULL THEN 'deferred'
+          ELSE 'pending'
+        END AS state
+        FROM public.product_binary_pool_allocations a
+        JOIN public.users u ON u.id = a.recipient_user_id
+        LEFT JOIN public.wallets w ON w.user_id = u.id
+        WHERE a.week_start = ${weekKey}::date AND a.amount_centavos > 0
+      )
+      SELECT (COALESCE(SUM(amount_centavos - partial_retained_centavos) FILTER (WHERE state = 'credited'), 0)::numeric / 100)::text AS credited,
+        (COALESCE(SUM(amount_centavos) FILTER (WHERE state = 'pending'), 0)::numeric / 100)::text AS pending,
+        (COALESCE(SUM(amount_centavos) FILTER (WHERE state = 'deferred'), 0)::numeric / 100)::text AS deferred,
+        (COALESCE(SUM(CASE WHEN state = 'retained' THEN amount_centavos ELSE partial_retained_centavos END), 0)::numeric / 100)::text AS retained,
+        COUNT(*) FILTER (WHERE state = 'credited')::int AS credited_count,
+        COUNT(*) FILTER (WHERE state = 'pending')::int AS pending_count,
+        COUNT(*) FILTER (WHERE state = 'deferred')::int AS deferred_count,
+        COUNT(*) FILTER (WHERE state <> 'credited')::int AS uncredited_count
+      FROM recipients
     ` : []
     const unreleased = weekRecord ? await tx.$queryRaw<{
       id: string; name: string; member: string; amount: string; reason: string
@@ -94,13 +116,16 @@ export default async function BonusesPage({ searchParams }: {
           WHEN u.status = 'inactive' THEN 'Account inactive'
           WHEN u.status = 'suspended' THEN 'Account suspended'
           WHEN wallet.id IS NULL THEN 'Wallet missing'
+          WHEN w.released_at IS NULL AND to_jsonb(w)->>'release_started_at' IS NOT NULL THEN 'Queued for the next payout batch'
           WHEN w.released_at IS NULL THEN COALESCE(to_jsonb(w)->>'readiness_blocker', 'Awaiting weekly release')
           ELSE 'Awaiting credit retry'
         END) AS reason
       FROM public.product_binary_pool_allocations a JOIN public.product_binary_pool_weeks w USING (week_start)
       JOIN public.users u ON u.id=a.recipient_user_id LEFT JOIN public.wallets wallet ON wallet.user_id=u.id
       WHERE a.week_start=${weekKey}::date AND a.commission_id IS NULL AND a.amount_centavos > 0
-      ORDER BY u.member_id LIMIT 100
+        AND (${memberFilter} = '' OR strpos(lower(u.member_id), lower(${memberFilter})) > 0
+          OR strpos(lower(u.full_name), lower(${memberFilter})) > 0)
+      ORDER BY u.member_id, u.id LIMIT ${recipientPageSize + 1} OFFSET ${(recipientsPage - 1) * recipientPageSize}
     ` : []
     const [inventorySchema] = await tx.$queryRaw<{ ready: boolean }[]>`
       SELECT to_regclass('public.product_binary_inventory_reserves') IS NOT NULL AS ready
@@ -157,13 +182,20 @@ export default async function BonusesPage({ searchParams }: {
       weeks: number; budget: string; allocated: string; retained: string
     }[]>`
       SELECT COUNT(*)::int AS weeks,
-        (COALESCE(SUM(pool_centavos), 0)::numeric / 100)::text AS budget,
-        (COALESCE(SUM(allocated_centavos), 0)::numeric / 100)::text AS allocated,
-        (COALESCE(SUM(pool_centavos - allocated_centavos), 0)::numeric / 100)::text AS retained
-      FROM product_binary_pool_weeks
-      WHERE closed_at IS NOT NULL
-        AND week_start + 6 >= (${start}::timestamptz AT TIME ZONE 'Asia/Manila')::date
-        AND week_start + 6 < (${endExclusive}::timestamptz AT TIME ZONE 'Asia/Manila')::date
+        (COALESCE(SUM(w.pool_centavos), 0)::numeric / 100)::text AS budget,
+        (COALESCE(SUM(w.allocated_centavos - account.retained_centavos), 0)::numeric / 100)::text AS allocated,
+        (COALESCE(SUM(w.pool_centavos - w.allocated_centavos + account.retained_centavos), 0)::numeric / 100)::text AS retained
+      FROM product_binary_pool_weeks w
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(CASE
+          WHEN to_jsonb(a)->>'retained_at' IS NOT NULL THEN a.amount_centavos
+          ELSE COALESCE((to_jsonb(a)->>'partial_retained_centavos')::bigint, 0)
+        END), 0) AS retained_centavos
+        FROM product_binary_pool_allocations a WHERE a.week_start = w.week_start
+      ) account
+      WHERE w.closed_at IS NOT NULL
+        AND w.week_start + 6 >= (${start}::timestamptz AT TIME ZONE 'Asia/Manila')::date
+        AND w.week_start + 6 < (${endExclusive}::timestamptz AT TIME ZONE 'Asia/Manila')::date
     ` : []
     const maxRate = BigInt(weekRecord?.max_rate_centavos ?? (await getProductBinaryPairAmount(tx)) * 100)
     return {
@@ -181,6 +213,10 @@ export default async function BonusesPage({ searchParams }: {
       finalized: weekRecord?.allocated_centavos ?? null,
     }
   }, { isolationLevel: 'RepeatableRead' })
+
+  function recipientPageLink(page: number) {
+    return `?${new URLSearchParams({ period: 'weekly', date, member: memberFilter, recipientsPage: String(page) })}#uncredited-recipients`
+  }
 
   const projected = finalized ?? pool.allocations.reduce((sum, row) => sum + row.amountCentavos, BigInt(0))
   const metrics = [
@@ -224,19 +260,32 @@ export default async function BonusesPage({ searchParams }: {
           <div className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
             <h3 className="mb-2 font-semibold">Weekly wallet release</h3>
             {finalized === null && <p className="mb-2 text-slate-600">No finalized payout for this week yet.</p>}
-            <p><strong>Credited</strong> {pesos.format(Number((releaseSummary?.credited ?? 0)))}</p>
-            <p><strong>Pending wallet credit</strong> {pesos.format(Number((releaseSummary?.pending ?? 0)))}</p>
-            <p><strong>Retained after next cutoff</strong> {pesos.format(Number((releaseSummary?.retained ?? 0)))}</p>
-            <details className="mt-2">
-              <summary className="cursor-pointer font-medium">View uncredited recipients ({(releaseSummary?.pending_count ?? 0)})</summary>
-              {unreleased.length === 0 && <p className="mt-2 text-xs text-slate-600">No uncredited recipients for this week.</p>}
+            <p><strong>Credited</strong> {pesos.format(Number(releaseSummary?.credited ?? 0))} ({releaseSummary?.credited_count ?? 0})</p>
+            <p><strong>Pending wallet credit</strong> {pesos.format(Number(releaseSummary?.pending ?? 0))} ({releaseSummary?.pending_count ?? 0})</p>
+            <p><strong>Deferred wallet credit</strong> {pesos.format(Number(releaseSummary?.deferred ?? 0))} ({releaseSummary?.deferred_count ?? 0})</p>
+            <p><strong>Retained by account policy</strong> {pesos.format(Number((releaseSummary?.retained ?? 0)))}</p>
+            <details id="uncredited-recipients" className="mt-2" open={Boolean(memberFilter || filters.recipientsPage)}>
+              <summary className="cursor-pointer font-medium">View uncredited recipients ({releaseSummary?.uncredited_count ?? 0})</summary>
+              <form className="mt-3 flex flex-wrap items-end gap-2" action="#uncredited-recipients">
+                <input type="hidden" name="period" value="weekly" />
+                <input type="hidden" name="date" value={date} />
+                <label className="text-xs">Member name or ID
+                  <input name="member" defaultValue={memberFilter} maxLength={100} className="mt-1 block rounded border p-2 text-sm" />
+                </label>
+                <button className="rounded border px-3 py-2">Search</button>
+              </form>
+              {unreleased.length === 0 && <p className="mt-2 text-xs text-slate-600">No matching uncredited recipients on this page.</p>}
               <ul className="mt-2 max-h-80 divide-y overflow-auto">
-                {unreleased.map(row => <li key={row.id} className="py-2">
+                {unreleased.slice(0, recipientPageSize).map(row => <li key={row.id} className="py-2">
                   <strong>{row.name}</strong> · {row.member} · {pesos.format(Number(row.amount))}
                   <p className="text-xs text-slate-600">{row.reason}</p>
                 </li>)}
               </ul>
-              {(releaseSummary?.pending_count ?? 0) > unreleased.length && <p className="mt-2 text-xs">Showing the first {unreleased.length} recipients.</p>}
+              <nav aria-label="Uncredited recipient pages" className="mt-2 flex gap-4 text-xs">
+                {recipientsPage > 1 && <a className="underline" href={recipientPageLink(recipientsPage - 1)}>Previous</a>}
+                <span>Page {recipientsPage}</span>
+                {unreleased.length > recipientPageSize && <a className="underline" href={recipientPageLink(recipientsPage + 1)}>Next</a>}
+              </nav>
             </details>
           </div>
         )}
@@ -252,7 +301,7 @@ export default async function BonusesPage({ searchParams }: {
           <dl className="mt-4 grid gap-3 sm:grid-cols-3">
             {[
               ['Finalized pool budget', monthly.budget],
-              ['Finalized commissions', monthly.allocated],
+              ['Net finalized commissions', monthly.allocated],
               ['Retained by Hiroma', monthly.retained],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg bg-slate-50 p-3">

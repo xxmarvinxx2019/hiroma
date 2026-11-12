@@ -26,7 +26,7 @@ test('temporary Vercel Hobby schedule is daily and the Pro cutover is tracked', 
 
   assert.equal(worker?.schedule, '0 2 * * *')
   assert.match(rollout, /Temporary Vercel Hobby preview schedule/)
-  assert.match(rollout, /restore `\*\/5 \* \* \* \*`/)
+  assert.match(rollout, /Product Binary schedule in `vercel\.json` to `\* \* \* \* \*`/)
 })
 
 test('Product Binary failures use bounded exponential retry and remain durable', () => {

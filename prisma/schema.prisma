@@ -805,7 +805,7 @@ model BinaryReserveLot {
   allocated_at              DateTime
   created_at                DateTime @default(now())
 
-  @@index([remaining_amount, allocated_at])
+  @@index([allocated_at, id], map: "product_binary_funding_fifo_idx")
   @@map("binary_reserve_lots")
 }
 

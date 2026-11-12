@@ -227,9 +227,11 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
     for (const ancestor of ancestors) {
       await ensureCurrentProductBinaryQuarter(tx, ancestor.user_id)
       const profiles = await tx.$queryRaw<{
-        status: string; package_id: string; package_name: string; total_pu: number;
+        pair_eligible: boolean; package_id: string; package_name: string; total_pu: number;
       }[]>`
-        SELECT u.status::text,rp.package_id::text,p.name package_name,
+        SELECT CASE WHEN ${weeklyPool} THEN public.product_binary_weekly_pair_eligible(u.id)
+                    ELSE u.status = 'active' END AS pair_eligible,
+          rp.package_id::text,p.name package_name,
           COALESCE(rp.total_pu,0)::int total_pu
         FROM reseller_profiles rp JOIN users u ON u.id=rp.user_id JOIN packages p ON p.id=rp.package_id
         WHERE rp.user_id=${ancestor.user_id} LIMIT 1
@@ -280,7 +282,7 @@ export async function processDeliveredProductBinaryOrder(orderId: string) {
         used,
         !weeklyPool,
         planCap,
-        profile.status === 'active',
+        profile.pair_eligible,
       )
       const payableAmount = weeklyPool ? 0 : payablePairs*rateAmount
       const flashoutAmount = weeklyPool ? 0 : (capFlashPairs+inactivePairs)*rateAmount

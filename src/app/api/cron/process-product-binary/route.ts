@@ -16,11 +16,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const startedAt = Date.now()
+  const orderRetryDeadline = startedAt + 55_000
+  const orderSettlementBudget = 31_000
   try {
     if (!await isProductBinaryReleaseApproved(prisma)) {
       return NextResponse.json({ success: false, held: true, reason: 'release_approval_pending' }, { status: 503 })
     }
-    const weeklyPool = await settleClosedProductBinaryPools()
+    const weeklyPool = await settleClosedProductBinaryPools(startedAt + 22_000)
+    if (Date.now() + orderSettlementBudget >= orderRetryDeadline) {
+      return NextResponse.json({ success: weeklyPool.failed === 0, weeklyPool, attempted: 0, completed: 0, failed: 0 })
+    }
     // Claim a short lease in one statement. SKIP LOCKED prevents concurrent
     // cron workers from selecting the same obligation, while the lease makes
     // an interrupted worker eligible again without losing the job.
@@ -45,6 +51,7 @@ export async function GET(req: NextRequest) {
     let completed = 0
     const errors: Array<{ order_id: string; error: string }> = []
     for (const job of jobs) {
+      if (Date.now() + orderSettlementBudget >= orderRetryDeadline) break
       try {
         await processDeliveredProductBinaryOrder(job.order_id)
         completed++
@@ -59,7 +66,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: errors.length === 0 && weeklyPool.failed === 0,
       weeklyPool,
-      attempted: jobs.length,
+      attempted: completed + errors.length,
       completed,
       failed: errors.length,
       errors: errors.length ? errors : undefined,

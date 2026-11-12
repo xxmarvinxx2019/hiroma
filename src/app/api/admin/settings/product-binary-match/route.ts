@@ -67,7 +67,7 @@ export async function PATCH(req: NextRequest) {
       user_role: 'admin',
       activity_type: 'product_binary_policy_changed',
       category: 'commission',
-      description: `Set Product Binary to ${puPerLeg} PU per leg and PHP ${pairAmount} per pair.`,
+      description: `Set Product Binary to ${puPerLeg} PU per leg and a maximum of PHP ${pairAmount} per pair.`,
       metadata: { previous, puPerLeg, previousAmount, pairAmount },
       risk_level: 'high',
       status: 'completed',
